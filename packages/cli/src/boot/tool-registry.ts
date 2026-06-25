@@ -41,8 +41,8 @@
 //     (extracted to `wiring/metrics.ts` already) and is
 //     not a tool-registry concern.
 
-import type { EventBus, MemoryStore, ToolRegistry, WstackPaths } from '@wrongstack/core';
-import { createContextManagerTool, makeMailboxTool, makeMailInboxTool, makeMailSendTool, normalizeTokenSavingTier } from '@wrongstack/core';
+import type { EventBus, MemoryStore, ToolDescriptionModeConfig, ToolRegistry, WstackPaths } from '@wrongstack/core';
+import { applyToolDescriptionModes, createContextManagerTool, makeMailboxTool, makeMailInboxTool, makeMailSendTool, normalizeTokenSavingTier } from '@wrongstack/core';
 import { builtinToolsPack, forgetTool, relatedMemoryTool, rememberTool, searchMemoryTool, TIER1_TOOLS, TIER2_TOOLS, TIER3_TOOLS } from '@wrongstack/tools';
 import type { TokenSavingTier } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
@@ -50,7 +50,10 @@ import type { Tool } from '@wrongstack/core';
 export interface RegisterBuiltinToolsDeps {
   toolRegistry: ToolRegistry;
   compactor: unknown;
-  config: { features: { memory: boolean; tokenSavingMode?: TokenSavingTier | boolean | undefined } };
+  config: {
+    features: { memory: boolean; tokenSavingMode?: TokenSavingTier | boolean | undefined };
+    tools?: { descriptionMode?: ToolDescriptionModeConfig | undefined } | undefined;
+  };
   memoryStore: MemoryStore | null | undefined;
   events: EventBus;
   wpaths: Pick<WstackPaths, 'projectDir'>;
@@ -129,4 +132,5 @@ export function registerBuiltinTools(deps: RegisterBuiltinToolsDeps): void {
   deps.toolRegistry.register(
     makeMailInboxTool({ projectDir: deps.wpaths.projectDir, events: deps.events }),
   );
+  applyToolDescriptionModes(deps.toolRegistry, deps.config.tools?.descriptionMode);
 }

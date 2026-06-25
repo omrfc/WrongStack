@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ToolRegistry } from '@wrongstack/core';
 
 /**
  * PR 6 of Issue #29: extract the inline tool-registry
@@ -123,5 +124,21 @@ describe('registerBuiltinTools (PR 6 of #29)', () => {
     // registrations.
     const singles = calls.filter(c => c.kind === 'single');
     expect(singles).toHaveLength(7);
+  });
+
+  it('applies configured tool description modes to the real registry', () => {
+    const registry = new ToolRegistry();
+    registerBuiltinTools({
+      toolRegistry: registry,
+      compactor: {},
+      config: {
+        features: { memory: false },
+        tools: { descriptionMode: { read: 'simple' } },
+      },
+      memoryStore: null,
+      events: makeEvents() as never,
+      wpaths: makeWpaths() as never,
+    });
+    expect(registry.getDescriptionMode('read')).toBe('simple');
   });
 });

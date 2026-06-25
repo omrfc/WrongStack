@@ -10,6 +10,7 @@ export const DEFAULT_TOOLS_CONFIG = Object.freeze({
   iterationTimeoutMs: 300_000,
   sessionTimeoutMs: 1_800_000,
   perIterationOutputCapBytes: 100_000,
+  descriptionMode: Object.freeze({}) as Record<string, 'extend' | 'simple' | undefined>,
   autoExtendLimit: true,
   restrictToProjectRoot: false,
 });

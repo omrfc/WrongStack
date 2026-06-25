@@ -46,12 +46,18 @@ import { refreshRuntimeModelCatalog, resolveRuntimeMaxContext } from '../context
 import { createFallbackModelExtension } from '../fallback-model.js';
 import { buildRoutingRunner } from './routing.js';
 
-function buildShadowAgentTaskDescription(intervalMs: number): string {
-  return `Shadow Agent background fleet monitor. Run one startup check now: broadcast shadow:started via mailbox, call fleet_status and fleet_health, inspect mail_inbox for hoop/shadow control messages, report anomalies via mail_send, and only terminate agents when explicitly commanded. The host will assign follow-up heartbeat checks every ${intervalMs}ms; do not schedule cron jobs yourself.`;
-}
+function buildShadowAgentTaskDescription(reason: string): string {
+  return `Shadow Agent one-shot fleet monitor. Reason: ${reason}.
 
-function buildShadowHeartbeatTaskDescription(intervalMs: number): string {
-  return `Shadow Agent heartbeat. Run exactly one monitoring pass: call fleet_status and fleet_health, inspect mail_inbox for hoop/shadow control messages, report anomalies via mail_send, terminate only when explicitly commanded, then return a concise status summary. Host heartbeat interval: ${intervalMs}ms.`;
+Run exactly one quiet pass:
+- Call fleet_status and fleet_health.
+- Inspect mail_inbox only for explicit hoop/shadow control messages.
+- Do not broadcast startup, heartbeat, shutdown, or healthy status messages.
+- Use mail_send only for high/critical anomalies or explicit control replies.
+- Terminate agents only when explicitly commanded.
+- If the fleet is healthy and no command needs a reply, keep the final answer to "shadow: quiet".
+
+The host will stop this Shadow Agent after this pass. Do not schedule follow-up work.`;
 }
 
 export interface MultiAgentDeps {
@@ -255,11 +261,15 @@ export class MultiAgentHost {
   private readonly shadowTaskIds = new Set<string>();
   /** Shadow task ids assigned but not yet completed. Prevents heartbeat backlog. */
   private readonly shadowOutstandingTaskIds = new Set<string>();
-  /** Host-owned heartbeat timer. The LLM cron tool cannot wake an idle subagent. */
-  private shadowHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** Shadow task ids whose subagent should stop immediately after the one-shot pass. */
+  private readonly shadowStopAfterTaskIds = new Set<string>();
   private shadowHeartbeatIntervalMs = 30_000;
   /** Suppresses buildDirector() auto-start while /shadow start is explicitly spawning one. */
   private shadowAutoStartSuppressions = 0;
+  private shadowObservedWorkDepth = 0;
+  private shadowPassInFlight = false;
+  private shadowQueuedProblem: string | null = null;
+  private readonly shadowActivityOffHandles: Array<() => void> = [];
 
   constructor(
     private readonly deps: MultiAgentDeps,
@@ -366,6 +376,9 @@ export class MultiAgentHost {
       const isShadowTask = this.shadowTaskIds.has(task.id);
       if (isShadowTask) {
         this.shadowOutstandingTaskIds.delete(task.id);
+        if (this.shadowStopAfterTaskIds.delete(task.id)) {
+          void this.stopShadowAfterTask(result.subagentId);
+        }
         return;
       }
       this.emitLifecycleCompleted(task.id, result);
@@ -512,46 +525,36 @@ export class MultiAgentHost {
       this.directorRunnerSet = true;
     }
 
-    // Auto-start Shadow Agent if configured
-    await this.spawnShadowAgentIfNeeded();
+    // Arm Shadow Agent event monitoring. This is intentionally lazy and
+    // event-driven: no background LLM task is spawned until a real anomaly
+    // or an explicit /shadow start asks for one.
+    this.armShadowAgentIfNeeded();
   }
 
   /**
-   * Spawn Shadow Agent automatically on first Director build.
-   * Shadow Agent monitors the fleet, detects anomalies, and can intervene via 'hoop'.
+   * Arm host-owned Shadow observation. Healthy work windows stay fully
+   * deterministic; a one-shot LLM Shadow pass runs only after problematic work
+   * finishes, or when the user explicitly invokes /shadow start.
    */
-  private async spawnShadowAgentIfNeeded(): Promise<void> {
-    if (this.shadowAutoStartSuppressions > 0) return;
-    if (this.shadowAgentId && this.isActiveSubagent(this.shadowAgentId)) return;
-    if (this.shadowAgentId) this.clearShadowAgent(this.shadowAgentId);
+  private armShadowAgentIfNeeded(): void {
+    if (this.shadowActivityOffHandles.length > 0) return;
 
-    // Always auto-start shadow agent - it runs silently in background
-    const intervalMs = 30_000; // 30 second heartbeat
-    const description = buildShadowAgentTaskDescription(intervalMs);
-
-    try {
-      const { subagentId, taskId } = await this._spawnAndAssign({
-        name: 'shadow',
-        role: 'shadow-agent',
-        maxTokens: 4096,
-        maxCostUsd: 5,
-        timeoutMs: 3_600_000, // 1 hour max
-        idleTimeoutMs: intervalMs * 2,
-        maxIterations: 1000,
-        maxToolCalls: 500,
-        tools: [
-          'fleet_status', 'fleet_health', 'fleet_usage',
-          'mailbox', 'mail_inbox', 'mail_send',
-          'terminate_subagent',
-        ],
-      }, description, { internalTask: true });
-      this.recordShadowAgent(subagentId, taskId);
-
-      // Log to console
-      console.log(`[shadow] Auto-started ${subagentId} with interval=${intervalMs}ms`);
-    } catch (err) {
-      console.warn(`[shadow] Auto-start failed: ${err}`);
-    }
+    this.shadowActivityOffHandles.push(
+      this.deps.events.on('agent.run.started', () => this.noteShadowWorkStarted()),
+      this.deps.events.on('agent.run.completed', (e) => {
+        const problem = e.status === 'failed' || e.status === 'max_iterations'
+          ? `leader run ended with ${e.status}`
+          : undefined;
+        this.noteShadowWorkCompleted(problem);
+      }),
+      this.deps.events.on('subagent.task_started', () => this.noteShadowWorkStarted()),
+      this.deps.events.on('subagent.task_completed', (e) => {
+        const problem = e.status === 'failed' || e.status === 'timeout'
+          ? `subagent ${e.subagentId} task ${e.taskId} ended with ${e.status}${e.error?.message ? `: ${e.error.message}` : ''}`
+          : undefined;
+        this.noteShadowWorkCompleted(problem);
+      }),
+    );
   }
 
   private recordShadowAgent(subagentId: string, taskId: string, intervalMs = this.shadowHeartbeatIntervalMs): void {
@@ -559,17 +562,16 @@ export class MultiAgentHost {
     this.shadowTaskId = taskId;
     this.shadowHeartbeatIntervalMs = intervalMs;
     this.markShadowTask(taskId);
-    this.startShadowHeartbeat(intervalMs);
     this.opts.onShadowAgentStarted?.(subagentId);
   }
 
   private clearShadowAgent(subagentId?: string): void {
     if (subagentId && this.shadowAgentId !== subagentId) return;
     const stoppedId = this.shadowAgentId;
-    this.stopShadowHeartbeat();
     this.shadowAgentId = null;
     this.shadowTaskId = null;
     this.shadowOutstandingTaskIds.clear();
+    this.shadowStopAfterTaskIds.clear();
     if (stoppedId) this.opts.onShadowAgentStopped?.(stoppedId);
   }
 
@@ -578,49 +580,106 @@ export class MultiAgentHost {
     this.shadowOutstandingTaskIds.add(taskId);
   }
 
-  private startShadowHeartbeat(intervalMs: number): void {
-    this.stopShadowHeartbeat();
-    this.shadowHeartbeatTimer = setInterval(() => {
-      void this.assignShadowHeartbeat();
-    }, intervalMs);
-    this.shadowHeartbeatTimer.unref?.();
-  }
-
-  private stopShadowHeartbeat(): void {
-    if (!this.shadowHeartbeatTimer) return;
-    clearInterval(this.shadowHeartbeatTimer);
-    this.shadowHeartbeatTimer = null;
-  }
-
-  private async assignShadowHeartbeat(): Promise<void> {
-    if (!this.director || !this.shadowAgentId) return;
-    if (this.shadowOutstandingTaskIds.size > 0) return;
-
-    const shadowStatus = this.getCoordinator()
-      .getStatus()
-      .subagents.find((a) => a.id === this.shadowAgentId)?.status;
-    if (shadowStatus !== 'idle') return;
-
-    const taskId = randomUUID();
-    this.markShadowTask(taskId);
-    try {
-      await this.director.assignInternal({
-        id: taskId,
-        subagentId: this.shadowAgentId,
-        description: buildShadowHeartbeatTaskDescription(this.shadowHeartbeatIntervalMs),
-      });
-    } catch {
-      this.shadowTaskIds.delete(taskId);
-      this.shadowOutstandingTaskIds.delete(taskId);
-    }
-  }
-
   private isActiveSubagent(subagentId: string): boolean {
     if (!this.director) return false;
     const status = this.getCoordinator()
       .getStatus()
       .subagents.find((a) => a.id === subagentId)?.status;
     return status === 'running' || status === 'idle';
+  }
+
+  private noteShadowWorkStarted(): void {
+    if (this.shadowAutoStartSuppressions > 0) return;
+    this.shadowObservedWorkDepth++;
+  }
+
+  private noteShadowWorkCompleted(problem?: string | undefined): void {
+    if (problem) {
+      this.shadowQueuedProblem = this.shadowQueuedProblem
+        ? `${this.shadowQueuedProblem}; ${problem}`
+        : problem;
+    }
+    if (this.shadowObservedWorkDepth > 0) {
+      this.shadowObservedWorkDepth--;
+    }
+    if (this.shadowObservedWorkDepth === 0 && this.shadowQueuedProblem) {
+      const queued = this.shadowQueuedProblem;
+      this.shadowQueuedProblem = null;
+      this.requestShadowPass(queued);
+    }
+  }
+
+  private requestShadowPass(reason: string): void {
+    if (!this.director) return;
+    if (this.shadowObservedWorkDepth > 0) {
+      this.shadowQueuedProblem = this.shadowQueuedProblem
+        ? `${this.shadowQueuedProblem}; ${reason}`
+        : reason;
+      return;
+    }
+    if (this.shadowPassInFlight || (this.shadowAgentId && this.isActiveSubagent(this.shadowAgentId))) {
+      this.shadowQueuedProblem = this.shadowQueuedProblem
+        ? `${this.shadowQueuedProblem}; ${reason}`
+        : reason;
+      return;
+    }
+
+    this.shadowPassInFlight = true;
+    queueMicrotask(() => {
+      void this.runShadowPass(reason);
+    });
+  }
+
+  private async runShadowPass(reason: string): Promise<void> {
+    try {
+      if (!this.director) return;
+      if (this.shadowObservedWorkDepth > 0) {
+        this.shadowQueuedProblem = this.shadowQueuedProblem
+          ? `${this.shadowQueuedProblem}; ${reason}`
+          : reason;
+        return;
+      }
+      const liveConfig = this.deps.configStore.get() as Config;
+      await this._spawnAndAssign(
+        {
+          name: 'shadow',
+          role: 'shadow-agent',
+          provider: liveConfig.provider,
+          model: liveConfig.model,
+          tools: [
+            'fleet_status', 'fleet_health', 'fleet_usage',
+            'mailbox', 'mail_inbox', 'mail_send',
+            'terminate_subagent',
+          ],
+        },
+        buildShadowAgentTaskDescription(reason),
+        {
+          internalTask: true,
+          stopShadowAfterTask: true,
+          shadowIntervalMs: this.shadowHeartbeatIntervalMs,
+        },
+      );
+    } finally {
+      this.shadowPassInFlight = false;
+      if (this.shadowObservedWorkDepth === 0 && this.shadowQueuedProblem) {
+        const queued = this.shadowQueuedProblem;
+        this.shadowQueuedProblem = null;
+        this.requestShadowPass(queued);
+      }
+    }
+  }
+
+  private async stopShadowAfterTask(subagentId: string): Promise<void> {
+    try {
+      await this.getCoordinator().stop(subagentId);
+    } finally {
+      this.clearShadowAgent(subagentId);
+      if (this.shadowObservedWorkDepth === 0 && this.shadowQueuedProblem) {
+        const queued = this.shadowQueuedProblem;
+        this.shadowQueuedProblem = null;
+        this.requestShadowPass(queued);
+      }
+    }
   }
 
   /**
@@ -804,7 +863,7 @@ export class MultiAgentHost {
           // explicit list or smart default. Mirrors the runtime light factory.
           getConfig: () => {
             const live = this.deps.configStore.get();
-            return subCfg.fallbackModels && subCfg.fallbackModels.length
+            return subCfg.fallbackModels?.length
               ? { ...live, fallbackModels: subCfg.fallbackModels }
               : live;
           },
@@ -1115,7 +1174,11 @@ export class MultiAgentHost {
     const { subagentId, taskId } = await this._spawnAndAssign(
       subagentConfig,
       description,
-      { internalTask: isShadowSpawn },
+      {
+        internalTask: isShadowSpawn,
+        stopShadowAfterTask: isShadowSpawn,
+        shadowIntervalMs: opts?.shadowIntervalMs,
+      },
     );
     // Track the pending task via FleetManager so status() can show descriptions
     // without host-side state duplication.
@@ -1125,9 +1188,6 @@ export class MultiAgentHost {
     // NOTE: subagent.spawned is now emitted via FleetBus in Director.spawn()
     // and bridged to EventBus in buildDirector(). This ensures the correct
     // nickname (e.g. "Einstein (Bug Hunter)") is captured, not the placeholder.
-    if (isShadowSpawn) {
-      this.recordShadowAgent(subagentId, taskId, opts?.shadowIntervalMs);
-    }
     return { subagentId, taskId };
   }
 
@@ -1176,7 +1236,11 @@ export class MultiAgentHost {
   private async _spawnAndAssign(
     subagentConfig: SubagentConfig,
     description: string = '',
-    opts?: { internalTask?: boolean },
+    opts?: {
+      internalTask?: boolean;
+      stopShadowAfterTask?: boolean;
+      shadowIntervalMs?: number | undefined;
+    },
   ): Promise<{ subagentId: string; taskId: string }> {
     const taskId = randomUUID();
     // Always goes through the Director — single code path after buildDirector()
@@ -1185,11 +1249,20 @@ export class MultiAgentHost {
     const task = { id: taskId, description, subagentId };
     if (opts?.internalTask) {
       this.markShadowTask(taskId);
+      if (opts.stopShadowAfterTask) this.shadowStopAfterTaskIds.add(taskId);
+      if (subagentConfig.name === 'shadow' || subagentConfig.role === 'shadow-agent') {
+        this.recordShadowAgent(subagentId, taskId, opts.shadowIntervalMs);
+      }
       try {
         await this.director.assignInternal(task);
       } catch (err) {
         this.shadowTaskIds.delete(taskId);
         this.shadowOutstandingTaskIds.delete(taskId);
+        this.shadowStopAfterTaskIds.delete(taskId);
+        if (subagentConfig.name === 'shadow' || subagentConfig.role === 'shadow-agent') {
+          this.clearShadowAgent(subagentId);
+          await this.director.remove(subagentId).catch(() => undefined);
+        }
         throw err;
       }
     } else {
@@ -1456,6 +1529,10 @@ export class MultiAgentHost {
    */
   async dispose(): Promise<void> {
     this.clearShadowAgent();
+    for (const off of this.shadowActivityOffHandles) {
+      off();
+    }
+    this.shadowActivityOffHandles.length = 0;
     // Unregister FleetBus filter listeners
     for (const off of this.directorOffHandles) {
       off();

@@ -7,6 +7,7 @@ import {
   DefaultModeStore,
   DefaultSkillLoader,
   DefaultSystemPromptBuilder,
+  applyToolDescriptionModes,
   makeMailboxTool,
   makeMailInboxTool,
   makeMailSendTool,
@@ -114,6 +115,7 @@ export async function setupTools(params: ToolsWiringDeps): Promise<ToolsWiringRe
     toolRegistry.register(searchMemoryTool(memoryStore));
     toolRegistry.register(relatedMemoryTool(memoryStore));
   }
+  applyToolDescriptionModes(toolRegistry, config.tools?.descriptionMode);
 
   // Mode store
   const modeStore = new DefaultModeStore({ directory: wpaths.configDir });

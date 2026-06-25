@@ -123,6 +123,8 @@ describe('built-in slash commands', () => {
     });
     await registry.dispatch('/tools', fakeCtx);
     expect(renderer.output).toContain('echo');
+    expect(renderer.output).toContain('description detail');
+    expect(renderer.output).toContain('desc:extend');
   });
 
   it('/exit signals exit', async () => {

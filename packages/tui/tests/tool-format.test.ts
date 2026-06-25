@@ -4,6 +4,7 @@ import {
   fmtDuration,
   formatToolArgs,
   formatToolOutput,
+  formatToolVisualOutput,
 } from '../src/components/history.js';
 
 describe('formatToolArgs', () => {
@@ -43,6 +44,40 @@ describe('formatToolArgs', () => {
   it('todo: item count', () => {
     expect(formatToolArgs('todo', { todos: [{}, {}, {}] })).toBe('3 items');
     expect(formatToolArgs('todo', { todos: [{}] })).toBe('1 item');
+  });
+
+  it('work/session/meta tools: concise action summaries', () => {
+    expect(formatToolArgs('plan', { action: 'add', title: 'Build better tool UI' })).toBe(
+      'add · Build better tool UI',
+    );
+    expect(formatToolArgs('task', { action: 'status', id: 't1', status: 'completed' })).toBe(
+      'status · t1 · completed',
+    );
+    expect(formatToolArgs('remember', { scope: 'project-memory', type: 'decision', text: 'Use pnpm for tests' })).toBe(
+      'project-memory · decision · Use pnpm for tests',
+    );
+    expect(formatToolArgs('search_memory', { query: 'pnpm', scope: 'project-memory' })).toBe(
+      '"pnpm" · project-memory',
+    );
+    expect(formatToolArgs('mode', { action: 'set', mode: 'review' })).toBe('set · review');
+  });
+
+  it('catalog/index tools: concise filters', () => {
+    expect(formatToolArgs('tool_help', { tool: 'write', format: 'full' })).toBe('write · full');
+    expect(formatToolArgs('tool_search', { query: 'file', permission: 'auto', mutating: false })).toBe(
+      '"file" · auto · read-only',
+    );
+    expect(formatToolArgs('tool_use', { tool: 'read' })).toBe('call read');
+    expect(formatToolArgs('batch_tool_use', { calls: [{ tool: 'read' }, { tool: 'grep' }], parallel: false })).toBe(
+      '2 calls · sequential',
+    );
+    expect(formatToolArgs('codebase-search', { query: 'Agent', kind: 'class', file: 'packages/core/src' })).toBe(
+      '"Agent" · class · in packages/core/src',
+    );
+    expect(formatToolArgs('codebase-index', { force: true, langs: ['ts', 'tsx'] })).toBe(
+      'force · ts,tsx',
+    );
+    expect(formatToolArgs('set_working_dir', { path: 'packages/tui' })).toBe('packages/tui');
   });
 
   it('unknown tool: picks the most identifying field', () => {
@@ -374,13 +409,16 @@ describe('extractDiffPreview', () => {
     expect(out!.rows.some((r) => r.text.startsWith('+++'))).toBe(false);
   });
 
-  it('caps preview at 8 lines and reports the hidden remainder', () => {
+  it('caps long previews and reports the hidden remainder with add/remove stats', () => {
     const many = ['@@ -1,20 +1,20 @@', ...Array.from({ length: 30 }, (_, i) => `+line ${i}`)].join(
       '\n',
     );
     const out = extractDiffPreview('edit', JSON.stringify({ diff: many }));
-    expect(out!.rows.length).toBeLessThanOrEqual(8);
+    expect(out!.rows.length).toBeLessThan(31);
+    expect(out!.rows.length + out!.hidden).toBe(31);
     expect(out!.hidden).toBeGreaterThan(0);
+    expect(out!.added).toBe(30);
+    expect(out!.hiddenAdded).toBeGreaterThan(0);
   });
 
   it('skips no-op edit sentinel diff', () => {
@@ -393,6 +431,47 @@ describe('extractDiffPreview', () => {
 
   it('parses raw unified diff for patch tool (no JSON wrapper)', () => {
     const out = extractDiffPreview('patch', sampleDiff);
+    expect(out).toBeDefined();
+    expect(out!.rows.some((r) => r.kind === 'add')).toBe(true);
+    expect(out!.rows.some((r) => r.kind === 'del')).toBe(true);
+  });
+
+  it('parses write-tool diff JSON for existing-file overwrites', () => {
+    const out = extractDiffPreview(
+      'write',
+      JSON.stringify({ path: '/x', created: false, diff: sampleDiff }),
+    );
+    expect(out).toBeDefined();
+    expect(out!.rows.some((r) => r.kind === 'add')).toBe(true);
+    expect(out!.rows.some((r) => r.kind === 'del')).toBe(true);
+  });
+
+  it('builds a compact added-line preview for newly written files', () => {
+    const out = extractDiffPreview(
+      'write',
+      JSON.stringify({ path: 'src/new.ts', created: true, diff: '+++ src/new.ts\n+ (new file)' }),
+      { path: 'src/new.ts', content: 'one\ntwo\nthree' },
+    );
+    expect(out).toBeDefined();
+    expect(out!.removed).toBe(0);
+    expect(out!.added).toBe(3);
+    expect(out!.rows.filter((r) => r.kind === 'add').map((r) => [r.newLine, r.text])).toEqual([
+      [1, '+one'],
+      [2, '+two'],
+      [3, '+three'],
+    ]);
+  });
+
+  it('collects nested diffs from replace-tool results', () => {
+    const out = extractDiffPreview(
+      'replace',
+      JSON.stringify({
+        results: [
+          { path: 'src/a.ts', replacements: 1, diff: sampleDiff },
+          { path: 'src/unchanged.ts', replacements: 0 },
+        ],
+      }),
+    );
     expect(out).toBeDefined();
     expect(out!.rows.some((r) => r.kind === 'add')).toBe(true);
     expect(out!.rows.some((r) => r.kind === 'del')).toBe(true);
@@ -421,6 +500,240 @@ describe('extractDiffPreview', () => {
     // After one ctx + one del + one add, both counters should be at 12 / 22.
     expect(ctxB.oldLine).toBe(12);
     expect(ctxB.newLine).toBe(22);
+  });
+});
+
+describe('formatToolVisualOutput', () => {
+  it('renders read serializer output as numbered code rows', () => {
+    const out = formatToolVisualOutput(
+      'read',
+      ['read: src/a.ts (total_lines=3)', '1→const a = 1;', '2→const b = 2;'].join('\n'),
+      true,
+    );
+    expect(out).toEqual([
+      { kind: 'code', lineNo: '1', text: 'const a = 1;' },
+      { kind: 'code', lineNo: '2', text: 'const b = 2;' },
+    ]);
+  });
+
+  it('renders grep grouped serializer output with file and match rows', () => {
+    const out = formatToolVisualOutput(
+      'grep',
+      [
+        'grep: widget (count=2 shown=2)',
+        'src/a.ts (2 match(es), showing 2)',
+        '10:const widget = true;',
+        '12:render(widget);',
+      ].join('\n'),
+      true,
+    );
+    expect(out?.[0]).toMatchObject({ kind: 'path', path: 'src/a.ts', text: '2 match(es)' });
+    expect(out?.[1]).toMatchObject({ kind: 'match', path: 'src/a.ts', lineNo: '10' });
+    expect(out?.[2]).toMatchObject({ kind: 'match', path: 'src/a.ts', lineNo: '12' });
+  });
+
+  it('renders command failures with status and stderr preview rows', () => {
+    const out = formatToolVisualOutput(
+      'bash',
+      ['bash: pnpm test (exit_code=1)', 'stdout:', 'running tests', 'stderr:', 'boom'].join('\n'),
+      false,
+    );
+    expect(out?.[0]).toMatchObject({ kind: 'error', marker: 'x ', text: 'bash exit 1' });
+    expect(out?.some((row) => row.kind === 'stderr' && row.text === 'boom')).toBe(true);
+  });
+
+  it('renders verifier report status rows', () => {
+    const passed = formatToolVisualOutput(
+      'typecheck',
+      ['typecheck (exit_code=0 errors=0)', 'report:', 'status=passed', 'errors=0', 'warnings=1'].join(
+        '\n',
+      ),
+      true,
+    );
+    expect(passed?.[0]).toMatchObject({ kind: 'ok', marker: 'ok ' });
+    expect(passed?.[0]?.text).toContain('1 warning');
+
+    const changed = formatToolVisualOutput(
+      'format',
+      ['format (exit_code=0 files_changed=2)', 'report:', 'status=changed', 'files_changed=2'].join(
+        '\n',
+      ),
+      true,
+    );
+    expect(changed?.[0]).toMatchObject({ kind: 'warn', marker: '! ' });
+    expect(changed?.[0]?.text).toContain('2 changed');
+  });
+
+  it('renders fetch status with HTTP severity', () => {
+    const ok = formatToolVisualOutput(
+      'fetch',
+      ['fetch: https://x (status=200 content_type=text/html)', '<html>Hello</html>'].join('\n'),
+      true,
+    );
+    expect(ok?.[0]).toMatchObject({ kind: 'ok', marker: 'ok ', text: 'HTTP 200 · text/html' });
+
+    const bad = formatToolVisualOutput(
+      'fetch',
+      ['fetch: https://x (status=500 content_type=text/plain)', 'server exploded'].join('\n'),
+      false,
+    );
+    expect(bad?.[0]).toMatchObject({ kind: 'error', marker: 'x ' });
+  });
+
+  it('renders todo, plan, and task summaries', () => {
+    expect(formatToolVisualOutput('todo', JSON.stringify({ count: 3, in_progress: 1 }), true)?.[0])
+      .toMatchObject({ kind: 'ok', marker: 'ok ', text: '3 todos · 1 in progress' });
+
+    const plan = formatToolVisualOutput(
+      'plan',
+      JSON.stringify({ ok: true, message: 'add ok', count: 2, open: 1, plan: '1. Build UI\n2. Ship' }),
+      true,
+    );
+    expect(plan?.[0]).toMatchObject({ kind: 'ok', marker: 'ok ' });
+    expect(plan?.[0]?.text).toContain('2 items');
+    expect(plan?.some((row) => row.text.includes('Build UI'))).toBe(true);
+
+    const task = formatToolVisualOutput(
+      'task',
+      JSON.stringify({ ok: false, message: 'Task "x" not found.', count: 0, completed: 0, inProgress: 0 }),
+      false,
+    );
+    expect(task?.[0]).toMatchObject({ kind: 'error', marker: 'x ' });
+  });
+
+  it('renders memory writes and memory search results', () => {
+    expect(formatToolVisualOutput('remember', JSON.stringify({ ok: true, scope: 'project-memory' }), true)?.[0])
+      .toMatchObject({ kind: 'ok', marker: 'ok ', text: 'remember · project-memory' });
+
+    const search = formatToolVisualOutput(
+      'search_memory',
+      JSON.stringify({
+        results: [
+          { text: 'Use pnpm', scope: 'project-memory', type: 'convention', priority: 'high' },
+        ],
+      }),
+      true,
+    );
+    expect(search?.[0]).toMatchObject({ kind: 'meta', marker: '! ' });
+    expect(search?.[0]?.text).toContain('[convention]');
+    expect(search?.[0]?.text).toContain('Use pnpm');
+  });
+
+  it('renders logs and document previews', () => {
+    const logs = formatToolVisualOutput(
+      'logs',
+      JSON.stringify({
+        source: 'app.log',
+        total: 2,
+        truncated: false,
+        entries: [
+          { timestamp: 't1', level: 'info', message: 'started' },
+          { timestamp: 't2', level: 'error', message: 'boom' },
+        ],
+      }),
+      true,
+    );
+    expect(logs?.[0]?.text).toContain('2 entries');
+    expect(logs?.some((row) => row.kind === 'error' && row.text.includes('boom'))).toBe(true);
+
+    const docs = formatToolVisualOutput(
+      'document',
+      JSON.stringify({
+        files_processed: 1,
+        items_documented: 2,
+        style: 'jsdoc',
+        results: [{ path: 'src/a.ts', name: 'makeThing', status: 'documented' }],
+      }),
+      true,
+    );
+    expect(docs?.[0]?.text).toContain('2 documented');
+    expect(docs?.[1]).toMatchObject({ kind: 'path', marker: '+ ', path: 'src/a.ts' });
+  });
+
+  it('renders tool catalog and meta execution tools', () => {
+    const catalog = formatToolVisualOutput(
+      'tool_search',
+      JSON.stringify({
+        total: 2,
+        tools: [
+          { name: 'read', description: 'Read files', permission: 'auto', mutating: false },
+          { name: 'write', description: 'Write files', permission: 'confirm', mutating: true },
+        ],
+      }),
+      true,
+    );
+    expect(catalog?.[0]).toMatchObject({ kind: 'ok', marker: 'ok ' });
+    expect(catalog?.some((row) => row.text.includes('write'))).toBe(true);
+
+    expect(
+      formatToolVisualOutput(
+        'tool_use',
+        JSON.stringify({ tool: 'read', success: true, executionMs: 12 }),
+        true,
+      )?.[0],
+    ).toMatchObject({ kind: 'ok', marker: 'ok ', text: 'read · 12ms' });
+
+    const batch = formatToolVisualOutput(
+      'batch_tool_use',
+      JSON.stringify({
+        total: 2,
+        succeeded: 1,
+        failed: 1,
+        results: [
+          { tool: 'read', success: true, executionMs: 5 },
+          { tool: 'write', success: false, error: 'denied', executionMs: 7 },
+        ],
+      }),
+      false,
+    );
+    expect(batch?.[0]).toMatchObject({ kind: 'error', marker: 'x ' });
+    expect(batch?.some((row) => row.text.includes('write') && row.text.includes('denied'))).toBe(true);
+  });
+
+  it('renders codebase index/search/stats and context tools', () => {
+    const search = formatToolVisualOutput(
+      'codebase-search',
+      JSON.stringify({
+        query: 'agent',
+        total: 1,
+        results: [{ file: 'src/agent.ts', line: 42, kind: 'class', name: 'Agent' }],
+      }),
+      true,
+    );
+    expect(search?.[0]?.text).toContain('1 symbol result');
+    expect(search?.[1]).toMatchObject({ kind: 'match', path: 'src/agent.ts', lineNo: '42' });
+
+    expect(
+      formatToolVisualOutput(
+        'codebase-index',
+        JSON.stringify({ filesIndexed: 4, symbolsIndexed: 20, durationMs: 1500, errors: [] }),
+        true,
+      )?.[0]?.text,
+    ).toContain('4 files');
+
+    expect(
+      formatToolVisualOutput(
+        'codebase-stats',
+        JSON.stringify({ totalSymbols: 20, totalFiles: 4, sizeBytes: 1024 }),
+        true,
+      )?.[0]?.text,
+    ).toContain('20 symbols');
+
+    expect(
+      formatToolVisualOutput(
+        'set_working_dir',
+        JSON.stringify({ current: 'D:/repo/src', previous: 'D:/repo', message: 'changed' }),
+        true,
+      )?.[0],
+    ).toMatchObject({ kind: 'ok', marker: 'ok ', path: 'D:/repo/src' });
+
+    const mode = formatToolVisualOutput(
+      'mode',
+      JSON.stringify({ action: 'list', success: true, modes: [{ id: 'review', name: 'Review', description: 'Find bugs' }] }),
+      true,
+    );
+    expect(mode?.[0]?.text).toContain('1 mode');
+    expect(mode?.[1]?.text).toContain('review');
   });
 });
 

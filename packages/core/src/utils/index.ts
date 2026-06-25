@@ -66,6 +66,17 @@ export {
   type ToolOutputSerializerOptions,
 } from './tool-output-serializer.js';
 export {
+  DEFAULT_TOOL_DESCRIPTION_MODE,
+  applyToolDescriptionModeToTool,
+  applyToolDescriptionModes,
+  getToolDescriptionMode,
+  normalizeToolDescriptionMode,
+  resolveToolDescriptionMode,
+  setToolDescriptionMode,
+  simplifyToolDescription,
+  type ToolDescriptionRegistryLike,
+} from './tool-description-mode.js';
+export {
   type CompactToolDefinitionForWireOptions,
   type CompactWireToolDefinition,
   compactSchemaDescriptions,

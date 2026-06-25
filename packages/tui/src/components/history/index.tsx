@@ -11,7 +11,7 @@ import type { HistoryProps } from './types.js';
 export type { HistoryEntry, HistoryProps } from './types.js';
 export type { BodySegment } from './types.js';
 export { Banner } from './banner.js';
-export { CodeBlock, DiffBlock, type DiffLineKind, type DiffLineRow, extractDiffPreview, parseUnifiedDiff } from './code-block.js';
+export { CodeBlock, DiffBlock, type DiffLineKind, type DiffLineRow, type DiffPreview, extractDiffPreview, parseUnifiedDiff } from './code-block.js';
 export { Entry } from './entry.js';
 export { MESSAGE_PANEL_BORDER_WIDTH, MESSAGE_PANEL_CHROME_WIDTH, MESSAGE_PANEL_MARGIN, AssistantBody, AssistantTail, assistantContentWidth, assistantTailRows, splitFencedBlocks } from './assistant.js';
 export {
@@ -31,6 +31,10 @@ export {
   formatMatchHit,
   formatToolArgs,
   formatToolOutput,
+  formatToolVisualOutput,
+  type ToolVisualLine,
+  type ToolVisualLineKind,
+  ToolOutputLines,
   ToolStreamBox,
   streamBoxRows,
   MAX_STREAM_DISPLAY_CHARS,

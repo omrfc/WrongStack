@@ -15,11 +15,20 @@ export interface DiffLineRow {
   newLine?: number | undefined;
 }
 
+export interface DiffPreview {
+  rows: DiffLineRow[];
+  hidden: number;
+  added: number;
+  removed: number;
+  hiddenAdded: number;
+  hiddenRemoved: number;
+}
+
 // ── Constants ──
 
 /** Max code-block lines rendered before a "+N more" footer. */
 export const MAX_CODE_LINES = 80;
-const DIFF_MAX_LINES = 8;
+const DIFF_MAX_LINES = 12;
 
 // ── CodeBlock ──
 
@@ -88,16 +97,46 @@ export function CodeBlock({
 
 // ── DiffBlock ──
 
-export function DiffBlock({ rows, hidden }: { rows: DiffLineRow[]; hidden: number }): React.ReactElement {
+export function DiffBlock({
+  rows,
+  hidden,
+  hiddenAdded = 0,
+  hiddenRemoved = 0,
+}: {
+  rows: DiffLineRow[];
+  hidden: number;
+  hiddenAdded?: number | undefined;
+  hiddenRemoved?: number | undefined;
+}): React.ReactElement {
   let gutterWidth = 1;
   for (const r of rows) {
-    const n = r.kind === 'del' ? r.oldLine : r.newLine;
-    if (typeof n === 'number') {
-      const w = String(n).length;
-      if (w > gutterWidth) gutterWidth = w;
+    for (const n of [r.oldLine, r.newLine]) {
+      if (typeof n === 'number') {
+        const w = String(n).length;
+        if (w > gutterWidth) gutterWidth = w;
+      }
     }
   }
   const blank = ' '.repeat(gutterWidth);
+  const gutterPad = `${blank} ${blank}`;
+  const footerStats = [
+    hiddenAdded > 0 ? `+${hiddenAdded}` : '',
+    hiddenRemoved > 0 ? `-${hiddenRemoved}` : '',
+  ].filter(Boolean);
+
+  const markerFor = (kind: DiffLineKind) => {
+    if (kind === 'add') return '+';
+    if (kind === 'del') return '-';
+    return ' ';
+  };
+
+  const textForDisplay = (row: DiffLineRow) => {
+    if ((row.kind === 'add' || row.kind === 'del' || row.kind === 'ctx') && row.text.length > 0) {
+      return row.text.slice(1) || ' ';
+    }
+    return row.text || ' ';
+  };
+
   return (
     <Box flexDirection="column" marginLeft={4} marginTop={0}>
       {rows.map((row, i) => {
@@ -105,40 +144,55 @@ export function DiffBlock({ rows, hidden }: { rows: DiffLineRow[]; hidden: numbe
         if (row.kind === 'hunk') {
           return (
             <Text key={key} color="cyan" dimColor>
-              {row.text}
+              {`${gutterPad}  ${row.text}`}
             </Text>
           );
         }
         if (row.kind === 'meta') {
           return (
             <Text key={key} dimColor>
-              {`${blank}  ${row.text}`}
+              {`${gutterPad}  ${row.text}`}
             </Text>
           );
         }
-        const lnNumber = row.kind === 'del' ? row.oldLine : row.newLine;
-        const lnText =
-          typeof lnNumber === 'number' ? String(lnNumber).padStart(gutterWidth, ' ') : blank;
+        const oldLn =
+          typeof row.oldLine === 'number' ? String(row.oldLine).padStart(gutterWidth, ' ') : blank;
+        const newLn =
+          typeof row.newLine === 'number' ? String(row.newLine).padStart(gutterWidth, ' ') : blank;
         if (row.kind === 'ctx') {
           return (
             <Text key={key} dimColor>
-              {`${lnText}  ${row.text}`}
+              {`${oldLn} ${newLn}   ${textForDisplay(row)}`}
             </Text>
           );
         }
         const bg = row.kind === 'add' ? theme.diffAddBg : theme.diffDelBg;
+        const lineColor = row.kind === 'add' ? theme.success : theme.error;
+        const marker = markerFor(row.kind);
         return (
           <Text key={key}>
-            <Text dimColor>{`${lnText}  `}</Text>
+            <Text color={row.kind === 'del' ? lineColor : undefined} dimColor={row.kind !== 'del'}>
+              {oldLn}
+            </Text>
+            <Text dimColor>{' '}</Text>
+            <Text color={row.kind === 'add' ? lineColor : undefined} dimColor={row.kind !== 'add'}>
+              {newLn}
+            </Text>
+            <Text>{' '}</Text>
+            <Text color={lineColor} bold>
+              {marker}
+            </Text>
             <Text backgroundColor={bg} color="black">
-              {row.text}
+              {textForDisplay(row)}
             </Text>
           </Text>
         );
       })}
       {hidden > 0 ? (
         <Text dimColor italic>
-          {`${blank}  … ${hidden} more line${hidden === 1 ? '' : 's'}`}
+          {`${gutterPad}  … ${hidden} more line${hidden === 1 ? '' : 's'}${
+            footerStats.length > 0 ? ` (${footerStats.join(' ')})` : ''
+          }`}
         </Text>
       ) : null}
     </Box>
@@ -147,7 +201,7 @@ export function DiffBlock({ rows, hidden }: { rows: DiffLineRow[]; hidden: numbe
 
 // ── Diff parsing ──
 
-export function parseUnifiedDiff(diff: string, maxLines: number): { rows: DiffLineRow[]; hidden: number } {
+export function parseUnifiedDiff(diff: string, maxLines: number): DiffPreview {
   const all: DiffLineRow[] = [];
   let oldLn = 0;
   let newLn = 0;
@@ -183,9 +237,24 @@ export function parseUnifiedDiff(diff: string, maxLines: number): { rows: DiffLi
     oldLn++;
     newLn++;
   }
-  if (all.length === 0) return { rows: [], hidden: 0 };
-  if (all.length <= maxLines) return { rows: all, hidden: 0 };
-  return { rows: all.slice(0, maxLines), hidden: all.length - maxLines };
+  const added = all.filter((row) => row.kind === 'add').length;
+  const removed = all.filter((row) => row.kind === 'del').length;
+  if (all.length === 0) {
+    return { rows: [], hidden: 0, added: 0, removed: 0, hiddenAdded: 0, hiddenRemoved: 0 };
+  }
+  if (all.length <= maxLines) {
+    return { rows: all, hidden: 0, added, removed, hiddenAdded: 0, hiddenRemoved: 0 };
+  }
+  const rows = all.slice(0, maxLines);
+  const hiddenRows = all.slice(maxLines);
+  return {
+    rows,
+    hidden: hiddenRows.length,
+    added,
+    removed,
+    hiddenAdded: hiddenRows.filter((row) => row.kind === 'add').length,
+    hiddenRemoved: hiddenRows.filter((row) => row.kind === 'del').length,
+  };
 }
 
 /**
@@ -195,16 +264,21 @@ export function parseUnifiedDiff(diff: string, maxLines: number): { rows: DiffLi
 export function extractDiffPreview(
   toolName: string,
   output: string | undefined,
-): { rows: DiffLineRow[]; hidden: number } | undefined {
+  input?: unknown | undefined,
+): DiffPreview | undefined {
   if (!output) return undefined;
   const text = output.trim();
   if (!text) return undefined;
 
   let diff: string | undefined;
-  if (toolName === 'edit' || toolName === 'diff') {
+  if (toolName === 'edit' || toolName === 'diff' || toolName === 'write') {
     const parsed = tryParseJson(text);
     if (parsed && typeof parsed === 'object') {
-      diff = stringOf((parsed as Record<string, unknown>)['diff']);
+      const obj = parsed as Record<string, unknown>;
+      diff =
+        toolName === 'write' && obj['created'] === true
+          ? newFileDiffFromWriteInput(obj, input) ?? stringOf(obj['diff'])
+          : stringOf(obj['diff']);
     }
   } else if (toolName === 'patch') {
     const parsed = tryParseJson(text);
@@ -215,8 +289,40 @@ export function extractDiffPreview(
     } else if (text.includes('@@') || text.startsWith('---')) {
       diff = text;
     }
+  } else if (toolName === 'replace') {
+    const parsed = tryParseJson(text);
+    if (parsed && typeof parsed === 'object') {
+      diff = collectReplaceDiffs(parsed as Record<string, unknown>);
+    }
   }
 
   if (!diff?.trim() || diff.startsWith('(no-op')) return undefined;
-  return parseUnifiedDiff(diff, DIFF_MAX_LINES);
+  const preview = parseUnifiedDiff(diff, DIFF_MAX_LINES);
+  return preview.rows.length > 0 ? preview : undefined;
+}
+
+function collectReplaceDiffs(obj: Record<string, unknown>): string | undefined {
+  const results = Array.isArray(obj['results']) ? (obj['results'] as unknown[]) : [];
+  const diffs = results
+    .map((result) =>
+      result && typeof result === 'object'
+        ? stringOf((result as Record<string, unknown>)['diff'])
+        : undefined,
+    )
+    .filter((diff): diff is string => Boolean(diff?.trim()));
+  return diffs.length > 0 ? diffs.join('\n') : undefined;
+}
+
+function newFileDiffFromWriteInput(
+  output: Record<string, unknown>,
+  input: unknown,
+): string | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const obj = input as Record<string, unknown>;
+  const content = stringOf(obj['content']);
+  if (content === undefined) return undefined;
+  const path = stringOf(output['path']) ?? stringOf(obj['path']) ?? 'new file';
+  const lines = content === '' ? [] : content.replace(/\n$/, '').split('\n');
+  const header = [`+++ ${path}`, `@@ -0,0 +1,${lines.length} @@`];
+  return [...header, ...lines.map((line) => `+${line}`)].join('\n');
 }

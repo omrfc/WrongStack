@@ -124,6 +124,14 @@ describe('fleet roster derivation', () => {
       expect(resolved.timeoutMs, `no default wall-clock for ${role}`).toBeUndefined();
     }
   });
+
+  it('shadow-agent has a modern one-shot budget without the old 4096 token cap', () => {
+    const resolved = applyRosterBudget({ ...FLEET_ROSTER['shadow-agent']!, role: 'shadow-agent' });
+    expect(resolved.maxTokens).toBe(60_000);
+    expect(resolved.maxCostUsd).toBe(1);
+    expect(resolved.timeoutMs).toBeUndefined();
+    expect(resolved.idleTimeoutMs).toBeGreaterThan(0);
+  });
 });
 
 describe('catalog spawnability (real Director + spawn tool)', () => {

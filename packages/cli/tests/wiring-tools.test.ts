@@ -53,6 +53,14 @@ function fakeConfig(overrides: Partial<Config> = {}): Config {
     provider: 'p',
     model: 'm',
     features: { mcp: true, plugins: true, memory: true, modelsRegistry: true, skills: true },
+    tools: {
+      defaultExecutionStrategy: 'smart',
+      maxIterations: 100,
+      iterationTimeoutMs: 300_000,
+      sessionTimeoutMs: 1_800_000,
+      perIterationOutputCapBytes: 100_000,
+      descriptionMode: {},
+    },
     ...overrides,
   } as Config;
 }
@@ -119,6 +127,26 @@ describe('setupTools', () => {
     const toolNames = toolRegistry.list().map((t) => t.name);
     expect(toolNames).toContain('remember');
     expect(toolNames).toContain('forget');
+  });
+
+  it('applies configured tool description modes', async () => {
+    const toolRegistry = new ToolRegistry();
+    await setupTools({
+      config: fakeConfig({
+        tools: {
+          ...fakeConfig().tools,
+          descriptionMode: { read: 'simple' },
+        },
+      }),
+      toolRegistry,
+      modelsRegistry: makeModelsRegistry(),
+      memoryStore: makeMemoryStore(),
+      wpaths: makeWpaths(),
+      projectRoot: tmp,
+      cwd: tmp,
+      container: makeContainer() as never,
+    });
+    expect(toolRegistry.getDescriptionMode('read')).toBe('simple');
   });
 
   it('skips remember/forget when memory feature disabled', async () => {

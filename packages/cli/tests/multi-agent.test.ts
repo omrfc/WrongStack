@@ -198,7 +198,7 @@ describe('MultiAgentHost', () => {
     await host.stopAll();
   });
 
-  it('shadow heartbeat is host-assigned and excluded from fleet summaries', async () => {
+  it('manual shadow check is one-shot and excluded from fleet summaries', async () => {
     const deps = makeDeps();
     const startedEvents: unknown[] = [];
     deps.events.on('subagent.task_started', (event) => startedEvents.push(event));
@@ -210,12 +210,11 @@ describe('MultiAgentHost', () => {
     });
 
     const build = (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build;
-    await vi.waitFor(() => expect(build.mock.calls.length).toBeGreaterThan(1));
+    await vi.waitFor(() => expect(build.mock.calls.length).toBeGreaterThan(0));
 
     const s = host.status();
     expect(s.pending).toEqual([]);
     expect(s.completed).toEqual([]);
-    expect(s.summary).toMatch(/active/);
     expect(startedEvents).toEqual([]);
     await host.stopAll();
   });
@@ -235,7 +234,34 @@ describe('MultiAgentHost', () => {
     await host.stopAll();
   });
 
-  it('auto-started shadow inherits the leader provider and model', async () => {
+  it('healthy leader turns do not auto-start a shadow LLM pass', async () => {
+    const deps = makeDeps();
+    const host = new MultiAgentHost(deps);
+    await host.promoteToDirector();
+
+    deps.events.emit('agent.run.started', {
+      ctx: {} as never,
+      model: 'claude',
+      at: new Date().toISOString(),
+    });
+    deps.events.emit('agent.run.completed', {
+      ctx: {} as never,
+      status: 'done',
+      iterations: 1,
+      at: new Date().toISOString(),
+      durationMs: 1,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
+    ).not.toHaveBeenCalled();
+    await host.stopAll();
+  });
+
+  it('problem-triggered shadow inherits the leader provider and model', async () => {
     const providersMod = await import('@wrongstack/providers');
     const mocked = providersMod.makeProviderFromConfig as ReturnType<typeof vi.fn>;
     mocked.mockClear();
@@ -252,6 +278,18 @@ describe('MultiAgentHost', () => {
 
     const host = new MultiAgentHost(deps);
     await host.promoteToDirector();
+    deps.events.emit('agent.run.started', {
+      ctx: {} as never,
+      model: 'gpt-5',
+      at: new Date().toISOString(),
+    });
+    deps.events.emit('agent.run.completed', {
+      ctx: {} as never,
+      status: 'failed',
+      iterations: 1,
+      at: new Date().toISOString(),
+      durationMs: 1,
+    });
     await vi.waitFor(() =>
       expect(
         (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
@@ -262,6 +300,47 @@ describe('MultiAgentHost', () => {
     const providerIds = mocked.mock.calls.map((c) => c[0]);
     expect(providerIds).toContain('openai');
     expect(providerIds).not.toContain('anthropic');
+  });
+
+  it('defers a problem-triggered shadow pass until the next work window finishes', async () => {
+    const deps = makeDeps();
+    const host = new MultiAgentHost(deps);
+    await host.promoteToDirector();
+
+    deps.events.emit('agent.run.started', {
+      ctx: {} as never,
+      model: 'claude',
+      at: new Date().toISOString(),
+    });
+    deps.events.emit('agent.run.completed', {
+      ctx: {} as never,
+      status: 'failed',
+      iterations: 1,
+      at: new Date().toISOString(),
+      durationMs: 1,
+    });
+    deps.events.emit('agent.run.started', {
+      ctx: {} as never,
+      model: 'claude',
+      at: new Date().toISOString(),
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const build = (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build;
+    expect(build).not.toHaveBeenCalled();
+
+    deps.events.emit('agent.run.completed', {
+      ctx: {} as never,
+      status: 'done',
+      iterations: 1,
+      at: new Date().toISOString(),
+      durationMs: 1,
+    });
+
+    await vi.waitFor(() => expect(build).toHaveBeenCalled());
+    await host.stopAll();
   });
 
   it('spawn() works with a providers config entry (not just top-level apiKey)', async () => {

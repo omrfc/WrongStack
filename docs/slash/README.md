@@ -30,6 +30,7 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/sessions` | `packages/cli/src/slash-commands/session.ts` | List recent sessions; `/resume`, `/load` aliases for backward compat |
 | `/prune` | `packages/cli/src/slash-commands/prune.ts` | Delete old sessions; `/prune --dry-run` to preview |
 | `/exit` | `packages/cli/src/slash-commands/session.ts` | Exit REPL; `/quit`, `/q` aliases |
+| `/tool` | `packages/cli/src/slash-commands/tool.ts` | Configure per-tool description detail (`simple` or `extend`) |
 | `/tools` | `packages/cli/src/slash-commands/tools.ts` | List registered tools |
 | `/plugin` | `packages/cli/src/slash-commands/plugin.ts` | Manage plugins |
 | `/mcp` | `packages/cli/src/slash-commands/mcp.ts` | Manage MCP servers |

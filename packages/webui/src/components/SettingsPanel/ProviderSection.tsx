@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import type { WrongStackWebSocketClient } from '@/lib/ws-client';
 import {
   CheckCircle2,
   Eye,
@@ -12,6 +13,7 @@ import {
 import { useState, useCallback } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { ProviderModelsPanel } from './ProviderModelsPanel';
 
 // ── Types (shared with index) ──
 
@@ -73,6 +75,10 @@ export interface ProviderSectionProps {
   onAddProvider: (id: string, family: string, baseUrl?: string | undefined, apiKey?: string) => void;
   /** Called to remove a saved provider. */
   onRemoveProvider: (providerId: string) => void;
+  /** Called when a saved provider model is picked. */
+  onPickProviderModel: (providerId: string, modelId: string) => void;
+  /** WebSocket client used for saved-provider model probing/clearing. */
+  ws: WrongStackWebSocketClient;
   /** Search filter text. */
   catalogQuery: string;
   setCatalogQuery: (v: string) => void;
@@ -94,6 +100,8 @@ export function ProviderSection({
   onSetActiveKey,
   onAddProvider,
   onRemoveProvider,
+  onPickProviderModel,
+  ws,
   catalogQuery,
   setCatalogQuery,
 }: ProviderSectionProps) {
@@ -344,6 +352,14 @@ export function ProviderSection({
                     {sp.baseUrl}
                   </div>
                 )}
+
+                <ProviderModelsPanel
+                  providerId={sp.id}
+                  savedPickedModelId={sp.pickedModelId}
+                  savedModels={sp.models}
+                  ws={ws}
+                  onPickModel={onPickProviderModel}
+                />
 
                 {/* API Keys */}
                 <div className="space-y-2">

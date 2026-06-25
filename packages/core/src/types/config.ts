@@ -239,6 +239,11 @@ export interface ToolsConfig {
   sessionTimeoutMs: number;
   perIterationOutputCapBytes: number;
   /**
+   * Per-tool prose budget for the tool's top-level description and usage hint.
+   * Missing entries default to "extend".
+   */
+  descriptionMode?: ToolDescriptionModeConfig | undefined;
+  /**
    * When true (default), the agent automatically extends its iteration
    * limit by 100 when hit. Set to false to require user confirmation.
    */
@@ -252,6 +257,9 @@ export interface ToolsConfig {
    */
   restrictToProjectRoot?: boolean | undefined;
 }
+
+export type ToolDescriptionMode = 'extend' | 'simple';
+export type ToolDescriptionModeConfig = Record<string, ToolDescriptionMode | undefined>;
 
 export interface ProviderApiKey {
   /** Short human-readable label (e.g. "personal", "work", "rate-limit-backup"). */

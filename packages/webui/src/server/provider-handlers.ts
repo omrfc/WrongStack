@@ -114,7 +114,10 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
     try {
       const providers = await loadConfigProviders();
       const result = upsertKeyRecord(providers, providerId, label, apiKey, new Date().toISOString());
-      if (result.ok) await saveConfigProviders(providers);
+      if (result.ok) {
+        await saveConfigProviders(providers);
+        broadcastSaved(providers);
+      }
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -125,7 +128,10 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
     try {
       const providers = await loadConfigProviders();
       const result = deleteKeyRecord(providers, providerId, label);
-      if (result.ok) await saveConfigProviders(providers);
+      if (result.ok) {
+        await saveConfigProviders(providers);
+        broadcastSaved(providers);
+      }
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -136,7 +142,10 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
     try {
       const providers = await loadConfigProviders();
       const result = setActiveKeyRecord(providers, providerId, label);
-      if (result.ok) await saveConfigProviders(providers);
+      if (result.ok) {
+        await saveConfigProviders(providers);
+        broadcastSaved(providers);
+      }
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -147,11 +156,13 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
     try {
       const providers = await loadConfigProviders();
       const result = addProviderRecord(providers, payload, new Date().toISOString());
-      if (result.ok) await saveConfigProviders(providers);
+      if (result.ok) {
+        await saveConfigProviders(providers);
+        broadcastSaved(providers);
+      }
       sendResult(ws, result.ok, result.message);
       if (result.ok) {
         console.log(`[WebUI] Provider "${payload.id}" added via provider.add`);
-        broadcastSaved(providers);
       }
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -162,7 +173,10 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
     try {
       const providers = await loadConfigProviders();
       const result = removeProviderRecord(providers, providerId);
-      if (result.ok) await saveConfigProviders(providers);
+      if (result.ok) {
+        await saveConfigProviders(providers);
+        broadcastSaved(providers);
+      }
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));

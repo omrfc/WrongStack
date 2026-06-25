@@ -96,6 +96,7 @@ import {
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DEFAULT_SESSION_PRUNE_DAYS,
   DEFAULT_TOOLS_CONFIG,
+  applyToolDescriptionModes,
   resolveContextWindowPolicy,
   enhanceUserPrompt,
   gatedEnhancerReasoning,
@@ -133,7 +134,7 @@ import { registerInstance, unregisterInstance } from './instance-registry.js';
 import { findFreePort } from './port-utils.js';
 import { openBrowser } from './open-browser.js';
 import { computeUsageCost, getCostRates } from './usage-cost.js';
-import { createProviderHandlers } from './provider-handlers.js';
+import { createProviderHandlers, projectSavedProviders } from './provider-handlers.js';
 import { createModeHandlers } from './mode-handlers.js';
 import { createProjectHandlers } from './project-handlers.js';
 import { createSessionHandlers } from './session-handlers.js';
@@ -547,6 +548,7 @@ export async function startWebUI(
   toolRegistry.register(makeMailboxTool({ projectDir: wpaths.projectDir, events }));
   toolRegistry.register(makeMailSendTool({ projectDir: wpaths.projectDir, events }));
   toolRegistry.register(makeMailInboxTool({ projectDir: wpaths.projectDir, events }));
+  applyToolDescriptionModes(toolRegistry, config.tools?.descriptionMode);
   console.log('[WebUI] Tool registry loaded:', toolRegistry.list().length, 'tools');
 
   // ── MCP registry — the live counterpart to config.mcpServers. ────────────
@@ -2275,22 +2277,7 @@ export async function startWebUI(
       const saved = await providerHandlers.loadConfigProviders();
       send(ws, {
         type: 'providers.saved',
-        payload: {
-          providers: Object.entries(saved).map(([id, cfg]) => {
-            const keys = normalizeKeys(cfg);
-            return {
-              id,
-              family: cfg.family ?? id,
-              baseUrl: cfg.baseUrl,
-              apiKeys: keys.map((k) => ({
-                label: k.label,
-                maskedKey: maskedKey(k.apiKey),
-                isActive: k.label === cfg.activeKey,
-                createdAt: k.createdAt,
-              })),
-            };
-          }),
-        },
+        payload: { providers: projectSavedProviders(saved) },
       });
     },
     listProviderModels: async (ws, msg) => {

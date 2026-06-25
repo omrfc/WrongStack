@@ -1,5 +1,10 @@
 import { WrongStackError, ERROR_CODES } from '../types/errors.js';
+import type { ToolDescriptionMode, ToolDescriptionModeConfig } from '../types/config.js';
 import type { Tool } from '../types/tool.js';
+import {
+  applyToolDescriptionModeToTool,
+  normalizeToolDescriptionMode,
+} from '../utils/tool-description-mode.js';
 import { estimateToolDefTokens } from '../utils/token-estimate.js';
 
 /**
@@ -27,6 +32,7 @@ export type ToolWrapper = (tool: Tool) => Tool;
 
 export class ToolRegistry {
   private readonly tools = new Map<string, { tool: Tool; owner: string }>();
+  private readonly descriptionModes = new Map<string, ToolDescriptionMode>();
   /** Monotonic version bumped on every registry mutation. */
   private _version = 0;
   /** Cached `list()` result, frozen after build. Invalidated on _version change. */
@@ -38,6 +44,11 @@ export class ToolRegistry {
     if (tool._estDefTokens === undefined) {
       tool._estDefTokens = estimateToolDefTokens(tool);
     }
+  }
+
+  private _prepareForStorage(tool: Tool): Tool {
+    const mode = this.descriptionModes.get(tool.name) ?? 'extend';
+    return applyToolDescriptionModeToTool(tool, mode);
   }
 
   register(tool: Tool, owner = 'core'): void {
@@ -61,8 +72,9 @@ export class ToolRegistry {
       });
     }
 
-    this._stampDefTokens(tool);
-    this.tools.set(tool.name, { tool, owner });
+    const stored = this._prepareForStorage(tool);
+    this._stampDefTokens(stored);
+    this.tools.set(tool.name, { tool: stored, owner });
     this._version++;
   }
 
@@ -78,8 +90,9 @@ export class ToolRegistry {
       return false; // silently reject invalid schema in tryRegister
     }
 
-    this._stampDefTokens(tool);
-    this.tools.set(tool.name, { tool, owner });
+    const stored = this._prepareForStorage(tool);
+    this._stampDefTokens(stored);
+    this.tools.set(tool.name, { tool: stored, owner });
     this._version++;
     return true;
   }
@@ -108,12 +121,16 @@ export class ToolRegistry {
    */
   registerDefault(tool: Tool, owner = 'core'): void {
     if (this.tools.has(tool.name)) return;
-    this._stampDefTokens(tool);
-    this.tools.set(tool.name, { tool, owner });
+    const stored = this._prepareForStorage(tool);
+    this._stampDefTokens(stored);
+    this.tools.set(tool.name, { tool: stored, owner });
+    this._version++;
   }
 
   unregister(name: string): boolean {
-    return this.tools.delete(name);
+    const deleted = this.tools.delete(name);
+    if (deleted) this._version++;
+    return deleted;
   }
 
   /**
@@ -129,8 +146,10 @@ export class ToolRegistry {
         context: { tool: name },
       });
     }
-    this._stampDefTokens(tool);
-    this.tools.set(name, { tool, owner });
+    const stored = this._prepareForStorage(tool);
+    this._stampDefTokens(stored);
+    this.tools.set(name, { tool: stored, owner });
+    this._version++;
   }
 
   /**
@@ -154,12 +173,56 @@ export class ToolRegistry {
         context: { tool: name },
       });
     }
-    const wrapped = wrapper(entry.tool);
+    const current = applyToolDescriptionModeToTool(entry.tool, 'extend');
+    const wrapped = this._prepareForStorage(wrapper(current));
     // The wrapper may have changed name/description/inputSchema — recompute.
     wrapped._estDefTokens = undefined;
     this._stampDefTokens(wrapped);
     this.tools.set(name, { tool: wrapped, owner: `${entry.owner}+${owner}` });
     this._version++;
+  }
+
+  setDescriptionMode(name: string, mode: ToolDescriptionMode): boolean {
+    const normalized = normalizeToolDescriptionMode(mode);
+    if (!normalized) return false;
+    const entry = this.tools.get(name);
+    if (!entry) return false;
+
+    if (normalized === 'extend') {
+      this.descriptionModes.delete(name);
+    } else {
+      this.descriptionModes.set(name, normalized);
+    }
+
+    const stored = applyToolDescriptionModeToTool(entry.tool, normalized);
+    stored._estDefTokens = undefined;
+    this._stampDefTokens(stored);
+    this.tools.set(name, { ...entry, tool: stored });
+    this._version++;
+    return true;
+  }
+
+  getDescriptionMode(name: string): ToolDescriptionMode {
+    return this.descriptionModes.get(name) ?? 'extend';
+  }
+
+  applyDescriptionModes(
+    modes: ToolDescriptionModeConfig = {},
+  ): { applied: number; missing: string[] } {
+    const missing: string[] = [];
+    let applied = 0;
+    for (const [name, rawMode] of Object.entries(modes)) {
+      const mode = normalizeToolDescriptionMode(rawMode);
+      if (!mode) continue;
+      if (this.tools.has(name)) {
+        if (this.setDescriptionMode(name, mode)) applied++;
+      } else {
+        if (mode === 'simple') this.descriptionModes.set(name, mode);
+        else this.descriptionModes.delete(name);
+        missing.push(name);
+      }
+    }
+    return { applied, missing };
   }
 
   get(name: string): Tool | undefined {
@@ -205,6 +268,8 @@ export class ToolRegistry {
 
   clear(): void {
     this.tools.clear();
+    this.descriptionModes.clear();
+    this._version++;
   }
 
   /**
@@ -213,6 +278,9 @@ export class ToolRegistry {
    */
   clone(): ToolRegistry {
     const copy = new ToolRegistry();
+    for (const [name, mode] of this.descriptionModes) {
+      copy.descriptionModes.set(name, mode);
+    }
     for (const { tool, owner } of this.listWithOwner()) copy.register(tool, owner);
     return copy;
   }

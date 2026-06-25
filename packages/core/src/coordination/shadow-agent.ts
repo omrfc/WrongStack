@@ -2,12 +2,12 @@
  * Shadow Agent — Fleet Monitoring & Intervention
  *
  * A deterministic background agent that monitors all agents in the fleet via
- * host-assigned heartbeat checks. Shadow Agents run silently, observe everything,
+ * host-assigned one-shot checks. Shadow Agents run silently, observe everything,
  * and intervene only when explicitly commanded or when critical anomalies detected.
  *
  * Features:
  * - FleetBus subscription for live event monitoring
- * - Host-assigned heartbeat checks
+ * - Host-assigned one-shot checks
  * - Mailbox surveillance for commands and anomalies
  * - Spike detection (instant start/stop tasks)
  * - Intervention via "hoop" command
@@ -20,7 +20,7 @@ import { randomUUID } from 'node:crypto';
 export interface ShadowConfig {
   /** Heartbeat interval in ms (default: 30000) */
   intervalMs?: number;
-  /** Model for LLM analysis (default: claude-3-5-sonnet) */
+  /** Model for LLM analysis (default: host-selected model) */
   model?: string;
   /** Auto-intervene on anomalies (default: false) */
   autoIntervene?: boolean;
@@ -78,7 +78,7 @@ export interface ShadowState {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_INTERVAL_MS = 30_000;
-const DEFAULT_MODEL = 'claude-3-5-sonnet';
+const DEFAULT_MODEL = 'default';
 // Note: stuck/spike thresholds are passed as parameters, not constants
 
 // ── Intervention Commands ────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ export function parseInterventionCommand(body: string): InterventionCommand | nu
     return { type: 'resume' };
   }
 
-  // "shadow interval <ms>" — change heartbeat interval
+  // "shadow interval <ms>" — update legacy interval setting
   const intervalMatch = trimmed.match(/^shadow\s+interval\s+(\d+)$/i);
   if (intervalMatch?.[1]) {
     return { type: 'set_interval', ms: parseInt(intervalMatch[1], 10) };
@@ -399,9 +399,9 @@ export function resolveInterventionTarget(
 
 // ── Legacy Cron Job Name Constants ──────────────────────────────────────────
 
-/** @deprecated Shadow heartbeat is host-assigned; kept for compatibility. */
+/** @deprecated Shadow checks are host-assigned one-shots; kept for compatibility. */
 export const SHADOW_HEARTBEAT_CRON = 'shadow_heartbeat';
-/** @deprecated Shadow mailbox checks are part of each host-assigned heartbeat. */
+/** @deprecated Shadow mailbox checks are part of each host-assigned pass. */
 export const SHADOW_MAILBOX_CRON = 'shadow_mailbox_check';
 
 // ── Event Types for FleetBus ────────────────────────────────────────────────

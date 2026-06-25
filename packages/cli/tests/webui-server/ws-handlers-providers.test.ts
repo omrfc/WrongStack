@@ -93,6 +93,41 @@ describe('ws-handlers/providers (PR 5 of #30)', () => {
     expect(lastResult(cap).success).toBe(false);
   });
 
+  it('handleProvidersSaved: includes saved model allowlist and picked model id', async () => {
+    const seed = makeCtx(configPath);
+    await handleProviderAdd(seed.ctx, FAKE_WS, {
+      id: 'local',
+      family: 'openai-compatible',
+      baseUrl: 'http://localhost:11434/v1',
+      apiKey: 'sk-local-secret',
+    });
+    const upd = makeCtx(configPath);
+    await handleProviderUpdate(upd.ctx, FAKE_WS, {
+      id: 'local',
+      models: ['llama3.1:8b', 'qwen2.5:7b'],
+    });
+
+    const { ctx, cap } = makeCtx(configPath);
+    await handleProvidersSaved(ctx, FAKE_WS);
+
+    const payload = cap.sent.find((m) => m.type === 'providers.saved')?.payload as {
+      providers: Array<{
+        id: string;
+        models?: string[] | undefined;
+        pickedModelId?: string | undefined;
+        apiKeys: Array<{ maskedKey: string }>;
+      }>;
+    };
+    expect(payload.providers).toEqual([
+      expect.objectContaining({
+        id: 'local',
+        models: ['llama3.1:8b', 'qwen2.5:7b'],
+        pickedModelId: 'llama3.1:8b',
+      }),
+    ]);
+    expect(payload.providers[0]?.apiKeys[0]?.maskedKey).not.toContain('sk-local-secret');
+  });
+
   it('handleProviderModels: OAuth provider not in catalog → saved allowlist, NO error toast', async () => {
     // github-copilot shape: saved with a model allowlist, absent from models.dev.
     const seed = makeCtx(configPath);
@@ -180,11 +215,13 @@ describe('ws-handlers/providers (PR 5 of #30)', () => {
     const add = makeCtx(configPath);
     await handleKeyUpsert(add.ctx, FAKE_WS, 'acme', 'work', 'sk-work-key');
     expect(lastResult(add.cap).success).toBe(true);
+    expect(add.cap.broadcasts.some((m) => m.type === 'providers.saved')).toBe(true);
 
     // Make it active.
     const active = makeCtx(configPath);
     await handleKeySetActive(active.ctx, FAKE_WS, 'acme', 'work');
     expect(lastResult(active.cap).success).toBe(true);
+    expect(active.cap.broadcasts.some((m) => m.type === 'providers.saved')).toBe(true);
 
     // providers.saved masks the key (never returns the plaintext).
     const saved = makeCtx(configPath);
@@ -204,6 +241,7 @@ describe('ws-handlers/providers (PR 5 of #30)', () => {
     const del = makeCtx(configPath);
     await handleKeyDelete(del.ctx, FAKE_WS, 'acme', 'work');
     expect(lastResult(del.cap).success).toBe(true);
+    expect(del.cap.broadcasts.some((m) => m.type === 'providers.saved')).toBe(true);
   });
 
   it('handleProviderRemove: deletes the provider', async () => {
@@ -213,6 +251,7 @@ describe('ws-handlers/providers (PR 5 of #30)', () => {
     const rm = makeCtx(configPath);
     await handleProviderRemove(rm.ctx, FAKE_WS, 'gone');
     expect(lastResult(rm.cap).success).toBe(true);
+    expect(rm.cap.broadcasts.some((m) => m.type === 'providers.saved')).toBe(true);
 
     const saved = await loadSavedProviders(configPath);
     expect(saved.gone).toBeUndefined();

@@ -190,4 +190,64 @@ describe('ToolRegistry', () => {
     r.registerDefault(t('a'), 'default-owner');
     expect(r.ownerOf('a')).toBe('default-owner');
   });
+
+  it('can switch a tool description between simple and extend', () => {
+    const r = new ToolRegistry();
+    const full =
+      'Read a file from disk and return its contents with optional line ranges. Use this for inspecting source code, configuration files, documentation, and generated output before making edits.';
+    r.register({ ...t('read'), description: full, usageHint: `${full} Prefer narrow ranges.` });
+
+    expect(r.setDescriptionMode('read', 'simple')).toBe(true);
+    expect(r.getDescriptionMode('read')).toBe('simple');
+    expect(r.get('read')?.description.length).toBeLessThan(full.length);
+
+    expect(r.setDescriptionMode('read', 'extend')).toBe(true);
+    expect(r.getDescriptionMode('read')).toBe('extend');
+    expect(r.get('read')?.description).toBe(full);
+    expect(r.get('read')?.usageHint).toBe(`${full} Prefer narrow ranges.`);
+  });
+
+  it('wrap receives the extended tool while a simple mode is active', () => {
+    const r = new ToolRegistry();
+    const full =
+      'Execute a command through the project shell with configured permission checks. Use this when a shell command is the clearest way to inspect, build, test, or run project code. Prefer explicit commands with bounded timeouts and visible output.';
+    const wrappedFull =
+      'Execute a vetted command through the project shell and return stdout, stderr, and exit code. Use this for build, test, and diagnostic commands that need normal shell behavior. Prefer explicit commands with bounded timeouts and visible output.';
+    r.register({ ...t('bash'), description: full });
+    r.setDescriptionMode('bash', 'simple');
+
+    let seenByWrapper = '';
+    r.wrap(
+      'bash',
+      (tool) => {
+        seenByWrapper = tool.description;
+        return { ...tool, description: wrappedFull };
+      },
+      'plug',
+    );
+
+    expect(seenByWrapper).toBe(full);
+    expect(r.get('bash')?.description.length).toBeLessThan(wrappedFull.length);
+
+    r.setDescriptionMode('bash', 'extend');
+    expect(r.get('bash')?.description).toBe(wrappedFull);
+  });
+
+  it('applies stored description modes to later registrations and clones', () => {
+    const r = new ToolRegistry();
+    expect(r.applyDescriptionModes({ read: 'simple' })).toEqual({
+      applied: 0,
+      missing: ['read'],
+    });
+
+    const full =
+      'Read project files with optional offsets and limits. Use this before editing so changes are based on the current file contents rather than assumptions. Prefer narrow line ranges when a file is large or generated.';
+    r.register({ ...t('read'), description: full });
+    expect(r.getDescriptionMode('read')).toBe('simple');
+    expect(r.get('read')?.description.length).toBeLessThan(full.length);
+
+    const clone = r.clone();
+    expect(clone.getDescriptionMode('read')).toBe('simple');
+    expect(clone.get('read')?.description.length).toBeLessThan(full.length);
+  });
 });

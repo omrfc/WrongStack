@@ -52,7 +52,7 @@ interface CatalogModel {
 
 export function SettingsPanel() {
   const { setCurrentView } = useUIStore();
-  const { provider, setProvider, setModel, wsConnected } = useConfigStore();
+  const { provider, setProvider, setModel, setConfig, wsConnected, wsUrl } = useConfigStore();
   const { theme, setTheme } = useTheme();
   const ws = useWebSocket();
   const wsClient = ws.client;
@@ -188,6 +188,16 @@ export function SettingsPanel() {
     [ws],
   );
 
+  const handlePickProviderModel = useCallback(
+    (providerId: string, modelId: string) => {
+      ws.client.updateProvider({ id: providerId, models: [modelId] });
+      if (providerId === useConfigStore.getState().provider) {
+        setModel(modelId);
+      }
+    },
+    [setModel, ws.client],
+  );
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -245,6 +255,8 @@ export function SettingsPanel() {
                 onSetActiveKey={handleSetActiveKey}
                 onAddProvider={handleAddProvider}
                 onRemoveProvider={handleRemoveProvider}
+                onPickProviderModel={handlePickProviderModel}
+                ws={ws.client}
                 catalogQuery={catalogQuery}
                 setCatalogQuery={setCatalogQuery}
               />
@@ -277,8 +289,8 @@ export function SettingsPanel() {
                 </label>
                 <Input
                   id="websocket-url"
-                  value={useConfigStore.getState().wsUrl}
-                  onChange={(e) => useConfigStore.getState().setConfig({ wsUrl: e.target.value })}
+                  value={wsUrl}
+                  onChange={(e) => setConfig({ wsUrl: e.target.value })}
                   placeholder="ws://localhost:3457"
                   className="font-mono text-sm"
                 />

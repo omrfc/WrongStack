@@ -49,7 +49,7 @@ describe('buildShadowCommand', () => {
     const res = await cmd.run('start --interval=15000 --model=openai/gpt-5', ctx());
 
     expect(onSpawn).toHaveBeenCalledWith(
-      'Shadow Agent — background fleet monitor at 15000ms interval',
+      'Shadow Agent — one-shot quiet fleet check',
       expect.objectContaining({
         provider: 'openai',
         model: 'gpt-5',
@@ -80,7 +80,7 @@ describe('buildShadowCommand', () => {
     const res = await cmd.run('start --interval=5000', ctx());
 
     expect(onSpawn).toHaveBeenCalledWith(
-      'Shadow Agent — background fleet monitor at 5000ms interval',
+      'Shadow Agent — one-shot quiet fleet check',
       expect.objectContaining({
         provider: 'local',
         model: 'qwen3-coder',
@@ -102,7 +102,7 @@ describe('buildShadowCommand', () => {
     const res = await cmd.run('start --interval=5000', ctx());
 
     expect(onSpawn).toHaveBeenCalledWith(
-      'Shadow Agent — background fleet monitor at 5000ms interval',
+      'Shadow Agent — one-shot quiet fleet check',
       expect.objectContaining({
         provider: 'local',
         model: 'qwen3-coder',
@@ -131,7 +131,7 @@ describe('buildShadowCommand', () => {
     expect(controller.setDefaults).toHaveBeenCalledWith({ intervalMs: 7000 });
     expect(controller.setDefaults).toHaveBeenCalledWith({ provider: 'openai', model: 'gpt-5' });
     expect(onSpawn).toHaveBeenCalledWith(
-      'Shadow Agent — background fleet monitor at 7000ms interval',
+      'Shadow Agent — one-shot quiet fleet check',
       expect.objectContaining({
         provider: 'openai',
         model: 'gpt-5',

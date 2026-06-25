@@ -75,7 +75,7 @@ export interface SlashCommandContext {
        *  tools' own capabilities. Pass this to narrow (e.g. read-only) or to
        *  grant an escape-hatch cap (fs.write.outside-project, config.mutate). */
       allowedCapabilities?: readonly string[] | undefined;
-      /** Shadow Agent heartbeat interval in ms. Only used when name === 'shadow'. */
+      /** Legacy Shadow Agent interval in ms. Only used when name === 'shadow'. */
       shadowIntervalMs?: number | undefined;
     },
   ) => Promise<string>;
@@ -97,7 +97,7 @@ export interface SlashCommandContext {
        *  tools' own capabilities. Pass this to narrow (e.g. read-only) or to
        *  grant an escape-hatch cap (fs.write.outside-project, config.mutate). */
       allowedCapabilities?: readonly string[] | undefined;
-      /** Shadow Agent heartbeat interval in ms. Only used when name === 'shadow'. */
+      /** Legacy Shadow Agent interval in ms. Only used when name === 'shadow'. */
       shadowIntervalMs?: number | undefined;
     },
   ) => Promise<string>;
@@ -515,6 +515,7 @@ import { buildTechStackCommand } from './techstack.js';
 import { buildTelegramSetupCommand } from './telegram-setup.js';
 import { buildTelegramSettingsCommand } from './telegram-settings.js';
 import { buildTodosCommand } from './todos.js';
+import { buildToolCommand } from './tool.js';
 import { buildToolsCommand } from './tools.js';
 import { buildWorkingDirCommand } from './working-dir.js';
 import { buildWorktreeCommand } from './worktree.js';
@@ -534,6 +535,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildDoctorCommand(opts),
     buildCodebaseReindexCommand(opts),
     buildTechStackCommand(opts),
+    buildToolCommand(opts),
     buildToolsCommand(opts),
     buildPluginCommand(opts),
     buildPruneCommand(opts),

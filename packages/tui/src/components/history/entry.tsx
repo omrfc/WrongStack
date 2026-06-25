@@ -14,6 +14,8 @@ import {
   fmtTok,
   formatToolArgs,
   formatToolOutput,
+  formatToolVisualOutput,
+  ToolOutputLines,
 } from './utils.js';
 
 // ── Internal helpers ──
@@ -198,7 +200,8 @@ export const Entry = React.memo(function Entry({
         entry.outputBytes,
         entry.outputLines,
       );
-      const diff = entry.ok ? extractDiffPreview(entry.name, entry.output) : undefined;
+      const visualLines = formatToolVisualOutput(entry.name, entry.output, entry.ok, entry.input);
+      const diff = entry.ok ? extractDiffPreview(entry.name, entry.output, entry.input) : undefined;
       const sizeChip = (() => {
         if (!entry.ok) return '';
         const parts: string[] = [];
@@ -230,18 +233,29 @@ export const Entry = React.memo(function Entry({
             <Text dimColor>{`  ·  ${fmtDuration(entry.durationMs)}`}</Text>
             {sizeChip ? <Text dimColor>{`  ·  ${sizeChip}`}</Text> : null}
           </Text>
-          {outLines.map((line, i) => (
-            <Text key={i}>
-              <Text dimColor>{i === outLines.length - 1 && !diff ? '  └─ ' : '  ├─ '}</Text>
-              <Text
-                dimColor={entry.ok && !line.startsWith('!')}
-                {...(!entry.ok || line.startsWith('!') ? { color: 'red' } : {})}
-              >
-                {line}
+          {visualLines ? (
+            <ToolOutputLines lines={visualLines} hasFollowingBlock={Boolean(diff)} />
+          ) : (
+            outLines.map((line, i) => (
+              <Text key={i}>
+                <Text dimColor>{i === outLines.length - 1 && !diff ? '  └─ ' : '  ├─ '}</Text>
+                <Text
+                  dimColor={entry.ok && !line.startsWith('!')}
+                  {...(!entry.ok || line.startsWith('!') ? { color: 'red' } : {})}
+                >
+                  {line}
+                </Text>
               </Text>
-            </Text>
-          ))}
-          {diff ? <DiffBlock rows={diff.rows} hidden={diff.hidden} /> : null}
+            ))
+          )}
+          {diff ? (
+            <DiffBlock
+              rows={diff.rows}
+              hidden={diff.hidden}
+              hiddenAdded={diff.hiddenAdded}
+              hiddenRemoved={diff.hiddenRemoved}
+            />
+          ) : null}
         </Box>
       );
     }

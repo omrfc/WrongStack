@@ -39,22 +39,30 @@ const probeScrubber = new DefaultSecretScrubber();
  * mutating provider handlers (add / update / clear / undo) so all surfaces
  * re-render the same masked snapshot after a change.
  */
+function projectSavedProviders(providers: Record<string, ProviderConfig>) {
+  return Object.entries(providers).map(([id, cfg]) => {
+    const models = cfg.models;
+    const pickedModelId = models && models.length > 0 ? models[0] : undefined;
+    return {
+      id,
+      family: cfg.family ?? id,
+      baseUrl: cfg.baseUrl,
+      models,
+      ...(pickedModelId !== undefined ? { pickedModelId } : {}),
+      apiKeys: normalizeKeys(cfg).map((k) => ({
+        label: k.label,
+        maskedKey: maskedKey(k.apiKey),
+        isActive: k.label === cfg.activeKey,
+        createdAt: k.createdAt,
+      })),
+    };
+  });
+}
+
 function broadcastSaved(ctx: WsHandlerContext, providers: Record<string, ProviderConfig>): void {
   ctx.broadcast({
     type: 'providers.saved',
-    payload: {
-      providers: Object.entries(providers).map(([id, cfg]) => ({
-        id,
-        family: cfg.family,
-        baseUrl: cfg.baseUrl,
-        apiKeys: normalizeKeys(cfg).map((k) => ({
-          label: k.label,
-          maskedKey: maskedKey(k.apiKey),
-          isActive: k.label === cfg.activeKey,
-          createdAt: k.createdAt,
-        })),
-      })),
-    },
+    payload: { providers: projectSavedProviders(providers) },
   });
 }
 
@@ -124,19 +132,7 @@ export async function handleProvidersSaved(ctx: WsHandlerContext, ws: WebSocket)
     const providers = await ctx.providerStore.load();
     ctx.send(ws, {
       type: 'providers.saved',
-      payload: {
-        providers: Object.entries(providers).map(([id, cfg]) => ({
-          id,
-          family: cfg.family,
-          baseUrl: cfg.baseUrl,
-          apiKeys: normalizeKeys(cfg).map((k) => ({
-            label: k.label,
-            maskedKey: maskedKey(k.apiKey),
-            isActive: k.label === cfg.activeKey,
-            createdAt: k.createdAt,
-          })),
-        })),
-      },
+      payload: { providers: projectSavedProviders(providers) },
     });
   } catch (err) {
     sendResult(ctx, ws, false, toErrorMessage(err));
@@ -169,6 +165,7 @@ export async function handleKeyUpsert(
 
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Key "${label}" saved for ${providerId}`);
+    broadcastSaved(ctx, providers);
   } catch (err) {
     sendResult(ctx, ws, false, toErrorMessage(err));
   }
@@ -199,6 +196,7 @@ export async function handleKeyDelete(
     }
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Key "${label}" deleted from ${providerId}`);
+    broadcastSaved(ctx, providers);
   } catch (err) {
     sendResult(ctx, ws, false, toErrorMessage(err));
   }
@@ -222,6 +220,7 @@ export async function handleKeySetActive(
     providers[providerId] = existing;
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Active key for ${providerId} set to "${label}"`);
+    broadcastSaved(ctx, providers);
   } catch (err) {
     sendResult(ctx, ws, false, toErrorMessage(err));
   }
@@ -261,22 +260,7 @@ export async function handleProviderAdd(
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Provider "${payload.id}" added`);
     ctx.log(`[WebUI] Provider "${payload.id}" added via provider.add`);
-    ctx.broadcast({
-      type: 'providers.saved',
-      payload: {
-        providers: Object.entries(providers).map(([id, cfg]) => ({
-          id,
-          family: cfg.family,
-          baseUrl: cfg.baseUrl,
-          apiKeys: normalizeKeys(cfg).map((k) => ({
-            label: k.label,
-            maskedKey: maskedKey(k.apiKey),
-            isActive: k.label === cfg.activeKey,
-            createdAt: k.createdAt,
-          })),
-        })),
-      },
-    });
+    broadcastSaved(ctx, providers);
   } catch (err) {
     sendResult(ctx, ws, false, toErrorMessage(err));
   }
@@ -296,6 +280,7 @@ export async function handleProviderRemove(
     delete providers[providerId];
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Provider "${providerId}" removed`);
+    broadcastSaved(ctx, providers);
   } catch (err) {
     sendResult(ctx, ws, false, toErrorMessage(err));
   }

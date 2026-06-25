@@ -168,10 +168,10 @@ describe('setupSlashCommands', () => {
     const result = await registry.dispatch('/shadow start --interval=5000', fakeContext() as never);
 
     expect((host as { spawn: ReturnType<typeof vi.fn> }).spawn).toHaveBeenCalledWith(
-      'Shadow Agent — background fleet monitor at 5000ms interval',
+      'Shadow Agent — one-shot quiet fleet check',
       expect.objectContaining({ name: 'shadow', shadowIntervalMs: 5000 }),
     );
     expect(shadowController.register).not.toHaveBeenCalled();
-    expect(result?.message).toContain('Shadow Agent spawned');
+    expect(result?.message).toContain('Shadow Agent queued');
   });
 });

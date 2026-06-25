@@ -2,7 +2,7 @@
  * /shadow slash command — Start, manage, and stop the Shadow Agent.
  *
  * Usage:
- *   /shadow start [--interval=<ms>] [--model=<provider/model>]
+ *   /shadow start [--model=<provider/model>]
  *   /shadow stop
  *   /shadow status
  *   /shadow hoop <agent-id>
@@ -20,8 +20,8 @@ const MIN_SHADOW_INTERVAL_MS = 5_000;
 /**
  * /shadow — Shadow Agent management
  *
- * The Shadow Agent is a background monitoring agent that:
- * - Auto-starts on first LLM request (if enabled)
+ * The Shadow Agent is a one-shot monitoring agent that:
+ * - Runs only on explicit request or after the host observes problematic work
  * - Tracks all fleet agents and their current tasks
  * - Monitors mailbox state and detects loops
  * - Identifies spike tasks (start/stop instantly)
@@ -38,8 +38,8 @@ export function buildShadowCommand(opts: SlashCommandContext): SlashCommand {
     argsHint: '<start|stop|status|hoop|model|interval> [--flag=value]',
     help: [
       'Usage:',
-      '  /shadow start [--interval=<ms>] [--model=<provider/model>]',
-      '        Start Shadow Agent with optional interval and model',
+      '  /shadow start [--model=<provider/model>]',
+      '        Run one quiet Shadow Agent fleet check',
       '  /shadow stop',
       '        Stop the Shadow Agent',
       '  /shadow status',
@@ -49,20 +49,21 @@ export function buildShadowCommand(opts: SlashCommandContext): SlashCommand {
       '  /shadow model <provider/model>',
       '        Change Shadow Agent analysis model',
       '  /shadow interval <ms>',
-      '        Change heartbeat interval',
+      '        Change the legacy interval default kept for compatibility',
       '',
       'The Shadow Agent monitors:',
       '  • All fleet agents and their current tasks',
       '  • Mailbox state and message flow',
       '  • Spike tasks (starting/stopping instantly)',
       '  • Fleet-wide activity across all terminals',
-      '  • Uses deterministic rules first, LLM only for complex cases',
+      '  • Uses deterministic host rules first; LLM only for manual/problem cases',
+      '  • Does not post routine healthy reports',
       '',
       'Model must be specified as provider/model, e.g. anthropic/claude-3-5-sonnet',
       'When omitted, Shadow uses the current leader provider/model.',
       '',
       'Examples:',
-      '  /shadow start --interval=15000',
+      '  /shadow start',
       '  /shadow start --model=anthropic/claude-3-5-sonnet',
       '  /shadow status                       Show all agent activity',
       '  /shadow hoop subagent-abc123        Stop agent and notify',
@@ -115,7 +116,7 @@ export function buildShadowCommand(opts: SlashCommandContext): SlashCommand {
           }
 
           const spawnId = await opts.onSpawn(
-            `Shadow Agent — background fleet monitor at ${intervalMs}ms interval`,
+            `Shadow Agent — one-shot quiet fleet check`,
             {
               provider: modelRef.provider,
               model: modelRef.model,
@@ -129,7 +130,7 @@ export function buildShadowCommand(opts: SlashCommandContext): SlashCommand {
             },
           );
 
-          return { message: `${color.green('✓')} Shadow Agent spawned: ${spawnId}\n${color.dim('Interval:')} ${intervalMs}ms\n${color.dim('Model:')} ${modelRef.label}` };
+          return { message: `${color.green('✓')} Shadow Agent queued: ${spawnId}\n${color.dim('Mode:')} one-shot quiet check\n${color.dim('Model:')} ${modelRef.label}` };
         }
 
         case 'stop': {
@@ -231,7 +232,7 @@ export function buildShadowCommand(opts: SlashCommandContext): SlashCommand {
         case 'interval': {
           const [msStr] = rest;
           if (!msStr) {
-            return { message: `/shadow interval <ms> — change heartbeat interval.\nCurrent default: ${DEFAULT_SHADOW_INTERVAL_MS}ms (30 seconds)` };
+            return { message: `/shadow interval <ms> — update the legacy Shadow interval default.\nCurrent default: ${DEFAULT_SHADOW_INTERVAL_MS}ms (30 seconds)` };
           }
           let ms: number;
           try {
