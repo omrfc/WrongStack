@@ -324,22 +324,6 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  packages/tui2:
-    dependencies:
-      '@wrongstack/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: ^25.9.3
-        version: 25.9.3
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(typescript@6.0.3)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-
   packages/webui:
     dependencies:
       '@fontsource-variable/ibm-plex-sans':
