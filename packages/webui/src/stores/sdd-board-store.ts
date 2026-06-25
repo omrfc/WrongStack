@@ -10,7 +10,17 @@ export interface SddBoardColumn {
 
 export interface SddBoardFeedEntry {
   ts: number;
-  kind: 'started' | 'completed' | 'failed' | 'retrying' | 'wave' | 'deadlock';
+  kind:
+    | 'started'
+    | 'completed'
+    | 'failed'
+    | 'retrying'
+    | 'wave'
+    | 'deadlock'
+    | 'verification_failed'
+    | 'conflict'
+    | 'split'
+    | 'supervisor';
   taskShortId?: string;
   agentName?: string;
   text: string;

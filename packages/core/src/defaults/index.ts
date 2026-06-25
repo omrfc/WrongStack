@@ -311,6 +311,7 @@ export { SpecParser } from '../sdd/spec-parser.js';
 export {
   TaskGenerator,
   DefaultTaskStore,
+  extractVerificationCommand,
   type TaskGeneratorOptions,
   type GeneratedTask,
 } from '../sdd/task-generator.js';
@@ -380,7 +381,20 @@ export {
   type SddProgress,
   type WaveResult,
   type RunResult,
+  type SddSubtaskSpec,
+  type SddSupervisorVerdict,
 } from '../sdd/sdd-parallel-run.js';
+export { SddSupervisor, type SddSupervisorOptions } from '../sdd/sdd-supervisor.js';
+export { makeCommandVerifier, type CommandVerifierOptions } from '../sdd/verify-task.js';
+export { makeLlmSubtaskGenerator, type SubtaskGeneratorOptions } from '../sdd/decompose-task.js';
+export {
+  makePreferSideConflictResolver,
+  makeLlmConflictResolver,
+  resolveConflictText,
+  hasConflictMarkers,
+  type ConflictSide,
+  type LlmConflictResolverOptions,
+} from '../sdd/conflict-resolver.js';
 // Live SDD board: model, persistence, projector, run registry.
 export {
   buildBoardTasks,

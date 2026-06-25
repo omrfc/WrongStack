@@ -61,6 +61,13 @@ describe('SddParallelRun — constructor clamps', () => {
     const small = await makeHarness({ parallelSlots: 0 });
     expect((small.run as never as { slots: number }).slots).toBe(1);
   });
+
+  it('defaults to low parallelism (2) and 3 retries so worktrees stay manageable', async () => {
+    const { run } = await makeHarness();
+    expect((run as never as { slots: number }).slots).toBe(2);
+    expect((run as never as { maxRetries: number }).maxRetries).toBe(3);
+    expect((run as never as { maxFailedSweeps: number }).maxFailedSweeps).toBe(2);
+  });
 });
 
 describe('SddParallelRun.executeWave', () => {
@@ -88,6 +95,57 @@ describe('SddParallelRun.executeWave', () => {
     expect(t1After?.status).toBe('pending');
     expect(tracker.getAllNodes({ status: ['failed'] })).toHaveLength(0);
     expect((run as never as { retryMap: Map<string, number> }).retryMap.get(t1.id)).toBe(1);
+  });
+
+  it('re-verifies a conflict-resolved merge and reverts the base when it regresses', async () => {
+    // A fake worktree manager whose merge always lands as `resolved` (i.e. the
+    // conflictResolver rewrote files). verifyTask passes in the worktree (pre-
+    // merge) but FAILS against the integrated base (cwd === projectRoot), so the
+    // engine must revert the squash commit and fail the task — not complete it.
+    const revertCalls: string[] = [];
+    const fakeWorktrees = {
+      allocate: vi.fn(async (ownerId: string) => ({
+        id: ownerId,
+        ownerId,
+        status: 'active',
+        dir: `/wt/${ownerId}`,
+        branch: `b-${ownerId}`,
+        baseBranch: 'main',
+      })),
+      commitAll: vi.fn(async () => {}),
+      baseHead: vi.fn(async () => 'SHA0'),
+      merge: vi.fn(async () => ({ ok: true, resolved: true })),
+      revertBaseTo: vi.fn(async (_h: unknown, sha: string) => {
+        revertCalls.push(sha);
+        return true;
+      }),
+      release: vi.fn(async () => {}),
+    };
+    const verifyTask = vi.fn(async ({ cwd }: { cwd: string }) =>
+      cwd === '/proj' ? { ok: false, reason: 'integration regressed' } : { ok: true },
+    );
+
+    const { run, tracker, t1 } = await makeHarness({
+      maxRetries: 0,
+      worktrees: fakeWorktrees,
+      conflictResolver: async () => true,
+      verifyTask,
+    });
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator();
+
+    const events: string[] = [];
+    (run as never as { emit: (e: string, p: unknown) => void }).emit = ((e: string) => {
+      events.push(e);
+    }) as never;
+
+    await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
+
+    // Reverted to the captured pre-merge tip, surfaced as a verification failure,
+    // and the task is NOT completed.
+    expect(revertCalls).toEqual(['SHA0']);
+    expect(events).toContain('sdd.task.verification_failed');
+    expect(tracker.getAllNodes({ status: ['completed'] })).toHaveLength(0);
+    expect(tracker.getAllNodes({ status: ['failed'] })).toHaveLength(1);
   });
 
   it('marks a task failed once retries are exhausted, formatting the error', async () => {
@@ -288,7 +346,7 @@ describe('SddParallelRun — coordinator + helpers', () => {
   });
 });
 
-function fakeWorktrees() {
+function fakeWorktrees(opts: { merge?: () => { ok: boolean; conflict?: boolean; conflictFiles?: string[] } } = {}) {
   const calls: string[] = [];
   const wm = {
     async allocate(ownerId: string, o: { slugHint?: string; ownerLabel?: string } = {}) {
@@ -315,7 +373,7 @@ function fakeWorktrees() {
     },
     async merge(h: { ownerId: string }) {
       calls.push(`merge:${h.ownerId}`);
-      return { ok: true, conflictFiles: [] };
+      return opts.merge ? opts.merge() : { ok: true, conflictFiles: [] };
     },
     async release(h: { ownerId: string }, o: { keep?: boolean } = {}) {
       calls.push(`release:${h.ownerId}:${o.keep ? 'keep' : 'remove'}`);
@@ -353,13 +411,37 @@ describe('SddParallelRun — Layer 2: worktree isolation', () => {
     );
   });
 
-  it('keeps a failed task worktree for review (no merge)', async () => {
+  it('a merge conflict does not complete the task — terminal-fails + emits sdd.task.conflict', async () => {
+    const events = new EventBus();
+    const seen: string[] = [];
+    events.on('sdd.task.conflict', () => seen.push('conflict'));
+    events.on('sdd.task.completed', () => seen.push('completed'));
+    const wt = fakeWorktrees({ merge: () => ({ ok: false, conflict: true, conflictFiles: ['src/x.ts'] }) });
+    const { run, tracker, t1 } = await makeHarness({ worktrees: wt.wm, maxRetries: 0, events });
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator();
+    await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
+    expect(tracker.getNode(t1.id)?.status).toBe('failed'); // never 'completed'
+    expect(seen).toContain('conflict');
+    expect(seen).not.toContain('completed');
+  });
+
+  it('a merge conflict with retries left requeues to pending (fresh-base retry)', async () => {
+    const wt = fakeWorktrees({ merge: () => ({ ok: false, conflict: true, conflictFiles: ['x'] }) });
+    const { run, tracker, t1 } = await makeHarness({ worktrees: wt.wm, maxRetries: 2 });
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator();
+    await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
+    expect(tracker.getNode(t1.id)?.status).toBe('pending');
+  });
+
+  it('discards a failed task worktree (no merge, no pile-up)', async () => {
     const wt = fakeWorktrees();
     const { run, t1 } = await makeHarness({ worktrees: wt.wm, maxRetries: 0 });
     const coord = fakeCoordinator({ awaitTasks: vi.fn(async (ids: string[]) => ids.map((id) => failResult(id))) });
     (run as never as { coordinator: unknown }).coordinator = coord;
     await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
-    expect(wt.calls).toContain(`release:sdd-${t1.id}:keep`);
+    // Failed checkout is discarded (keep:false) so worktrees don't accumulate;
+    // a genuine merge-conflict handle would be force-kept by the manager itself.
+    expect(wt.calls).toContain(`release:sdd-${t1.id}:remove`);
     expect(wt.calls.some((c) => c.startsWith(`merge:sdd-${t1.id}`))).toBe(false);
   });
 });
@@ -421,6 +503,16 @@ describe('SddParallelRun — task controls (model / cancel / delete)', () => {
     expect(run.setTaskModel('nope', 'x')).toBe(false);
   });
 
+  it('setTaskVerification sets/clears the completion-gate command (trimmed)', async () => {
+    const { run, tracker, t1 } = await makeHarness();
+    expect(run.setTaskVerification(t1.id, '  pnpm vitest run x  ')).toBe(true);
+    expect(tracker.getNode(t1.id)!.metadata!.verificationCommand).toBe('pnpm vitest run x');
+    // Empty / whitespace clears it.
+    expect(run.setTaskVerification(t1.id, '   ')).toBe(true);
+    expect(tracker.getNode(t1.id)!.metadata!.verificationCommand).toBeUndefined();
+    expect(run.setTaskVerification('nope', 'x')).toBe(false);
+  });
+
   it('cancelTask marks a not-running task terminal-cancelled', async () => {
     const { run, tracker, t1 } = await makeHarness();
     expect(await run.cancelTask(t1.id)).toBe(true);
@@ -468,5 +560,221 @@ describe('SddParallelRun — task controls (model / cancel / delete)', () => {
     tracker.updateNodeStatus(t1.id, 'in_progress');
     expect(run.deleteTask(t1.id)).toBe(false);
     expect(tracker.getNode(t1.id)).toBeTruthy();
+  });
+});
+
+describe('SddParallelRun — failed-task retry', () => {
+  /** Drive the real scheduler with a stubbed executeOne whose verdict we control. */
+  function stubExecuteOneWith(
+    run: SddParallelRun,
+    tracker: TaskTracker,
+    verdict: (task: TaskNode, attempt: number) => 'pass' | 'fail',
+  ) {
+    const attempts = new Map<string, number>();
+    vi.spyOn(run as never as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
+    return vi.spyOn(run, 'executeOne').mockImplementation(async (task: TaskNode) => {
+      const n = (attempts.get(task.id) ?? 0) + 1;
+      attempts.set(task.id, n);
+      if (verdict(task, n) === 'fail') {
+        tracker.updateNodeStatus(task.id, 'failed', 'boom');
+        return { taskId: task.id, success: false };
+      }
+      tracker.updateNodeStatus(task.id, 'completed');
+      return { taskId: task.id, success: true };
+    });
+  }
+
+  it('auto-retries a failed task in the end-of-run sweep until it completes', async () => {
+    const { run, tracker, t1 } = await makeHarness();
+    // t1 fails its first dispatch, then succeeds; t2 always passes.
+    stubExecuteOneWith(run, tracker, (task, attempt) =>
+      task.id === t1.id && attempt === 1 ? 'fail' : 'pass',
+    );
+    const result = await run.run();
+    expect(result.totalCompleted).toBe(2);
+    expect(result.totalFailed).toBe(0);
+    expect(tracker.getNode(t1.id)?.status).toBe('completed');
+  });
+
+  it('bounds the sweep — a hopeless task ends failed and is dispatched a finite number of times', async () => {
+    const { run, tracker, t1 } = await makeHarness({ maxFailedRetrySweeps: 2 });
+    let t1Dispatches = 0;
+    stubExecuteOneWith(run, tracker, (task) => {
+      if (task.id === t1.id) {
+        t1Dispatches++;
+        return 'fail';
+      }
+      return 'pass';
+    });
+    const result = await run.run();
+    expect(tracker.getNode(t1.id)?.status).toBe('failed');
+    expect(result.totalFailed).toBe(1);
+    // Initial dispatch + exactly one fruitless sweep: the no-progress guard stops
+    // re-sweeping once a sweep yields no new completions (even though 2 are allowed).
+    expect(t1Dispatches).toBe(2);
+  });
+
+  it('retryAllFailed requeues failed tasks (incl. cancelled) to pending and returns the count', async () => {
+    const { run, tracker, t1, t2 } = await makeHarness();
+    tracker.updateNodeStatus(t1.id, 'failed', 'boom');
+    // t2: terminally failed + cancelled marker (user cancelled it).
+    tracker.updateNodeStatus(t2.id, 'failed', 'cancelled');
+    tracker.patchMetadata(t2.id, { cancelled: true });
+    (run as never as { cancelledTasks: Set<string> }).cancelledTasks.add(t2.id);
+
+    const n = run.retryAllFailed();
+    expect(n).toBe(2);
+    expect(tracker.getNode(t1.id)?.status).toBe('pending');
+    expect(tracker.getNode(t2.id)?.status).toBe('pending');
+    expect(tracker.getNode(t2.id)?.metadata?.cancelled).toBeFalsy();
+  });
+
+  it('the automatic sweep skips cancelled tasks (only the manual button resurrects them)', async () => {
+    const { run, tracker, t1 } = await makeHarness();
+    tracker.updateNodeStatus(t1.id, 'failed', 'cancelled');
+    tracker.patchMetadata(t1.id, { cancelled: true });
+    const n = (run as never as { requeueFailedTasks: (reason?: string) => number }).requeueFailedTasks();
+    expect(n).toBe(0);
+    expect(tracker.getNode(t1.id)?.status).toBe('failed');
+  });
+});
+
+describe('SddParallelRun — completion gate (verification)', () => {
+  it('does NOT complete a task whose verification gate fails — routes to failure path', async () => {
+    const events = new EventBus();
+    const seen: string[] = [];
+    events.on('sdd.task.verification_failed', () => seen.push('verif_failed'));
+    events.on('sdd.task.completed', () => seen.push('completed'));
+    const verifyTask = vi.fn(async () => ({ ok: false, reason: 'tests failed' }));
+    const { run, tracker, t1 } = await makeHarness({ maxRetries: 0, events, verifyTask });
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator(); // worker reports success
+    await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
+    expect(verifyTask).toHaveBeenCalledTimes(1);
+    expect(tracker.getNode(t1.id)?.status).toBe('failed'); // gate rejected the false success
+    expect(seen).toContain('verif_failed');
+    expect(seen).not.toContain('completed');
+  });
+
+  it('completes when the verification gate passes', async () => {
+    const verifyTask = vi.fn(async () => ({ ok: true }));
+    const { run, tracker, t1 } = await makeHarness({ verifyTask });
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator();
+    await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
+    expect(verifyTask).toHaveBeenCalledTimes(1);
+    expect(tracker.getNode(t1.id)?.status).toBe('completed');
+  });
+
+  it('a failing verifier with retries left requeues to pending', async () => {
+    const verifyTask = vi.fn(async () => ({ ok: false, reason: 'nope' }));
+    const { run, tracker, t1 } = await makeHarness({ maxRetries: 2, verifyTask });
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator();
+    await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
+    expect(tracker.getNode(t1.id)?.status).toBe('pending');
+  });
+
+  it('no verifier configured → success completes as before (no-op gate)', async () => {
+    const { run, tracker, t1 } = await makeHarness();
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator();
+    await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
+    expect(tracker.getNode(t1.id)?.status).toBe('completed');
+  });
+});
+
+describe('SddParallelRun — splitTask', () => {
+  it('splits a task into leaves, rewires deps, and completes the parent container', async () => {
+    const { run, tracker, t1, t2 } = await makeHarness();
+    tracker.addDependency(t1.id, t2.id); // t2 depends on t1
+    const leaves = run.splitTask(t1.id, [
+      { title: 'L1', description: 'part 1' },
+      { title: 'L2', description: 'part 2' },
+    ]);
+    expect(leaves).toHaveLength(2);
+    // Parent becomes a completed container.
+    expect(tracker.getNode(t1.id)?.status).toBe('completed');
+    // The former dependent (t2) now waits on every leaf.
+    const t2Blockers = tracker.getBlockers(t2.id);
+    for (const leaf of leaves) expect(t2Blockers).toContain(leaf);
+    // Leaves carry the parent id and start pending.
+    for (const leaf of leaves) {
+      expect(tracker.getNode(leaf)?.parentId).toBe(t1.id);
+      expect(tracker.getNode(leaf)?.status).toBe('pending');
+    }
+  });
+
+  it('leaves inherit the parent\'s blockers', async () => {
+    const { run, tracker, t1, t2 } = await makeHarness();
+    tracker.addDependency(t1.id, t2.id); // t2 depends on t1
+    const leaves = run.splitTask(t2.id, [{ title: 'L', description: 'd' }]);
+    expect(tracker.getBlockers(leaves[0]!)).toContain(t1.id); // leaf inherits t2's blocker
+  });
+
+  it('refuses to split a running task and an empty subtask list', async () => {
+    const { run, tracker, t1 } = await makeHarness();
+    expect(run.splitTask(t1.id, [])).toEqual([]);
+    tracker.updateNodeStatus(t1.id, 'in_progress');
+    expect(run.splitTask(t1.id, [{ title: 'X', description: 'y' }])).toEqual([]);
+  });
+});
+
+describe('SddParallelRun — failure supervisor', () => {
+  // Drive applyTaskFailure directly (private) with retries already exhausted.
+  function makeFailing(overrides: Record<string, unknown> = {}) {
+    return makeHarness({ maxRetries: 0, ...overrides });
+  }
+  const callFailure = (run: SddParallelRun, taskId: string) =>
+    (run as never as { applyTaskFailure: (id: string, sid: string, msg: string) => Promise<void> }).applyTaskFailure(
+      taskId,
+      'sub',
+      'boom',
+    );
+
+  it('a retry verdict requeues the task instead of failing it', async () => {
+    const superviseFailure = vi.fn(async () => ({ action: 'retry' as const }));
+    const { run, tracker, t1 } = await makeFailing({ superviseFailure });
+    await callFailure(run, t1.id);
+    expect(superviseFailure).toHaveBeenCalledTimes(1);
+    expect(tracker.getNode(t1.id)?.status).toBe('pending');
+  });
+
+  it('a reassign verdict swaps the model and requeues', async () => {
+    const superviseFailure = vi.fn(async () => ({ action: 'reassign' as const, model: 'claude-haiku-4-5' }));
+    const { run, tracker, t1 } = await makeFailing({ superviseFailure });
+    await callFailure(run, t1.id);
+    expect(tracker.getNode(t1.id)?.status).toBe('pending');
+    expect(tracker.getNode(t1.id)?.metadata?.model).toBe('claude-haiku-4-5');
+  });
+
+  it('a split verdict splits the task (parent completed)', async () => {
+    const superviseFailure = vi.fn(async () => ({
+      action: 'split' as const,
+      subtasks: [{ title: 'A', description: 'a' }, { title: 'B', description: 'b' }],
+    }));
+    const { run, tracker, t1 } = await makeFailing({ superviseFailure });
+    await callFailure(run, t1.id);
+    expect(tracker.getNode(t1.id)?.status).toBe('completed'); // container
+    expect(tracker.getAllNodes().filter((n) => n.parentId === t1.id)).toHaveLength(2);
+  });
+
+  it('a fail verdict (or none) lets the task terminal-fail', async () => {
+    const superviseFailure = vi.fn(async () => ({ action: 'fail' as const }));
+    const { run, tracker, t1 } = await makeFailing({ superviseFailure });
+    await callFailure(run, t1.id);
+    expect(tracker.getNode(t1.id)?.status).toBe('failed');
+  });
+
+  it('bounds supervisor rescues per task (maxSupervisorEscalations) so it cannot loop forever', async () => {
+    const superviseFailure = vi.fn(async () => ({ action: 'retry' as const }));
+    const { run, tracker, t1 } = await makeFailing({ superviseFailure, maxSupervisorEscalations: 1 });
+    await callFailure(run, t1.id); // rescue #1 → pending
+    expect(tracker.getNode(t1.id)?.status).toBe('pending');
+    await callFailure(run, t1.id); // cap reached → terminal fail
+    expect(tracker.getNode(t1.id)?.status).toBe('failed');
+    expect(superviseFailure).toHaveBeenCalledTimes(1); // not consulted again past the cap
+  });
+
+  it('no supervisor configured → terminal-fails exactly as before', async () => {
+    const { run, tracker, t1 } = await makeFailing();
+    await callFailure(run, t1.id);
+    expect(tracker.getNode(t1.id)?.status).toBe('failed');
   });
 });

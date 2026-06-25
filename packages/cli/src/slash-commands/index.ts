@@ -353,6 +353,13 @@ export interface SlashCommandContext {
   onSddParallelRun?: (opts?: { parallelSlots?: number | undefined }) => Promise<string>;
   /** Stop the currently running SDD parallel fan-out. */
   onSddParallelStop?: (() => void) | undefined;
+  /** Requeue every failed task in the active SDD run to pending. Returns the count requeued. */
+  onSddRetryAllFailed?: (() => number) | undefined;
+  /**
+   * Split a task in the active SDD run into sub-tasks (refused while it runs).
+   * Returns the new leaf ids, or null when there is no active run / unknown task.
+   */
+  onSddSplitTask?: ((taskId: string, subtasks: Array<{ title: string; description: string }>) => string[] | null) | undefined;
   /**
    * Start a real, LLM-driven AutoPhase run from a free-text goal. The host
    * plans phases (each holding many todos), persists the phase-graph as

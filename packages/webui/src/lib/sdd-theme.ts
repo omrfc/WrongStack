@@ -8,13 +8,17 @@
 import {
   AlertTriangle,
   Ban,
+  Brain,
   Check,
   CircleDot,
+  GitMerge,
   Layers,
   Loader2,
   type LucideIcon,
   Play,
   RotateCcw,
+  ShieldAlert,
+  Split,
   X,
 } from 'lucide-react';
 
@@ -171,6 +175,10 @@ export const SDD_FEED_KIND: Record<string, { icon: LucideIcon; color: string }> 
   retrying: { icon: RotateCcw, color: 'text-orange-400' },
   wave: { icon: Layers, color: 'text-violet-400' },
   deadlock: { icon: AlertTriangle, color: 'text-rose-400' },
+  verification_failed: { icon: ShieldAlert, color: 'text-red-400' },
+  conflict: { icon: GitMerge, color: 'text-amber-400' },
+  split: { icon: Split, color: 'text-sky-400' },
+  supervisor: { icon: Brain, color: 'text-fuchsia-400' },
 };
 
 // ── formatters ────────────────────────────────────────────────────────────

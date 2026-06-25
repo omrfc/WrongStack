@@ -11,7 +11,6 @@
     { "path": "./packages/mcp/tsconfig.test.json" },
     { "path": "./packages/plug-lsp" },
     { "path": "./packages/tui" },
-    { "path": "./packages/tui2" },
     { "path": "./packages/webui" },
     { "path": "./packages/cli" },
     { "path": "./packages/bench" },

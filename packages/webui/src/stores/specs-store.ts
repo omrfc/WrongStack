@@ -46,6 +46,8 @@ export interface BoardTaskItem {
   provider?: string | undefined;
   /** Per-task fallback model chain (overrides the run default), if set. */
   fallbackModels?: string[] | undefined;
+  /** Per-task completion-gate verification command, if set. */
+  verificationCommand?: string | undefined;
 }
 
 export interface SpecColumn {

@@ -2448,6 +2448,72 @@ export async function main(argv: string[]): Promise<number> {
       }
 
       const boardStore = new core.SddBoardStore({ baseDir: wpaths.projectSddBoards });
+
+      // Completion gate: when a task declares `metadata.verificationCommand`, run
+      // it in the task's worktree cwd and only let the task complete on exit 0.
+      // No command → no-op (the run's existing guards still apply). Bounded so a
+      // hung verifier can't wedge the run. Shared with the standalone WebUI wizard
+      // via core.makeCommandVerifier so both surfaces gate identically.
+      const verifyTask = core.makeCommandVerifier();
+
+      // Failure supervisor: when a task exhausts its retries, the Brain decides
+      // retry/reassign/fail rather than dead-ending. Safe default (no LLM verdict)
+      // is a bounded retry, so this only ever helps the run keep moving. The
+      // run-level fallback chain (already validated against configured providers)
+      // is offered as `reassignModels`, so a `reassign` verdict rotates the worker
+      // model on retry.
+      // NOTE: `requestLlmVerdict` is intentionally left false here. The CLI brain
+      // is wrapped in HumanEscalatingBrainArbiter, so an `ask_human` escalation
+      // would BLOCK mid-run on a human prompt and wedge the parallel run. With
+      // the default (`fallback: 'continue'`) the policy answers in place — a safe
+      // bounded retry — and `reassignModels` still applies when a brain answers
+      // `reassign`. (Standalone WebUI, whose brain has no human wrapper, enables
+      // it; see sdd-wizard-wiring.ts.)
+      const sddSupervisor = new core.SddSupervisor({
+        brain,
+        reassignModels: core.effectiveFallbackChain(config),
+      });
+
+      // Single per-task subagent factory, shared by the run AND the (optional)
+      // LLM conflict resolver's isolated turns.
+      const sddSubagentFactory = multiAgentHost.makeSubagentFactory(config);
+
+      // Opt-in merge-conflict resolver (default OFF → conservative
+      // retry-on-fresh-base then terminal-fail, which never corrupts the base).
+      // WRONGSTACK_SDD_CONFLICT_RESOLVER=prefer-incoming|prefer-base|llm.
+      // - prefer-*: a blunt one-side rewrite.
+      // - llm:      a semantic merge on a fresh read-only-ish isolated turn.
+      // The WorktreeManager still rejects any rewrite that leaves markers, and the
+      // run re-verifies the integrated base + reverts a regression (when a
+      // verifyTask is set), so a bad resolution degrades safely.
+      const conflictMode = process.env['WRONGSTACK_SDD_CONFLICT_RESOLVER'];
+      const conflictResolver =
+        conflictMode === 'prefer-incoming'
+          ? core.makePreferSideConflictResolver('incoming')
+          : conflictMode === 'prefer-base'
+            ? core.makePreferSideConflictResolver('base')
+            : conflictMode === 'llm'
+              ? core.makeLlmConflictResolver({
+                  run: async (prompt: string): Promise<string> => {
+                    const r = await sddSubagentFactory({
+                      id: `sdd-conflict-${Date.now()}`,
+                      role: 'executor',
+                      name: 'Conflict Resolver',
+                      disabledTools: ['delegate'],
+                      // Only returns the resolved text; the core helper writes the
+                      // file. Keep it on the read-only capability floor.
+                      allowedCapabilities: ['fs.read', 'net.outbound'],
+                    });
+                    try {
+                      const res = await r.agent.run([{ type: 'text', text: prompt }]);
+                      return res.finalText ?? '';
+                    } finally {
+                      await r.dispose?.();
+                    }
+                  },
+                })
+              : undefined;
+
       // Shared run-setup core (also used by the WebUI servers): orphan reset →
       // run → board projector → registry → cross-process control drain.
       const handle = core.startSddRun({
@@ -2457,10 +2523,13 @@ export async function main(argv: string[]): Promise<number> {
         projectRoot,
         events,
         parallelSlots: opts?.parallelSlots,
-        subagentFactory: multiAgentHost.makeSubagentFactory(config),
+        subagentFactory: sddSubagentFactory,
         worktrees,
         boardStore,
         registry: sddRunRegistry,
+        verifyTask,
+        conflictResolver,
+        superviseFailure: sddSupervisor.superviseFailure,
         onProgress: (p: import('@wrongstack/core').SddProgress) => {
           renderer.write(
             `  ░ wave ${p.wave + 1} · ${p.completed}/${p.total} tasks · ${p.percent}% done\n`,
@@ -2485,6 +2554,16 @@ export async function main(argv: string[]): Promise<number> {
     onSddParallelStop: () => {
       const run = (globalThis as SddParallelRunGlobal).__sddParallelRun;
       run?.stop();
+    },
+    onSddRetryAllFailed: () => sddRunRegistry.getActive()?.retryAllFailed() ?? 0,
+    onSddSplitTask: (taskId, subtasks) => {
+      const active = sddRunRegistry.getActive();
+      if (!active) return null;
+      // Accept a board short id or a full id — resolve short→full via the snapshot.
+      const snap = active.snapshot();
+      const match = snap.tasks.find((t) => t.id === taskId || t.shortId === taskId);
+      const ids = active.splitTask(match?.id ?? taskId, subtasks);
+      return ids.length ? ids : null;
     },
     onAutoPhaseStart: autoPhaseHost.onAutoPhaseStart,
     onAutoPhasePause: autoPhaseHost.onAutoPhasePause,

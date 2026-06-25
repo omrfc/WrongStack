@@ -53,10 +53,11 @@ function fakeCtx() {
   } as never;
 }
 
-function build() {
+function build(opts: Record<string, unknown> = {}) {
   return buildSddCommand({
     context: fakeCtx(),
     paths: resolveWstackPaths({ projectRoot: tmp }),
+    ...opts,
   } as never);
 }
 
@@ -337,6 +338,58 @@ describe('buildSddCommand verbs without an active session', () => {
 
   it('spec without a session reports "no active session"', async () => {
     expect((await build().run('spec'))?.message).toContain('No active SDD session');
+  });
+
+  it('retry-failed without an active parallel run reports "no active SDD parallel run"', async () => {
+    expect((await build().run('retry-failed'))?.message).toContain('No active SDD parallel run');
+  });
+
+  it('retry-failed / retry-all calls onSddRetryAllFailed and reports the requeued count', async () => {
+    let called = 0;
+    const onSddRetryAllFailed = () => {
+      called++;
+      return 3;
+    };
+    const res = await build({ onSddRetryAllFailed }).run('retry-failed');
+    expect(called).toBe(1);
+    expect(res?.message).toContain('Requeued 3 failed tasks');
+    const none = await build({ onSddRetryAllFailed: () => 0 }).run('retry-all');
+    expect(none?.message).toContain('No failed tasks to retry');
+  });
+
+  it('split without an active parallel run reports no run', async () => {
+    expect((await build().run('split t1 A ; B'))?.message).toContain(
+      'No active SDD parallel run',
+    );
+  });
+
+  it('split requires a task id and at least two sub-tasks', async () => {
+    const onSddSplitTask = () => ['x1', 'x2'];
+    expect((await build({ onSddSplitTask }).run('split'))?.message).toContain('Usage: /sdd split');
+    expect((await build({ onSddSplitTask }).run('split t1 OnlyOne'))?.message).toContain(
+      'at least two sub-tasks',
+    );
+  });
+
+  it('split parses `Title :: desc ; …` and reports the new leaf ids', async () => {
+    const calls: Array<{ taskId: string; subtasks: Array<{ title: string; description: string }> }> = [];
+    const onSddSplitTask = (taskId: string, subtasks: Array<{ title: string; description: string }>) => {
+      calls.push({ taskId, subtasks });
+      return ['leaf-1', 'leaf-2'];
+    };
+    const res = await build({ onSddSplitTask }).run('split t1 Build API :: do the api ; Write tests');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.taskId).toBe('t1');
+    expect(calls[0]?.subtasks).toEqual([
+      { title: 'Build API', description: 'do the api' },
+      { title: 'Write tests', description: 'Write tests' },
+    ]);
+    expect(res?.message).toContain('Split t1 into 2 sub-tasks: leaf-1, leaf-2');
+  });
+
+  it('split reports when the run rejects the split (null)', async () => {
+    const res = await build({ onSddSplitTask: () => null }).run('split t1 A ; B');
+    expect(res?.message).toContain("unknown / running");
   });
 
   it('tasks / task without an active tracker reports "no tasks generated yet"', async () => {

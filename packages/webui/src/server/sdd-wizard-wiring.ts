@@ -3,10 +3,14 @@ import { spawnSync } from 'node:child_process';
 import {
   type Agent,
   type AgentFactory,
+  type BrainArbiter,
   type EventBus,
+  makeCommandVerifier,
+  makeLlmSubtaskGenerator,
   SddBoardStore,
   SddInterviewDriver,
   SddRunRegistry,
+  SddSupervisor,
   SpecStore,
   startSddRun,
   TaskGraphStore,
@@ -22,6 +26,12 @@ export interface SddWizardWiringOptions {
   projectRoot: string;
   /** Per-task agent factory: CLI's director-backed one, or the runtime light one. */
   subagentFactory: AgentFactory;
+  /**
+   * Decision authority for the failure supervisor (the server's bound
+   * TOKENS.BrainArbiter). Omit to run without a supervisor (plain terminal-fail,
+   * matching a bare run) — but parity with the CLI wants it wired.
+   */
+  brain?: BrainArbiter | undefined;
   /** Persisted-store directories (from resolveWstackPaths). */
   paths: {
     projectSpecs: string;
@@ -39,7 +49,31 @@ export interface SddWizardWiringOptions {
  */
 export function buildSddWizardDeps(opts: SddWizardWiringOptions): SddWizardDeps {
   const registry = new SddRunRegistry();
-  let interviewSeq = 0;
+  let isolatedSeq = 0;
+
+  /**
+   * Run one self-contained, read-only LLM turn on a fresh isolated agent (off the
+   * main chat bus). Shared by the interview and the supervisor's subtask splitter:
+   * both feed a self-embedding prompt, want no shared context, and must NOT edit
+   * the repo (restricted to the read-only capability floor; the execute phase is
+   * where writes happen). The factory's per-turn cleanup is invoked here because
+   * we drive it directly, not via makeAgentSubagentRunner.
+   */
+  const runIsolatedTurn = async (prompt: string, name: string): Promise<string> => {
+    const result = await opts.subagentFactory({
+      id: `sdd-${name.toLowerCase().replace(/\s+/g, '-')}-${isolatedSeq++}`,
+      role: 'executor',
+      name,
+      disabledTools: ['delegate'],
+      allowedCapabilities: ['fs.read', 'net.outbound'],
+    });
+    try {
+      const res = await result.agent.run([{ type: 'text', text: prompt }]);
+      return res.finalText ?? '';
+    } finally {
+      await result.dispose?.();
+    }
+  };
 
   return {
     makeDriver: () =>
@@ -49,30 +83,7 @@ export function buildSddWizardDeps(opts: SddWizardWiringOptions): SddWizardDeps 
         sessionPath: path.join(opts.paths.projectDir, 'sdd-wizard-session.json'),
       }),
 
-    runInterviewTurn: async (prompt: string): Promise<string> => {
-      // Fresh isolated agent per turn — the AISpecBuilder prompt is
-      // self-contained (it re-embeds the full Q&A), so no shared context is
-      // needed and the interview never pollutes the user's main chat.
-      const result = await opts.subagentFactory({
-        id: `sdd-interview-${interviewSeq++}`,
-        role: 'executor',
-        name: 'Spec Architect',
-        disabledTools: ['delegate'],
-        // The interview only asks questions / drafts a spec — it must NOT edit
-        // the repo. Restrict to the read-only capability floor so any write the
-        // model attempts is denied (the execute phase is where writes happen).
-        allowedCapabilities: ['fs.read', 'net.outbound'],
-      });
-      try {
-        const res = await result.agent.run([{ type: 'text', text: prompt }]);
-        return res.finalText ?? '';
-      } finally {
-        // Call the factory's cleanup (per-turn subagent session writer, etc.) —
-        // here we drive the factory directly, not via makeAgentSubagentRunner,
-        // so its finally-block dispose won't fire for us.
-        await result.dispose?.();
-      }
-    },
+    runInterviewTurn: (prompt: string): Promise<string> => runIsolatedTurn(prompt, 'Spec Architect'),
 
     startRun: async (driver, { parallelSlots, defaultModel, defaultProvider, fallbackModels }) => {
       const graph = driver.getGraph();
@@ -95,6 +106,32 @@ export function buildSddWizardDeps(opts: SddWizardWiringOptions): SddWizardDeps 
       }
 
       const boardStore = new SddBoardStore({ baseDir: opts.paths.projectSddBoards });
+
+      // Parity with the CLI `/sdd parallel` path: gate completion on a per-task
+      // verificationCommand and let the Brain rescue a retry-exhausted task
+      // instead of dead-ending. Both are shared with cli-main.ts.
+      const verifyTask = makeCommandVerifier();
+      const superviseFailure = opts.brain
+        ? new SddSupervisor({
+            brain: opts.brain,
+            // The run-level fallback chain (chosen in the wizard) doubles as the
+            // supervisor's reassign options — a `reassign` verdict rotates the
+            // worker model on retry. Empty/undefined → reassign option dropped.
+            reassignModels: fallbackModels,
+            // LLM auto-split: decompose a retry-exhausted task into smaller
+            // sub-tasks on an isolated read-only turn. Heavily validated +
+            // bounded; an empty result degrades the split into a retry.
+            generateSubtasks: makeLlmSubtaskGenerator({
+              run: (prompt) => runIsolatedTurn(prompt, 'Task Splitter'),
+            }),
+            // The standalone brain is a tiered policy→LLM arbiter with NO
+            // human-escalation wrapper (see index.ts), so it never blocks on a
+            // human prompt — an unresolved verdict degrades to a bounded retry.
+            // Safe to let the LLM layer actually pick reassign/split.
+            requestLlmVerdict: true,
+          }).superviseFailure
+        : undefined;
+
       const handle = startSddRun({
         tracker,
         graph,
@@ -109,6 +146,8 @@ export function buildSddWizardDeps(opts: SddWizardWiringOptions): SddWizardDeps 
         defaultModel,
         defaultProvider,
         fallbackModels,
+        verifyTask,
+        superviseFailure,
       });
       // The board surfaces progress (events + disk); we don't block the wizard
       // on completion. Swallow rejections so a failed run can't crash the server.

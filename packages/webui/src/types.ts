@@ -867,6 +867,7 @@ export type WSClientMessage =
   | { type: 'sdd.board.resume'; payload?: { runId?: string | undefined } }
   | { type: 'sdd.board.stop'; payload?: { runId?: string | undefined } }
   | { type: 'sdd.board.retry'; payload: { taskId: string; runId?: string | undefined } }
+  | { type: 'sdd.board.retry_all_failed'; payload?: { runId?: string | undefined } }
   | {
       type: 'sdd.board.reassign';
       payload: { taskId: string; agentName: string; runId?: string | undefined };
@@ -879,8 +880,20 @@ export type WSClientMessage =
       type: 'sdd.board.set_task_fallbacks';
       payload: { taskId: string; fallbackModels?: string[] | undefined; runId?: string | undefined };
     }
+  | {
+      type: 'sdd.board.set_task_verification';
+      payload: { taskId: string; verificationCommand?: string | undefined; runId?: string | undefined };
+    }
   | { type: 'sdd.board.cancel_task'; payload: { taskId: string; runId?: string | undefined } }
   | { type: 'sdd.board.delete_task'; payload: { taskId: string; runId?: string | undefined } }
+  | {
+      type: 'sdd.board.split_task';
+      payload: {
+        taskId: string;
+        subtasks: Array<{ title: string; description: string }>;
+        runId?: string | undefined;
+      };
+    }
   | { type: 'sdd.spec.start'; payload: { goal: string } }
   | { type: 'sdd.spec.message'; payload: { text: string } }
   | { type: 'sdd.spec.approve'; payload?: Record<string, never> }

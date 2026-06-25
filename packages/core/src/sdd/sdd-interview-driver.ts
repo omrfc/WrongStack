@@ -212,7 +212,10 @@ export class SddInterviewDriver {
     if (!spec) return null;
 
     const tracker = new TaskTracker({ store: new DefaultTaskStore() });
-    const generator = new TaskGenerator({ taskTracker: tracker });
+    const generator = new TaskGenerator({
+      taskTracker: tracker,
+      verificationFromAcceptance: process.env['WRONGSTACK_SDD_VERIFY_FROM_ACCEPTANCE'] === '1',
+    });
     const graph = await generator.generateFromSpec(spec);
     this.tracker = tracker;
     this.graph = graph;

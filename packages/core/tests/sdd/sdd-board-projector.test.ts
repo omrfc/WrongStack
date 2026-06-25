@@ -133,6 +133,41 @@ describe('SddBoardProjector', () => {
     proj.dispose();
   });
 
+  it('narrates the robustness events (verification / conflict / split / supervisor)', () => {
+    const g = graph();
+    const tracker = makeTracker(g);
+    const events = new EventBus();
+    const proj = new SddBoardProjector({ runId: 'rr', graph: g, tracker, events, store });
+
+    events.emit('sdd.run.started', { runId: 'rr', graphId: 'g1', specId: 's1', total: 2 });
+    events.emit('sdd.task.verification_failed', { runId: 'rr', taskId: 'a', reason: 'tests failed' });
+    events.emit('sdd.task.conflict', { runId: 'rr', taskId: 'a', conflictFiles: ['src/x.ts', 'src/y.ts'] });
+    events.emit('sdd.task.split', { runId: 'rr', taskId: 'a', subtaskIds: ['a1', 'a2', 'a3'] });
+    events.emit('sdd.supervisor.decision', {
+      runId: 'rr',
+      taskId: 'a',
+      action: 'reassign',
+      rationale: 'try a stronger model',
+    });
+
+    const feed = proj.snapshot().feed ?? [];
+    const verify = feed.find((f) => f.kind === 'verification_failed');
+    expect(verify?.text).toContain('tests failed');
+    const conflict = feed.find((f) => f.kind === 'conflict');
+    expect(conflict?.text).toContain('2 file(s)');
+    expect(conflict?.text).toContain('src/x.ts');
+    expect(feed.find((f) => f.kind === 'split')?.text).toContain('3 sub-task(s)');
+    const sup = feed.find((f) => f.kind === 'supervisor');
+    expect(sup?.text).toContain('reassign');
+    expect(sup?.text).toContain('try a stronger model');
+
+    // Scoped by runId — another run's robustness event is ignored.
+    events.emit('sdd.task.split', { runId: 'OTHER', taskId: 'a', subtaskIds: ['z'] });
+    expect(proj.snapshot().feed?.filter((f) => f.kind === 'split').length).toBe(1);
+
+    proj.dispose();
+  });
+
   it('finalizes + persists on run.finished', async () => {
     const g = graph();
     const tracker = makeTracker(g);

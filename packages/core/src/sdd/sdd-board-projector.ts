@@ -146,6 +146,52 @@ export class SddBoardProjector {
       });
       this.markDirty();
     });
+    // Robustness events (completion gate / merge / supervisor / split) — narrate
+    // "why a task didn't just sail to done" so the board never silently hides a
+    // gate rejection, conflict, or supervisor verdict.
+    this.onRun('sdd.task.verification_failed', (e) => {
+      const sid = this.shortId.get(e.taskId);
+      this.pushFeed({
+        ts: this.now(),
+        kind: 'verification_failed',
+        taskShortId: sid,
+        agentName: this.assigneeOf(e.taskId),
+        text: `${sid ?? 'task'}${this.titleOf(e.taskId)} failed verification — ${e.reason}`,
+      });
+      this.markDirty();
+    });
+    this.onRun('sdd.task.conflict', (e) => {
+      const sid = this.shortId.get(e.taskId);
+      const files = e.conflictFiles.length;
+      this.pushFeed({
+        ts: this.now(),
+        kind: 'conflict',
+        taskShortId: sid,
+        agentName: this.assigneeOf(e.taskId),
+        text: `${sid ?? 'task'}${this.titleOf(e.taskId)} merge conflict — ${files} file(s)${files ? `: ${e.conflictFiles.slice(0, 3).join(', ')}${files > 3 ? '…' : ''}` : ''}`,
+      });
+      this.markDirty();
+    });
+    this.onRun('sdd.task.split', (e) => {
+      const sid = this.shortId.get(e.taskId);
+      this.pushFeed({
+        ts: this.now(),
+        kind: 'split',
+        taskShortId: sid,
+        text: `${sid ?? 'task'}${this.titleOf(e.taskId)} split into ${e.subtaskIds.length} sub-task(s)`,
+      });
+      this.markDirty();
+    });
+    this.onRun('sdd.supervisor.decision', (e) => {
+      const sid = this.shortId.get(e.taskId);
+      this.pushFeed({
+        ts: this.now(),
+        kind: 'supervisor',
+        taskShortId: sid,
+        text: `supervisor → ${e.action} for ${sid ?? 'task'}${this.titleOf(e.taskId)}${e.rationale ? ` (${e.rationale})` : ''}`,
+      });
+      this.markDirty();
+    });
   }
 
   private pushFeed(entry: SddBoardFeedEntry): void {

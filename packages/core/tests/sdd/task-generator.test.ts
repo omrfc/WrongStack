@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DefaultTaskStore, TaskGenerator } from '../../src/sdd/task-generator.js';
+import { DefaultTaskStore, TaskGenerator, extractVerificationCommand } from '../../src/sdd/task-generator.js';
 import { TaskTracker } from '../../src/sdd/task-tracker.js';
 import type { TaskStore } from '../../src/sdd/task-tracker.js';
 import type { TaskGraph } from '../../src/types/task-graph.js';
@@ -495,5 +495,48 @@ describe('DefaultTaskStore', () => {
     it('does nothing for nonexistent graph', async () => {
       await expect(store.deleteGraph('nonexistent')).resolves.not.toThrow();
     });
+  });
+});
+
+describe('extractVerificationCommand', () => {
+  it('recognizes $ / run: / verify: / cmd: markers (first wins)', () => {
+    expect(extractVerificationCommand(['$ pnpm vitest run x'])).toBe('pnpm vitest run x');
+    expect(extractVerificationCommand(['run: npm test'])).toBe('npm test');
+    expect(extractVerificationCommand(['VERIFY:  make check  '])).toBe('make check');
+    expect(extractVerificationCommand(['cmd:lint'])).toBe('lint');
+    expect(extractVerificationCommand(['free text', 'verify: a', 'cmd: b'])).toBe('a');
+  });
+  it('returns undefined for unmarked / empty criteria', () => {
+    expect(extractVerificationCommand([])).toBeUndefined();
+    expect(extractVerificationCommand(['the app should be fast', 'login works'])).toBeUndefined();
+    expect(extractVerificationCommand(['$'])).toBeUndefined();
+  });
+});
+
+describe('TaskGenerator — verificationFromAcceptance (opt-in)', () => {
+  const req = (criteria: string[]): SpecRequirement =>
+    makeRequirement({ id: 'REQ-V', description: 'Gated requirement', acceptanceCriteria: criteria });
+
+  function run(enabled: boolean, criteria: string[]) {
+    const trk = new TaskTracker({ store: makeFakeStore() });
+    const gen = new TaskGenerator({ taskTracker: trk, verificationFromAcceptance: enabled });
+    return gen
+      .generateFromSpec(makeSpec({ requirements: [req(criteria)] }))
+      .then(() => trk.getAllNodes().find((n) => n.specRequirementId === 'REQ-V'));
+  }
+
+  it('is OFF by default — no verificationCommand even with a marked criterion', async () => {
+    const node = await run(false, ['$ pnpm vitest run x']);
+    expect(node?.metadata?.verificationCommand).toBeUndefined();
+  });
+
+  it('extracts a marked command when enabled', async () => {
+    const node = await run(true, ['must be fast', 'verify: pnpm test auth']);
+    expect(node?.metadata?.verificationCommand).toBe('pnpm test auth');
+  });
+
+  it('ignores plain free-text criteria (no marker → no command)', async () => {
+    const node = await run(true, ['the page loads quickly', 'users can log in']);
+    expect(node?.metadata?.verificationCommand).toBeUndefined();
   });
 });

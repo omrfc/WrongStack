@@ -4,6 +4,30 @@ import type { TaskStore, TaskTracker } from './task-tracker.js';
 
 export interface TaskGeneratorOptions {
   taskTracker: TaskTracker;
+  /**
+   * Opt-in (default off): derive each task's completion-gate
+   * `metadata.verificationCommand` from an acceptance criterion that carries a
+   * runnable-command marker (`$ <cmd>`, or `run:`/`verify:`/`cmd:` prefix). Off
+   * by default so the common case stays fast — auto-running a check per task is
+   * exactly the slowness the robustness initiative set out to avoid; enable it
+   * explicitly (the CLI gates it behind WRONGSTACK_SDD_VERIFY_FROM_ACCEPTANCE).
+   */
+  verificationFromAcceptance?: boolean | undefined;
+}
+
+/**
+ * Pull a runnable verification command out of a requirement's acceptance
+ * criteria. A criterion qualifies only when it carries an explicit marker —
+ * `$ <cmd>` (shell-prompt style) or a `run:` / `verify:` / `cmd:` prefix — so
+ * free-text criteria are never mistaken for commands. Returns the first match.
+ */
+export function extractVerificationCommand(criteria: readonly string[]): string | undefined {
+  const marker = /^\s*(?:\$\s+|(?:run|verify|cmd)\s*:\s*)(.+\S)\s*$/i;
+  for (const c of criteria) {
+    const m = marker.exec(c);
+    if (m?.[1]) return m[1].trim();
+  }
+  return undefined;
 }
 
 export interface GeneratedTask {
@@ -108,6 +132,9 @@ export class TaskGenerator {
   private createTaskFromRequirement(
     req: SpecRequirement,
   ): Omit<TaskNode, 'id' | 'createdAt' | 'updatedAt'> {
+    const verificationCommand = this.opts.verificationFromAcceptance
+      ? extractVerificationCommand(req.acceptanceCriteria)
+      : undefined;
     return {
       title: req.description,
       description: this.buildDescription(req),
@@ -117,6 +144,7 @@ export class TaskGenerator {
       specRequirementId: req.id,
       tags: [req.type, req.priority],
       estimateHours: this.estimateHours(req),
+      ...(verificationCommand ? { metadata: { verificationCommand } } : {}),
     };
   }
 

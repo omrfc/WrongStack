@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Cpu, Pause, Play, Square, X, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Cpu, Pause, Play, RotateCcw, Square, X, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useProviderModels } from '@/hooks/useProviderModels';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -108,6 +108,10 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
     (taskId: string) => send({ type: 'sdd.board.retry', payload: { taskId } }),
     [send],
   );
+  const onRetryAllFailed = useCallback(
+    () => send({ type: 'sdd.board.retry_all_failed', payload: {} }),
+    [send],
+  );
   const onReassign = useCallback(
     (taskId: string, agentName: string) => {
       const name = agentName.trim();
@@ -120,6 +124,11 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
       send({ type: 'sdd.board.set_task_model', payload: { taskId, model, provider } }),
     [send],
   );
+  const onSetVerification = useCallback(
+    (taskId: string, verificationCommand: string | undefined) =>
+      send({ type: 'sdd.board.set_task_verification', payload: { taskId, verificationCommand } }),
+    [send],
+  );
   const onCancel = useCallback(
     (taskId: string) => send({ type: 'sdd.board.cancel_task', payload: { taskId } }),
     [send],
@@ -128,6 +137,13 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
     (taskId: string) => {
       send({ type: 'sdd.board.delete_task', payload: { taskId } });
       setSelectedTaskId(null); // the task is gone — drop the drawer selection
+    },
+    [send],
+  );
+  const onSplit = useCallback(
+    (taskId: string, subtasks: Array<{ title: string; description: string }>) => {
+      send({ type: 'sdd.board.split_task', payload: { taskId, subtasks } });
+      setSelectedTaskId(null); // parent becomes a container — close the drawer
     },
     [send],
   );
@@ -193,6 +209,16 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
                   </button>
                 ))}
               </div>
+            )}
+            {active && (p?.failed ?? 0) > 0 && (
+              <button
+                type="button"
+                onClick={onRetryAllFailed}
+                title="Requeue every failed task to pending"
+                className="inline-flex items-center gap-1 rounded-md bg-orange-500/15 px-2.5 py-1 text-xs font-medium text-orange-600 dark:text-orange-300 hover:bg-orange-500/25"
+              >
+                <RotateCcw className="h-3.5 w-3.5" /> Retry failed ({p?.failed})
+              </button>
             )}
             {active && (
               <>
@@ -346,6 +372,7 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
           <aside className="w-80 shrink-0 border-l border-border bg-card">
             {selectedTask ? (
               <SddTaskDrawer
+                key={selectedTask.id}
                 task={selectedTask}
                 allTasks={snapshot.tasks}
                 feed={snapshot.feed ?? []}
@@ -356,8 +383,10 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
                 onRetry={onRetry}
                 onReassign={onReassign}
                 onSetModel={onSetModel}
+                onSetVerification={onSetVerification}
                 onCancel={onCancel}
                 onDelete={onDelete}
+                onSplit={onSplit}
                 onSelectTask={setSelectedTaskId}
               />
             ) : (

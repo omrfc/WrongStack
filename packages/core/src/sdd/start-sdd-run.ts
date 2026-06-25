@@ -17,7 +17,12 @@ import type { WorktreeManager } from '../worktree/worktree-manager.js';
 import { SddBoardProjector } from './sdd-board-projector.js';
 import type { SddBoardStore } from './sdd-board-store.js';
 import type { SddRunRegistry } from './sdd-run-registry.js';
-import { SddParallelRun, type RunResult, type SddProgress } from './sdd-parallel-run.js';
+import {
+  SddParallelRun,
+  type RunResult,
+  type SddProgress,
+  type SddParallelRunOptions,
+} from './sdd-parallel-run.js';
 
 export interface StartSddRunOptions {
   tracker: TaskTracker;
@@ -37,6 +42,14 @@ export interface StartSddRunOptions {
   taskTimeoutMs?: number | undefined;
   /** Idle reaper per task (ms); resets on activity. Default 600_000 (10 min). */
   taskIdleTimeoutMs?: number | undefined;
+  /** End-of-run failed-task auto-retry sweeps (bounded). Default 2. */
+  maxFailedRetrySweeps?: number | undefined;
+  /** Post-task verification gate (forwarded to SddParallelRun). Omit → no gate. */
+  verifyTask?: SddParallelRunOptions['verifyTask'];
+  /** Merge-conflict resolver (forwarded to SddParallelRun). Omit → retry-on-fresh-base then fail. */
+  conflictResolver?: SddParallelRunOptions['conflictResolver'];
+  /** Failure supervisor (forwarded to SddParallelRun). Omit → no rescue, plain terminal-fail. */
+  superviseFailure?: SddParallelRunOptions['superviseFailure'];
   /** Run-level default worker model / provider / fallback chain (task overrides win). */
   defaultModel?: string | undefined;
   defaultProvider?: string | undefined;
@@ -79,6 +92,10 @@ export function startSddRun(opts: StartSddRunOptions): SddRunHandle {
     parallelSlots: opts.parallelSlots,
     taskTimeoutMs: opts.taskTimeoutMs,
     taskIdleTimeoutMs: opts.taskIdleTimeoutMs,
+    maxFailedRetrySweeps: opts.maxFailedRetrySweeps,
+    verifyTask: opts.verifyTask,
+    conflictResolver: opts.conflictResolver,
+    superviseFailure: opts.superviseFailure,
     subagentFactory: opts.subagentFactory,
     events: opts.events,
     worktrees: opts.worktrees,
@@ -109,11 +126,14 @@ export function startSddRun(opts: StartSddRunOptions): SddRunHandle {
     resume: () => run.resume(),
     stop: () => run.stop(),
     retryTask: (id) => run.retryTask(id),
+    retryAllFailed: () => run.retryAllFailed(),
     reassignTask: (id, name) => run.reassignTask(id, name),
     setTaskModel: (id, model, provider) => run.setTaskModel(id, model, provider),
     setTaskFallbacks: (id, fb) => run.setTaskFallbacks(id, fb),
+    setTaskVerification: (id, cmd) => run.setTaskVerification(id, cmd),
     cancelTask: (id) => run.cancelTask(id),
     deleteTask: (id) => run.deleteTask(id),
+    splitTask: (id, subtasks) => run.splitTask(id, subtasks),
     snapshot: () => projector.snapshot(),
     isRunning: () => run.isRunning(),
   });
@@ -131,16 +151,22 @@ export function startSddRun(opts: StartSddRunOptions): SddRunHandle {
           model?: string;
           provider?: string;
           fallbackModels?: string[];
+          verificationCommand?: string;
+          subtasks?: import('./sdd-parallel-run.js').SddSubtaskSpec[];
         };
         if (c.type === 'pause') run.pause();
         else if (c.type === 'resume') run.resume();
         else if (c.type === 'stop') run.stop();
         else if (c.type === 'retry' && p.taskId) run.retryTask(p.taskId);
+        else if (c.type === 'retry_all_failed') run.retryAllFailed();
         else if (c.type === 'reassign' && p.taskId) run.reassignTask(p.taskId, p.agentName ?? '');
         else if (c.type === 'set_task_model' && p.taskId) run.setTaskModel(p.taskId, p.model, p.provider);
         else if (c.type === 'set_task_fallbacks' && p.taskId) run.setTaskFallbacks(p.taskId, p.fallbackModels);
+        else if (c.type === 'set_task_verification' && p.taskId)
+          run.setTaskVerification(p.taskId, p.verificationCommand);
         else if (c.type === 'cancel_task' && p.taskId) void run.cancelTask(p.taskId);
         else if (c.type === 'delete_task' && p.taskId) run.deleteTask(p.taskId);
+        else if (c.type === 'split_task' && p.taskId && p.subtasks?.length) run.splitTask(p.taskId, p.subtasks);
       }
     });
   }, drainMs);

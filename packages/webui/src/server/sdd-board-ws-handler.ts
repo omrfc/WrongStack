@@ -17,12 +17,15 @@ const CONTROL_TYPES = new Set([
   'resume',
   'stop',
   'retry',
+  'retry_all_failed',
   'reassign',
-  // Per-task model / fallback assignment + stop/delete (drained by start-sdd-run).
+  // Per-task model / fallback / verification assignment + stop/delete (drained by start-sdd-run).
   'set_task_model',
   'set_task_fallbacks',
+  'set_task_verification',
   'cancel_task',
   'delete_task',
+  'split_task',
 ]);
 
 /**

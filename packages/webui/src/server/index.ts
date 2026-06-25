@@ -1312,6 +1312,7 @@ export async function startWebUI(
       agent,
       events,
       projectRoot,
+      brain,
       subagentFactory: makeLightSubagentFactory({
         container,
         providerRegistry,

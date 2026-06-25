@@ -29,6 +29,20 @@ const PRIORITY: Record<string, string> = {
   low: 'gray',
 };
 
+/** Activity-feed kind → glyph + colour (mirrors the WebUI SDD_FEED_KIND). */
+const FEED_KIND: Record<string, { icon: string; color: string }> = {
+  started: { icon: '▶', color: 'yellow' },
+  completed: { icon: '✓', color: 'green' },
+  failed: { icon: '✗', color: 'red' },
+  retrying: { icon: '↻', color: 'yellow' },
+  wave: { icon: '≋', color: 'magenta' },
+  deadlock: { icon: '⚠', color: 'red' },
+  verification_failed: { icon: '⛊', color: 'red' },
+  conflict: { icon: '⑂', color: 'yellow' },
+  split: { icon: '⋔', color: 'cyan' },
+  supervisor: { icon: '✦', color: 'magenta' },
+};
+
 function clip(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
@@ -76,6 +90,8 @@ export function SddBoardOverlay({
   const byShort = new Map<string, SddBoardTask>(snapshot.tasks.map((t) => [t.shortId, t]));
   const p = snapshot.progress;
   const chains = snapshot.diagnostics?.deadlockChains ?? [];
+  // Most-recent-first feed; the projector already caps + orders it.
+  const recentFeed = (snapshot.feed ?? []).slice(0, 6);
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
@@ -136,6 +152,26 @@ export function SddBoardOverlay({
           ))}
         </Box>
       )}
+
+      {/* Recent activity — narrates verification / conflict / split / supervisor
+          alongside the usual task lifecycle so the overlay isn't board-only. */}
+      {recentFeed.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color="cyan">
+            Recent activity
+          </Text>
+          <Text dimColor>{'─'.repeat(12)}</Text>
+          {recentFeed.map((f, i) => {
+            const k = FEED_KIND[f.kind] ?? FEED_KIND.started;
+            return (
+              <Box key={`${f.ts}-${i}`} flexDirection="row" gap={1}>
+                <Text color={k?.color ?? 'white'}>{k?.icon ?? '•'}</Text>
+                <Text dimColor>{clip(f.text, 70)}</Text>
+              </Box>
+            );
+          })}
+        </Box>
+      ) : null}
     </Box>
   );
 }

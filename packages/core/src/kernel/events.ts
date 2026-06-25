@@ -631,6 +631,19 @@ export interface EventMap {
   'sdd.task.failed': { runId: string; taskId: string; subagentId: string; error: string };
   /** A failed task was requeued for another attempt. */
   'sdd.task.retrying': { runId: string; taskId: string; attempt: number; maxRetries: number };
+  /** A task's worker reported success but the post-task verification gate rejected it. */
+  'sdd.task.verification_failed': { runId: string; taskId: string; reason: string };
+  /** A completed task's worktree could not be merged back into the base branch. */
+  'sdd.task.conflict': { runId: string; taskId: string; conflictFiles: string[] };
+  /** A task was split into sub-tasks (the parent becomes a completed container). */
+  'sdd.task.split': { runId: string; taskId: string; subtaskIds: string[] };
+  /** The supervisor made a decision about a failing/stuck task. */
+  'sdd.supervisor.decision': {
+    runId: string;
+    taskId: string;
+    action: 'retry' | 'reassign' | 'split' | 'fail';
+    rationale?: string | undefined;
+  };
   /** A new wave of dependency-ready tasks began. */
   'sdd.wave': { runId: string; wave: number; batchSize: number };
   /** No runnable tasks remain but some are still blocked — with the blocking chains. */

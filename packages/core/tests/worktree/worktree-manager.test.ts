@@ -276,6 +276,45 @@ describe.skipIf(!gitAvailable)('WorktreeManager (real repo)', () => {
     }
   }, 120_000);
 
+  it('baseHead + revertBaseTo undo a resolved squash-merge back to the captured tip', async () => {
+    const base = await makeRepo();
+    try {
+      const wm = new WorktreeManager({ projectRoot: base });
+      const h = await wm.allocate('p', { slugHint: 'revert-resolved' });
+
+      await fs.writeFile(path.join(h.dir, 'seed.txt'), 'line1\nWORKTREE\nline3\n');
+      await wm.commitAll(h, 'edit on branch');
+      await fs.writeFile(path.join(base, 'seed.txt'), 'line1\nBASE\nline3\n');
+      spawnSync('git', ['-C', base, 'commit', '-aqm', 'edit on base'], { stdio: 'ignore', env: GIT_ENV });
+
+      // Capture the base tip BEFORE the merge (the revert target).
+      const preSha = await wm.baseHead(h);
+      expect(preSha).toBeTruthy();
+
+      const m = await wm.merge(h, {
+        squash: true,
+        resolve: async ({ cwd }) => {
+          await fs.writeFile(path.join(cwd, 'seed.txt'), 'line1\nBASE+WORKTREE\nline3\n');
+          return true;
+        },
+      });
+      expect(m.ok).toBe(true);
+      expect(m.resolved).toBe(true);
+      // The squash-resolution commit advanced base.
+      const after = spawnSync('git', ['-C', base, 'log', '-1', '--pretty=%H'], { encoding: 'utf8', env: GIT_ENV });
+      expect(after.stdout.trim()).not.toBe(preSha);
+
+      // Revert undoes it: base tip + tree are back to the pre-merge state.
+      expect(await wm.revertBaseTo(h, preSha!)).toBe(true);
+      const reverted = spawnSync('git', ['-C', base, 'log', '-1', '--pretty=%H'], { encoding: 'utf8', env: GIT_ENV });
+      expect(reverted.stdout.trim()).toBe(preSha);
+      const onBase = await fs.readFile(path.join(base, 'seed.txt'), 'utf8');
+      expect(onBase.replace(/\r/g, '')).toBe('line1\nBASE\nline3\n');
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it('resolve callback that leaves markers → aborts to needs-review (never commits)', async () => {
     const base = await makeRepo();
     try {

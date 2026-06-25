@@ -53,6 +53,8 @@ export interface SddBoardTask {
   provider?: string | undefined;
   /** Per-task fallback model chain (overrides the run default), if set. */
   fallbackModels?: string[] | undefined;
+  /** Per-task completion-gate verification command, if set. */
+  verificationCommand?: string | undefined;
 }
 
 /** A topological column: tasks whose deepest dependency chain is `depth`. */
@@ -72,7 +74,17 @@ export interface SddDeadlockChain {
 /** One entry in the live activity feed (the board's "what just happened" ticker). */
 export interface SddBoardFeedEntry {
   ts: number;
-  kind: 'started' | 'completed' | 'failed' | 'retrying' | 'wave' | 'deadlock';
+  kind:
+    | 'started'
+    | 'completed'
+    | 'failed'
+    | 'retrying'
+    | 'wave'
+    | 'deadlock'
+    | 'verification_failed'
+    | 'conflict'
+    | 'split'
+    | 'supervisor';
   /** Short id of the task this entry concerns, when applicable. */
   taskShortId?: string | undefined;
   /** Worker involved, when applicable. */
@@ -182,6 +194,8 @@ export function buildBoardTasks(graph: TaskGraph): {
       model: typeof meta['model'] === 'string' ? (meta['model'] as string) : undefined,
       provider: typeof meta['provider'] === 'string' ? (meta['provider'] as string) : undefined,
       fallbackModels: Array.isArray(meta['fallbackModels']) ? (meta['fallbackModels'] as string[]) : undefined,
+      verificationCommand:
+        typeof meta['verificationCommand'] === 'string' ? (meta['verificationCommand'] as string) : undefined,
     };
   };
 

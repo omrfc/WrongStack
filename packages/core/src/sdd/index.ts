@@ -5,6 +5,7 @@ export { SpecParser } from './spec-parser.js';
 export {
   TaskGenerator,
   DefaultTaskStore,
+  extractVerificationCommand,
   type TaskGeneratorOptions,
   type GeneratedTask,
 } from './task-generator.js';
@@ -118,4 +119,17 @@ export {
   type SddProgress,
   type WaveResult,
   type RunResult,
+  type SddSubtaskSpec,
+  type SddSupervisorVerdict,
 } from './sdd-parallel-run.js';
+export { SddSupervisor, type SddSupervisorOptions } from './sdd-supervisor.js';
+export { makeCommandVerifier, type CommandVerifierOptions } from './verify-task.js';
+export { makeLlmSubtaskGenerator, type SubtaskGeneratorOptions } from './decompose-task.js';
+export {
+  makePreferSideConflictResolver,
+  makeLlmConflictResolver,
+  resolveConflictText,
+  hasConflictMarkers,
+  type ConflictSide,
+  type LlmConflictResolverOptions,
+} from './conflict-resolver.js';

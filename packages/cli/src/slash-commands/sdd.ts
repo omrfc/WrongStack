@@ -317,6 +317,56 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
           return { message: 'SDD parallel run stopped.' };
         }
 
+        case 'retry-failed':
+        case 'retry-all': {
+          if (!opts.onSddRetryAllFailed) {
+            return { message: 'No active SDD parallel run to retry.' };
+          }
+          const n = opts.onSddRetryAllFailed();
+          return {
+            message:
+              n > 0
+                ? `Requeued ${n} failed task${n === 1 ? '' : 's'} to pending.`
+                : 'No failed tasks to retry.',
+          };
+        }
+
+        case 'split': {
+          if (!opts.onSddSplitTask) {
+            return { message: 'No active SDD parallel run to split a task in.' };
+          }
+          // Syntax: /sdd split <task> <subtitle :: desc ; subtitle :: desc ; …>
+          // taskId is the first token; the remainder is `;`-separated sub-tasks,
+          // each `Title :: description` (description optional → defaults to title).
+          const taskId = restArgs[0];
+          if (!taskId) {
+            return { message: 'Usage: /sdd split <task-id> <subtask ; subtask ; …>' };
+          }
+          const subtasks = restArgs
+            .slice(1)
+            .join(' ')
+            .split(';')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((piece) => {
+              const [title, ...rest] = piece.split('::');
+              const t = (title ?? '').trim();
+              const d = rest.join('::').trim();
+              return { title: t, description: d || t };
+            })
+            .filter((s) => s.title);
+          if (subtasks.length < 2) {
+            return { message: 'Provide at least two sub-tasks: /sdd split <task-id> <A ; B>' };
+          }
+          const ids = opts.onSddSplitTask(taskId, subtasks);
+          if (ids === null) {
+            return { message: `No active run, or task "${taskId}" is unknown / running (can't split).` };
+          }
+          return {
+            message: `Split ${taskId} into ${ids.length} sub-task${ids.length === 1 ? '' : 's'}: ${ids.join(', ')}`,
+          };
+        }
+
         case 'plan':
         case 'impl': {
           const planBuilder = sddState.getBuilder();

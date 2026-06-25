@@ -286,6 +286,31 @@ export class WorktreeManager {
   }
 
   /**
+   * Current tip SHA of a handle's base branch (without checking it out). Capture
+   * this before a merge so a regressed merge can be reverted to exactly this
+   * commit — unambiguous even when a squash produced no diff. Returns null on
+   * failure (caller then skips the revert).
+   */
+  async baseHead(handle: WorktreeHandle): Promise<string | null> {
+    const res = await this.runGit(['rev-parse', handle.baseBranch], this.projectRoot);
+    const sha = res.stdout.trim();
+    return res.code === 0 && sha ? sha : null;
+  }
+
+  /**
+   * Hard-reset the base branch back to `sha` (a value previously returned by
+   * {@link baseHead}). Used to undo a squash-merge whose integrated result failed
+   * re-verification, so an auto-resolved-but-broken merge never sticks on base.
+   * Safe because SDD merges are serialized — no other commit lands in between.
+   */
+  async revertBaseTo(handle: WorktreeHandle, sha: string): Promise<boolean> {
+    const co = await this.runGit(['checkout', handle.baseBranch], this.projectRoot);
+    if (co.code !== 0) return false;
+    const reset = await this.runGit(['reset', '--hard', sha], this.projectRoot);
+    return reset.code === 0;
+  }
+
+  /**
    * Run the caller-supplied resolver against a conflicted squash-merge, then
    * commit if it cleared every marker. Returns a successful `MergeResult` on a
    * clean resolution, or `null` to signal the caller should fall back to the
