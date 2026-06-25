@@ -14,6 +14,7 @@
  * The picker never spawns anything itself, so it is safe to unit-test in
  * isolation. Shell *resolution* (finding the actual binary on PATH) lives in
  * `_win32-resolve.ts` and runs at spawn time.
+ * @see {@link ../../docs/configuration.md#windows-shell-selection-wrongstackshell} for user-facing documentation of the WRONGSTACK_SHELL env var and auto-detection behavior.
  *
  * Selection precedence (Windows only):
  *   1. `WRONGSTACK_SHELL` env var, if it names a known shell (cmd | powershell
