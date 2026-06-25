@@ -27,6 +27,9 @@
  * On non-Windows the picker is a no-op — bash.ts already routes through
  * `/bin/bash -c`. We return `'cmd'` as a sentinel value that means "the
  * platform default"; bash.ts maps it to the right binary.
+ *
+ * See docs/configuration.md § "Windows shell selection (WRONGSTACK_SHELL)" for
+ * user-facing documentation of the env var and auto-detection behaviour.
  */
 
 export type BashShell = 'cmd' | 'powershell' | 'pwsh';
