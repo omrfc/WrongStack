@@ -127,7 +127,9 @@ export { makeCommandVerifier, type CommandVerifierOptions } from './verify-task.
 export { makeLlmSubtaskGenerator, type SubtaskGeneratorOptions } from './decompose-task.js';
 export {
   makePreferSideConflictResolver,
+  makeLlmConflictResolver,
   resolveConflictText,
   hasConflictMarkers,
   type ConflictSide,
+  type LlmConflictResolverOptions,
 } from './conflict-resolver.js';

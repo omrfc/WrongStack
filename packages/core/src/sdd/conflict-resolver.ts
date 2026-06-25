@@ -99,3 +99,93 @@ export function makePreferSideConflictResolver(side: ConflictSide) {
     return true;
   };
 }
+
+export interface LlmConflictResolverOptions {
+  /** Runs one self-contained, isolated LLM turn and resolves its final text. */
+  run: (prompt: string) => Promise<string>;
+  /**
+   * Reject a resolution that shrinks the file below this fraction of its original
+   * non-marker line count — a crude guard against the model dropping content.
+   * Default 0.5.
+   */
+  minRetainedFraction?: number;
+}
+
+/** Strip a single surrounding ``` code fence (any/no language) if present. */
+function unfence(text: string): string {
+  const m = text.match(/^[\s\S]*?```[^\n]*\n([\s\S]*?)\n```[\s\S]*$/);
+  return m?.[1] !== undefined ? m[1] : text.trim();
+}
+
+/** Original line count ignoring conflict-marker lines (the resolution baseline). */
+function nonMarkerLineCount(text: string): number {
+  return text.split('\n').filter((l) => {
+    const m = l.slice(0, 7);
+    return m !== START && m !== SEP && m !== END && m !== BASE;
+  }).length;
+}
+
+/**
+ * Build an LLM-backed `conflictResolver`: for each conflicted file it asks the
+ * model (via one isolated `run` turn) to produce the fully resolved file and
+ * writes it back. Heavily guarded — returns false (→ conservative abort/retry)
+ * if the model leaves a marker, returns junk, or drops too much content. The
+ * WorktreeManager STILL rejects any surviving marker, and (when a `verifyTask`
+ * is configured) the run re-verifies the integrated base and reverts a
+ * regression — so a bad LLM merge can never silently stick. OFF by default.
+ */
+export function makeLlmConflictResolver(opts: LlmConflictResolverOptions) {
+  const minFraction = opts.minRetainedFraction ?? 0.5;
+
+  return async function conflictResolver(info: {
+    task: TaskNode;
+    conflictFiles: string[];
+    cwd: string;
+  }): Promise<boolean> {
+    if (info.conflictFiles.length === 0) return false;
+    for (const rel of info.conflictFiles) {
+      const abs = isAbsolute(rel) ? rel : join(info.cwd, rel);
+      let content: string;
+      try {
+        content = await readFile(abs, 'utf8');
+      } catch {
+        return false;
+      }
+      if (!hasConflictMarkers(content)) continue; // already clean — nothing to do
+
+      const prompt = [
+        'You are resolving a git MERGE CONFLICT in a single file. Below is the',
+        'full file with conflict markers (<<<<<<<, =======, >>>>>>>, and possibly',
+        '||||||| for diff3). Combine both sides into the correct, complete file —',
+        'keep ALL non-conflicting content verbatim and reconcile each hunk sensibly.',
+        'Return ONLY the fully resolved file contents (no conflict markers, no',
+        'commentary), optionally wrapped in a single ``` code fence.',
+        '',
+        `File: ${rel}`,
+        '--- BEGIN ---',
+        content,
+        '--- END ---',
+      ].join('\n');
+
+      let out: string;
+      try {
+        out = await opts.run(prompt);
+      } catch {
+        return false;
+      }
+      const resolved = unfence(out ?? '');
+      if (!resolved.trim() || hasConflictMarkers(resolved)) return false;
+      // Content-drop guard: a resolution far smaller than the original almost
+      // certainly lost real work — abort rather than write it.
+      if (resolved.split('\n').length < Math.floor(nonMarkerLineCount(content) * minFraction)) {
+        return false;
+      }
+      try {
+        await writeFile(abs, resolved, 'utf8');
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
+}

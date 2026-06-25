@@ -76,9 +76,12 @@ goes bad:
   a runnable marker (`$ <cmd>`, or a `run:`/`verify:`/`cmd:` prefix).
 - **Mergeable worktrees.** A completed task is only marked done after a clean
   squash-merge of its worktree. An unresolved conflict retries on a fresh base,
-  then fails — never a silent "completed". An opt-in heuristic resolver is
-  available via `WRONGSTACK_SDD_CONFLICT_RESOLVER=prefer-incoming|prefer-base`
-  (default off → the conservative retry-then-fail path).
+  then fails — never a silent "completed". An opt-in resolver is available via
+  `WRONGSTACK_SDD_CONFLICT_RESOLVER=prefer-incoming|prefer-base|llm` (default off
+  → the conservative retry-then-fail path); `llm` does a semantic merge on an
+  isolated turn. Any resolver is safety-netted: the WorktreeManager rejects a
+  rewrite that leaves markers, and a resolved merge is re-verified against the
+  integrated base and reverted on regression (when a `verificationCommand` is set).
 - **Failure supervisor.** When a task exhausts its retries, a `BrainArbiter`
   decides retry / reassign (rotate the worker model through the fallback chain) /
   split (LLM decomposition) / fail. The CLI keeps the conservative bounded-retry

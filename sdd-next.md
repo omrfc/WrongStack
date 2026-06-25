@@ -222,7 +222,10 @@ a specific task.
 > resolver rewrote files (`MergeResult.resolved`) is re-verified against the integrated base; on
 > regression the squash commit is reverted (`WorktreeManager.baseHead` captured pre-merge +
 > `revertBaseTo`) and the task fails (retry on fresh base) — an auto-resolution can never silently
-> stick a broken base. **Deferred:** an LLM-backed resolver (the heuristic is the only tier).
+> stick a broken base. **LLM resolver tier ✅ DONE (2026-06-25):** `makeLlmConflictResolver` does a
+> semantic merge on an isolated read-only turn (guards: unfence, marker-free, content-drop
+> fraction); CLI opt-in via `WRONGSTACK_SDD_CONFLICT_RESOLVER=llm`. Bounded by the same
+> marker-reject + verify-after-merge-revert safety nets. **Nothing left deferred in P4.**
 
 `integrateWorktree` accepts a `conflictResolver` but the CLI/standalone wiring injects none, so an
 unresolved conflict always degrades to a fresh-base retry then terminal-fail. That is correct and

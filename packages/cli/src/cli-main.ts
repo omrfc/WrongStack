@@ -2474,18 +2474,45 @@ export async function main(argv: string[]): Promise<number> {
         reassignModels: core.effectiveFallbackChain(config),
       });
 
+      // Single per-task subagent factory, shared by the run AND the (optional)
+      // LLM conflict resolver's isolated turns.
+      const sddSubagentFactory = multiAgentHost.makeSubagentFactory(config);
+
       // Opt-in merge-conflict resolver (default OFF → conservative
       // retry-on-fresh-base then terminal-fail, which never corrupts the base).
-      // WRONGSTACK_SDD_CONFLICT_RESOLVER=prefer-incoming|prefer-base enables a
-      // blunt one-side resolver; the WorktreeManager still rejects any rewrite
-      // that leaves conflict markers, so a bad resolution degrades safely.
+      // WRONGSTACK_SDD_CONFLICT_RESOLVER=prefer-incoming|prefer-base|llm.
+      // - prefer-*: a blunt one-side rewrite.
+      // - llm:      a semantic merge on a fresh read-only-ish isolated turn.
+      // The WorktreeManager still rejects any rewrite that leaves markers, and the
+      // run re-verifies the integrated base + reverts a regression (when a
+      // verifyTask is set), so a bad resolution degrades safely.
       const conflictMode = process.env['WRONGSTACK_SDD_CONFLICT_RESOLVER'];
       const conflictResolver =
         conflictMode === 'prefer-incoming'
           ? core.makePreferSideConflictResolver('incoming')
           : conflictMode === 'prefer-base'
             ? core.makePreferSideConflictResolver('base')
-            : undefined;
+            : conflictMode === 'llm'
+              ? core.makeLlmConflictResolver({
+                  run: async (prompt: string): Promise<string> => {
+                    const r = await sddSubagentFactory({
+                      id: `sdd-conflict-${Date.now()}`,
+                      role: 'executor',
+                      name: 'Conflict Resolver',
+                      disabledTools: ['delegate'],
+                      // Only returns the resolved text; the core helper writes the
+                      // file. Keep it on the read-only capability floor.
+                      allowedCapabilities: ['fs.read', 'net.outbound'],
+                    });
+                    try {
+                      const res = await r.agent.run([{ type: 'text', text: prompt }]);
+                      return res.finalText ?? '';
+                    } finally {
+                      await r.dispose?.();
+                    }
+                  },
+                })
+              : undefined;
 
       // Shared run-setup core (also used by the WebUI servers): orphan reset →
       // run → board projector → registry → cross-process control drain.
@@ -2496,7 +2523,7 @@ export async function main(argv: string[]): Promise<number> {
         projectRoot,
         events,
         parallelSlots: opts?.parallelSlots,
-        subagentFactory: multiAgentHost.makeSubagentFactory(config),
+        subagentFactory: sddSubagentFactory,
         worktrees,
         boardStore,
         registry: sddRunRegistry,

@@ -389,9 +389,11 @@ export { makeCommandVerifier, type CommandVerifierOptions } from '../sdd/verify-
 export { makeLlmSubtaskGenerator, type SubtaskGeneratorOptions } from '../sdd/decompose-task.js';
 export {
   makePreferSideConflictResolver,
+  makeLlmConflictResolver,
   resolveConflictText,
   hasConflictMarkers,
   type ConflictSide,
+  type LlmConflictResolverOptions,
 } from '../sdd/conflict-resolver.js';
 // Live SDD board: model, persistence, projector, run registry.
 export {

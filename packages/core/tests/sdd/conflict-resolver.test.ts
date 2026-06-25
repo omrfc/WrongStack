@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import {
   makePreferSideConflictResolver,
+  makeLlmConflictResolver,
   resolveConflictText,
   hasConflictMarkers,
 } from '../../src/sdd/conflict-resolver.js';
@@ -71,5 +72,54 @@ describe('makePreferSideConflictResolver', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('makeLlmConflictResolver', () => {
+  const withDir = async (fn: (dir: string) => Promise<void>) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'crl-'));
+    try {
+      await fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('writes the model-resolved file (unfencing a code block)', async () => {
+    await withDir(async (dir) => {
+      writeFileSync(path.join(dir, 'a.txt'), TWO_WAY);
+      const resolver = makeLlmConflictResolver({
+        run: async () => '```\ntop\nours-1+theirs-1\nbottom\n```',
+      });
+      expect(await resolver({ task, conflictFiles: ['a.txt'], cwd: dir })).toBe(true);
+      expect(readFileSync(path.join(dir, 'a.txt'), 'utf8')).toBe('top\nours-1+theirs-1\nbottom');
+    });
+  });
+
+  it('rejects a resolution that still has markers or is empty', async () => {
+    await withDir(async (dir) => {
+      writeFileSync(path.join(dir, 'a.txt'), TWO_WAY);
+      expect(await makeLlmConflictResolver({ run: async () => TWO_WAY })({ task, conflictFiles: ['a.txt'], cwd: dir })).toBe(false);
+      expect(await makeLlmConflictResolver({ run: async () => '   ' })({ task, conflictFiles: ['a.txt'], cwd: dir })).toBe(false);
+      // File untouched after a rejected resolution.
+      expect(readFileSync(path.join(dir, 'a.txt'), 'utf8')).toBe(TWO_WAY);
+    });
+  });
+
+  it('rejects a resolution that drops most of the file (content-loss guard)', async () => {
+    await withDir(async (dir) => {
+      const big = ['<<<<<<< HEAD', ...Array.from({ length: 20 }, (_, i) => `o${i}`), '=======', ...Array.from({ length: 20 }, (_, i) => `t${i}`), '>>>>>>> b'].join('\n');
+      writeFileSync(path.join(dir, 'a.txt'), big);
+      const resolver = makeLlmConflictResolver({ run: async () => 'just one line' });
+      expect(await resolver({ task, conflictFiles: ['a.txt'], cwd: dir })).toBe(false);
+    });
+  });
+
+  it('returns false on a runner throw or empty file list', async () => {
+    await withDir(async (dir) => {
+      writeFileSync(path.join(dir, 'a.txt'), TWO_WAY);
+      expect(await makeLlmConflictResolver({ run: async () => { throw new Error('down'); } })({ task, conflictFiles: ['a.txt'], cwd: dir })).toBe(false);
+      expect(await makeLlmConflictResolver({ run: async () => 'x' })({ task, conflictFiles: [], cwd: dir })).toBe(false);
+    });
   });
 });
