@@ -603,6 +603,13 @@ To always use cmd.exe (disables auto-detection entirely):
 set WRONGSTACK_SHELL=cmd
 ```
 
+**Provider paths (registry, certificates, etc.).** PowerShell provider paths such as `HKLM:\`, `HKCU:\`, `cert:\`, `wsman:\`, `env:\`, and `function:\` are not filesystem paths — they are PowerShell-specific abstractions that only exist inside the PowerShell provider system. Node.js's `fs` APIs cannot read them, and the `read`/`write`/`edit` tools will reject them as escaping the workspace. Access them through the `bash` tool instead, which routes to PowerShell:
+
+```powershell
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion" -Name "ProgramFilesDir"
+Get-ChildItem -Path "cert:\LocalMachine\My"
+```
+
 ---
 
 ## Secrets
