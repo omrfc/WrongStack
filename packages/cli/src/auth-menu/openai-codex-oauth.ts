@@ -27,7 +27,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { color, type ProviderApiKey, type ProviderConfig } from '@wrongstack/core';
+import { color, type ModelsRegistry, type ProviderApiKey, type ProviderConfig } from '@wrongstack/core';
 import {
   mutateConfigProviders,
   normalizeKeys,
@@ -57,21 +57,20 @@ export const CODEX_PROVIDER_ID = 'openai-codex';
 export const CODEX_BASE_URL = 'https://chatgpt.com/backend-api';
 
 /**
- * Canonical known Codex subscription models.
+ * Fallback model list used when BOTH the live backend AND the models.dev
+ * catalog are unreachable. This should never happen in practice — the
+ * catalog is cached locally and the only scenario where both fail is a
+ * fresh install with no network on first login.
  *
- * These are the models documented at https://developers.openai.com/codex/models
- * for ChatGPT-authenticated Codex usage. The list is used as a fallback when
- * the live backend cannot be reached; `fetchCodexModels()` below attempts to
- * fetch the actual list at login time.
- *
- * When updating this list, also check the family-capabilities defaults in
- * `@wrongstack/providers` for alignment (especially maxContext and reasoning).
+ * The primary resolution order in `resolveCodexModels()` is:
+ *  1. Live backend (`GET /models`)
+ *  2. models.dev catalog (`family: gpt-codex*` under `openai` provider)
+ *  3. This inline fallback
  */
-export const CODEX_DEFAULT_MODELS: readonly string[] = [
+const FALLBACK_MODELS: readonly string[] = [
   'gpt-5.5',
   'gpt-5.4',
   'gpt-5.4-mini',
-  'gpt-5.3-codex-spark',
 ];
 
 // ── Token shapes ────────────────────────────────────────────────────────────
@@ -158,6 +157,52 @@ export function extractAccountId(token: string): string | null {
 }
 
 // ── Model discovery ──────────────────────────────────────────────────────────
+
+/** Families in the models.dev catalog that indicate Codex / Responses API compatibility. */
+const CODEX_CATALOG_FAMILIES = new Set(['gpt-codex', 'gpt-codex-spark']);
+
+/**
+ * Resolve the list of available Codex models using a 3-tier fallback chain:
+ *
+ *  1. **Live backend** — `fetchCodexModels()` hits `GET <baseUrl>/models`.
+ *  2. **models.dev catalog** — queries the `openai` provider in the cached
+ *     models.dev registry and picks models whose `family` is `gpt-codex` or
+ *     `gpt-codex-spark` (i.e. models designed for the Responses API wire format).
+ *  3. **Inline fallback** — a minimal list of documented mainstream models
+ *     (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`).
+ *
+ * This keeps the model list in sync with the catalog: when OpenAI adds a new
+ * `gpt-codex` model to models.dev, it appears in the picker automatically
+ * without touching any source code.
+ */
+export async function resolveCodexModels(
+  modelsRegistry: ModelsRegistry,
+  accessToken: Promise<string> | string,
+  baseUrl?: string | undefined,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  // Tier 1 — live backend
+  const token = typeof accessToken === 'string' ? accessToken : await accessToken;
+  const live = await fetchCodexModels(token, baseUrl, signal);
+  if (live.length > 0) return live;
+
+  // Tier 2 — models.dev catalog
+  try {
+    const openaiProvider = await modelsRegistry.getProvider('openai');
+    if (openaiProvider) {
+      const catalog = openaiProvider.models
+        .filter((m) => m.family && CODEX_CATALOG_FAMILIES.has(m.family))
+        .map((m) => m.id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      if (catalog.length > 0) return catalog;
+    }
+  } catch {
+    // catalog unavailable — fall through to tier 3
+  }
+
+  // Tier 3 — inline fallback
+  return [...FALLBACK_MODELS];
+}
 
 /**
  * Fetch the account's available Codex model ids live from the ChatGPT backend.
@@ -529,8 +574,12 @@ export async function runCodexOAuthLogin(
 
     // Fetch available models from the Codex backend (best-effort).
     deps.renderer.write(color.dim('  Fetching available models...\n'));
-    const fetchedModels = await fetchCodexModels(tokens.access, CODEX_BASE_URL, ac.signal);
-    const models = fetchedModels.length > 0 ? fetchedModels : [...CODEX_DEFAULT_MODELS];
+    const models = await resolveCodexModels(
+      deps.modelsRegistry,
+      tokens.access,
+      CODEX_BASE_URL,
+      ac.signal,
+    );
 
     const saved = await saveCodexTokens(deps, providerId, tokens, accountId, models);
     if (!saved) return 1;
