@@ -100,6 +100,7 @@ describe('SddTaskDrawer controls', () => {
     onClose: noop,
     onRetry: noop,
     onReassign: noop,
+    onSplit: noop,
     onSelectTask: noop,
   };
 
@@ -129,6 +130,34 @@ describe('SddTaskDrawer controls', () => {
     fireEvent.click(screen.getByText('Delete'));
     fireEvent.click(screen.getByText('Delete', { selector: 'button' }));
     expect(onDelete).toHaveBeenCalledWith('task-1');
+  });
+
+  it('Split parses the textarea into sub-tasks and fires onSplit', () => {
+    const onSplit = vi.fn();
+    render(
+      <SddTaskDrawer {...baseProps} task={makeTask()} onSetModel={noop} onCancel={noop} onDelete={noop} onSplit={onSplit} />,
+    );
+    fireEvent.click(screen.getByText('Split'));
+    const box = screen.getByPlaceholderText(/add the repository/i);
+    fireEvent.change(box, { target: { value: 'Data layer :: build the repo\nWire the UI' } });
+    fireEvent.click(screen.getByText('Split into sub-tasks'));
+    expect(onSplit).toHaveBeenCalledWith('task-1', [
+      { title: 'Data layer', description: 'build the repo' },
+      { title: 'Wire the UI', description: 'Wire the UI' },
+    ]);
+  });
+
+  it('does not offer Split on a running task', () => {
+    render(
+      <SddTaskDrawer
+        {...baseProps}
+        task={makeTask({ status: 'in_progress', displayStatus: 'in_progress' })}
+        onSetModel={noop}
+        onCancel={noop}
+        onDelete={noop}
+      />,
+    );
+    expect(screen.queryByText('Split')).toBeNull();
   });
 
   it('does not offer Stop on a pending task or Delete on a running task', () => {
