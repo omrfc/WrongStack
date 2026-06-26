@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
 import {
+  STATUSLINE_ITEMS,
+  StatuslinePicker,
   isChipExpired,
   getExpiresInLabel,
   type ChipMeta,
@@ -8,14 +12,10 @@ import {
 // Simple ChipMeta factory — only fields needed by isChipExpired / getExpiresInLabel
 function chip(overrides: Partial<ChipMeta> = {}): ChipMeta {
   return {
-    field: 'brain',
-    label: 'Brain',
-    item: 'brain',
     key: 'brain',
-    expiresIn: undefined,
-    shownAt: undefined,
+    shownAt: Date.now(),
     ...overrides,
-  };
+  } as ChipMeta;
 }
 
 describe('isChipExpired', () => {
@@ -24,7 +24,7 @@ describe('isChipExpired', () => {
   });
 
   it('returns false when chip has no expiresIn', () => {
-    const c = chip({ expiresIn: undefined, shownAt: Date.now() });
+    const c = chip({ shownAt: Date.now() });
     expect(isChipExpired(c)).toBe(false);
   });
 
@@ -55,7 +55,7 @@ describe('isChipExpired', () => {
   });
 
   it('returns false when shownAt is undefined (permanent)', () => {
-    const c = chip({ expiresIn: 5, shownAt: undefined });
+    const c = chip({ expiresIn: 5, shownAt: undefined as never });
     expect(isChipExpired(c)).toBe(false);
   });
 });
@@ -66,7 +66,7 @@ describe('getExpiresInLabel', () => {
   });
 
   it('returns null when chip has no expiresIn', () => {
-    const c = chip({ expiresIn: undefined, shownAt: Date.now() });
+    const c = chip({ shownAt: Date.now() });
     expect(getExpiresInLabel(c)).toBeNull();
   });
 
@@ -104,7 +104,24 @@ describe('getExpiresInLabel', () => {
   });
 
   it('returns null when shownAt is undefined (permanent)', () => {
-    const c = chip({ expiresIn: 5, shownAt: undefined });
+    const c = chip({ expiresIn: 5, shownAt: undefined as never });
     expect(getExpiresInLabel(c)).toBeNull();
+  });
+});
+
+describe('StatuslinePicker render', () => {
+  it('shows idle stream chips as auto, not off', () => {
+    const { lastFrame, unmount } = render(
+      React.createElement(StatuslinePicker, {
+        field: STATUSLINE_ITEMS.indexOf('mailbox'),
+        hiddenItems: [],
+        visibleChips: [],
+      }),
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('mailbox');
+    expect(frame).toContain('auto');
+    unmount();
   });
 });

@@ -86,7 +86,10 @@ describe('startStaticServe', () => {
       distDir: '/resolved/dist',
       wsPort: 3457,
       globalRoot: '/tmp/.wrongstack',
+      onFleetPing: undefined,
+      publicWsUrl: undefined,
       apiToken: undefined,
+      requireToken: undefined,
     });
     // Binds the *http* port, not the ws port.
     expect(fake.listenCalls).toEqual([[3456, '127.0.0.1']]);
@@ -113,7 +116,39 @@ describe('startStaticServe', () => {
       distDir: '/resolved/dist',
       wsPort: 3457,
       globalRoot: '/tmp/.wrongstack',
+      onFleetPing: undefined,
+      publicWsUrl: undefined,
       apiToken: 'test-token-123',
+      requireToken: undefined,
+    });
+  });
+
+  it('passes public WS URL and requireToken to createHttpServer when provided', () => {
+    const fake = new FakeServer();
+    const createServer = vi.fn(() => fake as never as Server);
+
+    const handle = startStaticServe(
+      {
+        ...baseOpts,
+        publicWsUrl: 'wss://wrongstack-ws.example.com',
+        requireToken: true,
+      },
+      {
+        resolveDist: () => '/resolved/dist',
+        createServer,
+      },
+    ) as StaticServeHandle;
+
+    expect(handle).not.toBeNull();
+    expect(createServer).toHaveBeenCalledWith({
+      host: '127.0.0.1',
+      distDir: '/resolved/dist',
+      wsPort: 3457,
+      globalRoot: '/tmp/.wrongstack',
+      onFleetPing: undefined,
+      publicWsUrl: 'wss://wrongstack-ws.example.com',
+      apiToken: undefined,
+      requireToken: true,
     });
   });
 

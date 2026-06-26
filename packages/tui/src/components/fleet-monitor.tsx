@@ -282,7 +282,7 @@ export function FleetMonitor({
             const model = fmtModelLabel(e.provider, e.model) || '—';
             const ltCtx =
               e.ctxPct !== undefined
-                ? `L${e.iterations} ${e.toolCalls}t ${Math.round(e.ctxPct * 100)}%`
+                ? `L${e.iterations} ${e.toolCalls}t ${Math.min(100, Math.max(0, Math.round(e.ctxPct * 100)))}%`
                 : `L${e.iterations} ${e.toolCalls}t`;
             return (
               <Box key={e.id} flexDirection="row" gap={1}>

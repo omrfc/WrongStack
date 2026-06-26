@@ -30,6 +30,40 @@ export function getTokenFromWsUrl(wsUrl: string): string | null {
   }
 }
 
+export function getTokenFromPageUrl(): string | null {
+  if (typeof window === 'undefined' || !window.location) return null;
+  try {
+    const search = window.location.search ?? '';
+    return new URLSearchParams(search).get('token');
+  } catch {
+    return null;
+  }
+}
+
+export function stripTokenFromUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.searchParams.delete('token');
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+export function stripTokenFromAddressBar(): void {
+  if (typeof window === 'undefined' || !window.location || !window.history?.replaceState) return;
+  try {
+    const href = window.location.href;
+    if (!href) return;
+    const url = new URL(href);
+    if (!url.searchParams.has('token')) return;
+    url.searchParams.delete('token');
+    window.history.replaceState(window.history.state, document.title, url.toString());
+  } catch {
+    /* best-effort only */
+  }
+}
+
 const DEFAULT_WS_PORT = 3457;
 
 export function resolveWsPort(): number {
@@ -41,16 +75,41 @@ export function resolveWsPort(): number {
   return Number.isFinite(parsed) && parsed > 0 && parsed < 65536 ? parsed : DEFAULT_WS_PORT;
 }
 
+export function resolvePublicWsUrl(): string | null {
+  if (typeof document === 'undefined') return null;
+  const raw = document
+    .querySelector('meta[name="wrongstack-ws-url"]')
+    ?.getAttribute('content')
+    ?.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'ws:' && url.protocol !== 'wss:') return null;
+    const token = getTokenFromPageUrl();
+    if (token && !url.searchParams.has('token')) {
+      url.searchParams.set('token', token);
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function defaultWsUrl(): string {
+  const publicWsUrl = resolvePublicWsUrl();
+  if (publicWsUrl) return publicWsUrl;
   const port = resolveWsPort();
   if (typeof window === 'undefined' || !window.location?.hostname) {
     return `ws://127.0.0.1:${port}`;
   }
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.hostname.toLowerCase();
+  const token = getTokenFromPageUrl();
+  const query = token ? `?token=${encodeURIComponent(token)}` : '';
   if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') {
-    return `ws://127.0.0.1:${port}`;
+    return `${protocol}://127.0.0.1:${port}${query}`;
   }
-  return `ws://${window.location.hostname}:${port}`;
+  return `${protocol}://${window.location.hostname}:${port}${query}`;
 }
 
 /**
@@ -64,13 +123,11 @@ export function httpOriginForAuth(): string {
   if (typeof window === 'undefined' || !window.location?.hostname) {
     return 'http://127.0.0.1:3456';
   }
+  const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
   const host = window.location.hostname.toLowerCase();
-  const pagePort = window.location.port
-    ? Number.parseInt(window.location.port, 10)
-    : Number.NaN;
-  const httpPort = Number.isFinite(pagePort) && pagePort > 0 ? pagePort : 3456;
+  const portSuffix = window.location.port ? `:${window.location.port}` : '';
   if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') {
-    return `http://127.0.0.1:${httpPort}`;
+    return `${protocol}://127.0.0.1${portSuffix}`;
   }
-  return `http://${window.location.hostname}:${httpPort}`;
+  return `${protocol}://${window.location.hostname}${portSuffix}`;
 }

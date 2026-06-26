@@ -3,19 +3,41 @@ import type React from 'react';
 
 /** All possible statusline chip keys. */
 export type StatuslineItem =
+  | 'version'
+  | 'state'
+  | 'model'
+  | 'tokens'
+  | 'cache'
+  | 'queue'
+  | 'processes'
+  | 'hint'
+  | 'index'
+  | 'breaker'
   | 'todos'
   | 'plan'
   | 'tasks'
   | 'fleet'
+  | 'fleet_agents'
   | 'git'
   | 'elapsed'
   | 'context'
   | 'cost'
   | 'working_dir'
+  | 'project'
+  | 'yolo'
+  | 'autonomy'
+  | 'eternal_stage'
+  | 'goal'
+  | 'mode'
+  | 'auto_proceed'
+  | 'sessions'
+  | 'tools'
+  | 'token_saving'
   | 'brain'
   | 'mailbox'
   | 'enhance'
-  | 'debug_stream';
+  | 'debug_stream'
+  | 'next_steps';
 
 /**
  * Metadata for a temporarily-visible chip (one that appeared due to data,
@@ -60,19 +82,41 @@ export function getExpiresInLabel(meta: ChipMeta, now = Date.now()): string | nu
 
 /** Item descriptions for display. */
 const ITEM_DESCRIPTIONS: Record<StatuslineItem, string> = {
+  version: 'WrongStack version chip',
+  state: 'Agent run state / thinking spinner',
+  model: 'Current provider/model id',
+  tokens: 'Input/output token counters',
+  cache: 'Prompt cache hit ratio',
+  queue: 'Queued prompt count',
+  processes: 'Tracked shell/process count',
+  hint: 'Transient status hint text',
+  index: 'Codebase indexing status',
+  breaker: 'Process breaker countdown',
   todos: 'Todo items (pending/in-progress/done)',
   plan: 'Plan board items',
   tasks: 'Task board items',
   fleet: 'Fleet agent status',
+  fleet_agents: 'Per-agent live detail row',
   git: 'Git branch name',
   elapsed: 'Session elapsed time',
   context: 'Context window usage %',
   cost: 'Token cost estimate',
   working_dir: 'Current working directory',
+  project: 'Project name',
+  yolo: 'YOLO permission mode',
+  autonomy: 'Autonomy mode',
+  eternal_stage: 'Autonomy stage',
+  goal: 'Active goal summary',
+  mode: 'Active agent mode label',
+  auto_proceed: 'Auto-proceed countdown',
+  sessions: 'Live session count',
+  tools: 'Registered tool count',
+  token_saving: 'Token-saving mode indicator',
   brain: 'Brain arbiter decisions',
   mailbox: 'Mailbox unread messages',
   enhance: 'Prompt-enhance countdown',
   debug_stream: 'Stream debug telemetry',
+  next_steps: 'Next-step auto-submit countdown',
 };
 
 /**
@@ -83,20 +127,41 @@ const ITEM_DESCRIPTIONS: Record<StatuslineItem, string> = {
  * the navigation-order test guards against drift instead of duplicating it.
  */
 export const ITEM_LINE: Record<StatuslineItem, number> = {
+  breaker: 1,
+  cache: 1,
   context: 1,
   cost: 1,
+  hint: 1,
+  index: 1,
+  model: 1,
+  processes: 1,
+  queue: 1,
+  state: 1,
+  tokens: 1,
+  version: 1,
+  auto_proceed: 2,
+  autonomy: 2,
   elapsed: 2,
-  working_dir: 2,
+  eternal_stage: 2,
   git: 2,
+  goal: 2,
+  mode: 2,
+  project: 2,
+  sessions: 2,
+  token_saving: 2,
+  tools: 2,
+  working_dir: 2,
+  yolo: 2,
+  brain: 3,
+  debug_stream: 3,
+  enhance: 3,
+  fleet: 3,
+  next_steps: 3,
   todos: 3,
   plan: 3,
   tasks: 3,
-  fleet: 4,
-  brain: 3,
-  // mailbox renders on line 4 alongside the fleet-agent detail row, not line 3.
+  fleet_agents: 4,
   mailbox: 4,
-  enhance: 3,
-  debug_stream: 3,
 };
 
 export interface StatuslinePickerProps {
@@ -116,21 +181,43 @@ export const STATUSLINE_FIELD_COUNT = Object.keys(ITEM_LINE).length;
 /** Ordered list of statusline items — grouped by display line, then alphabetically within each line for consistent navigation. */
 export const STATUSLINE_ITEMS: StatuslineItem[] = [
   // Line 1
+  'breaker',
+  'cache',
   'context',
   'cost',
+  'hint',
+  'index',
+  'model',
+  'processes',
+  'queue',
+  'state',
+  'tokens',
+  'version',
   // Line 2
+  'auto_proceed',
+  'autonomy',
   'elapsed',
+  'eternal_stage',
   'git',
+  'goal',
+  'mode',
+  'project',
+  'sessions',
+  'token_saving',
+  'tools',
   'working_dir',
+  'yolo',
   // Line 3
   'brain',
   'debug_stream',
   'enhance',
+  'fleet',
+  'next_steps',
   'plan',
   'tasks',
   'todos',
   // Line 4
-  'fleet',
+  'fleet_agents',
   'mailbox',
 ];
 
@@ -187,10 +274,10 @@ export function StatuslinePicker({
     if (hiddenSet.has(item)) return 'off';
     if (STREAM_CHIP_KEYS.includes(item)) {
       const meta = visibleChipsMap.get(item);
-      if (!meta) return 'off'; // not yet shown
+      if (!meta) return 'auto';
       if (meta.expiresIn == null) return 'on '; // permanently shown
       const remainingMs = meta.shownAt + meta.expiresIn * 60_000 - Date.now();
-      if (remainingMs <= 0) return 'exp';
+      if (remainingMs <= 0) return 'auto';
       const remainingMin = Math.max(1, Math.ceil(remainingMs / 60_000));
       return `~${remainingMin}m`;
     }
@@ -200,8 +287,8 @@ export function StatuslinePicker({
     if (hiddenSet.has(item)) return 'red';
     if (STREAM_CHIP_KEYS.includes(item)) {
       const meta = visibleChipsMap.get(item);
-      if (!meta) return 'red';
-      if (isChipExpired(meta)) return 'red';
+      if (!meta) return 'cyan';
+      if (isChipExpired(meta)) return 'cyan';
       return 'yellow'; // stream chip active — yellow to signal it may disappear
     }
     return 'green';
@@ -242,7 +329,7 @@ export function StatuslinePicker({
       {hasBelow ? (
         <Text dimColor>{`  ↓ ${totalFields - windowEnd} item${totalFields - windowEnd === 1 ? '' : 's'} below`}</Text>
       ) : null}
-      <Text dimColor>Changes apply instantly · persisted to ~/.wrongstack/statusline.json · auto chips expire after ~5m</Text>
+      <Text dimColor>Changes apply instantly · persisted to ~/.wrongstack/statusline.json · auto chips show when data exists</Text>
       {hint ? <Text color="yellow">{hint}</Text> : null}
     </Box>
   );

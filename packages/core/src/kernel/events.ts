@@ -349,13 +349,16 @@ export interface EventMap {
   };
   /**
    * Fired on every `iteration.completed`. UIs subscribe to render a live
-   * context-window fill bar per agent (e.g. "67% ████████░░"). UIs cap the
-   * displayed percentage at 100; the raw `load` remains uncapped so diagnostics
-   * can tell when an agent was over budget.
+   * context-window fill bar per agent (e.g. "67% ████████░░"). `load` is
+   * clamped to 0..1 so every live surface renders at most 100%; diagnostics
+   * can still detect over-budget states from `tokens > maxContext` or
+   * `rawLoad`.
    */
   'ctx.pct': {
-    /** Fraction of maxContext currently in use (0–1+. Can exceed 1 when over budget). */
+    /** Fraction of maxContext currently in use, clamped to 0..1 for display. */
     load: number;
+    /** Unclamped fraction when available. Can exceed 1 when over budget. */
+    rawLoad?: number | undefined;
     /** Estimated total tokens (system + tools + messages). */
     tokens: number;
     /** Provider's max context window. */
@@ -599,7 +602,10 @@ export interface EventMap {
    */
   'subagent.ctx_pct': {
     subagentId: string;
+    /** Fraction of maxContext currently in use, clamped to 0..1 for display. */
     load: number;
+    /** Unclamped fraction when available. Can exceed 1 when over budget. */
+    rawLoad?: number | undefined;
     tokens: number;
     maxContext: number;
   };

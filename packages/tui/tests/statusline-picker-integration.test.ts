@@ -19,9 +19,6 @@ describe('statusline picker expiration logic', () => {
   });
 
   const makeMeta = (expiresIn: number, shownAt: number): ChipMeta => ({
-    field: 0,
-    label: 'Brain',
-    item: 'brain',
     key: 'brain',
     expiresIn,
     shownAt,

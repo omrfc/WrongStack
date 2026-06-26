@@ -15,27 +15,15 @@
 // happens to mount first.
 
 import { useState } from 'react';
+import type { StatuslineItem } from '../components/statusline-picker.js';
 
 export type AutonomyStage = 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel';
 
 /**
- * A statusline chip the user can *persistently* hide (written to
- * `statusline.json` and toggled by the `/statusline` command). Intentionally a
- * subset of the picker's full {@link StatuslineItem} union: the four stream
- * chips (brain/mailbox/enhance/debug_stream) are ephemeral/auto-expiring and
- * are NOT persisted here — their session visibility is tracked separately via
- * the reducer's stream-chip expiry, not this list.
+ * A statusline chip the user can persistently hide (written to
+ * `statusline.json` and toggled by the `/statusline` command).
  */
-export type StatuslineHiddenItem =
-  | 'todos'
-  | 'plan'
-  | 'tasks'
-  | 'fleet'
-  | 'git'
-  | 'elapsed'
-  | 'context'
-  | 'cost'
-  | 'working_dir';
+export type StatuslineHiddenItem = StatuslineItem;
 
 export interface UseStatuslineStateOptions {
   model: string;

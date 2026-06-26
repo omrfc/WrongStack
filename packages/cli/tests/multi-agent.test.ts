@@ -16,6 +16,9 @@ vi.mock('@wrongstack/providers', () => ({
 }));
 
 import {
+  DefaultErrorHandler,
+  DefaultLogger,
+  DefaultRetryPolicy,
   DefaultSecretScrubber,
   type Config,
   type ConfigStore,
@@ -60,23 +63,36 @@ function makeDeps(): MultiAgentDeps {
 
   const session = {
     id: 'sess-test',
+    pendingToolUses: [],
     append: vi.fn(async () => undefined),
     appendBatch: vi.fn(async () => undefined),
+    flush: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
+    recordFileChange: vi.fn(() => undefined),
+    writeCheckpoint: vi.fn(async () => undefined),
+    writeFileSnapshot: vi.fn(async () => undefined),
+    truncateToCheckpoint: vi.fn(async () => 0),
+    clearSession: vi.fn(async () => undefined),
+    writeInFlightMarker: vi.fn(async () => undefined),
+    clearInFlightMarker: vi.fn(async () => undefined),
   } as never as SessionWriter;
 
   const tokenCounter: TokenCounter = {
     account: vi.fn(),
-    estimate: vi.fn(() => 0),
-    reset: vi.fn(),
+    currentRequestTokens: vi.fn(() => ({ input: 0, cacheRead: 0 })),
     total: vi.fn(() => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })),
-    snapshot: vi.fn(() => []),
-    inputTokens: vi.fn(() => 0),
-    outputTokens: vi.fn(() => 0),
+    estimateCost: vi.fn(() => ({ input: 0, output: 0, total: 0, currency: 'USD' })),
+    cacheStats: vi.fn(() => ({ readTokens: 0, writeTokens: 0, hitRatio: 0 })),
+    reset: vi.fn(),
   } as never as TokenCounter;
 
+  const container = new Container();
+  container.bind(TOKENS.Logger, () => new DefaultLogger({ level: 'error', stderr: false }));
+  container.bind(TOKENS.ErrorHandler, () => new DefaultErrorHandler());
+  container.bind(TOKENS.RetryPolicy, () => new DefaultRetryPolicy());
+
   return {
-    container: new Container(),
+    container,
     toolRegistry: new ToolRegistry(),
     providerRegistry: new ProviderRegistry(),
     configStore,
@@ -155,6 +171,15 @@ describe('MultiAgentHost', () => {
         (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
       ).toHaveBeenCalled(),
     );
+    await host.stopAll();
+  });
+
+  it('does not account subagent provider usage into the leader token counter', async () => {
+    const deps = makeDeps();
+    const host = new MultiAgentHost(deps);
+    const result = await host.spawnAndWait('do a thing');
+    expect(result.status).toBe('success');
+    expect(deps.tokenCounter.account).not.toHaveBeenCalled();
     await host.stopAll();
   });
 
@@ -671,7 +696,7 @@ describe('MultiAgentHost', () => {
         await host.promoteToDirector();
         // manifest() should return null before any spawn (no director yet
         // in the simple path, but we just promoted, so it should work).
-        await host.spawn('inspect', { name: 'inspector' });
+        await host.spawnAndWait('inspect', { name: 'inspector' });
         const written = await host.manifest();
         expect(written).toBe(path.join(fleetRoot, 'fleet.json'));
         const raw = await fs.readFile(written!, 'utf8');
@@ -693,8 +718,8 @@ describe('MultiAgentHost', () => {
         expect(director).not.toBeNull();
 
         // Trigger lazy build and verify the Director's session factory
-        // was wired — spawn + assign a task and check the manifest path.
-        await host.spawn('path check', { name: 'checker' });
+        // was wired — spawn, finish the task, then check the manifest path.
+        await host.spawnAndWait('path check', { name: 'checker' });
         const written = await host.manifest();
         expect(written).toBe(path.join(fleetRoot, 'fleet.json'));
         await host.stopAll();
@@ -732,12 +757,12 @@ describe('MultiAgentHost', () => {
 
         const host = new MultiAgentHost(makeDeps(), { fleetRoot });
         await host.promoteToDirector();
-        const { taskId } = await host.spawn('routed', {
+        const result = await host.spawnAndWait('routed', {
           name: 'router',
           provider: 'anthropic',
           model: 'claude',
         });
-        expect(taskId).toBeTruthy();
+        expect(result.taskId).toBeTruthy();
 
         // The manifest should reflect the spawn even though we promoted
         // at runtime — the spawn path checks `this.director` and routes
@@ -778,20 +803,6 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
     deps.toolRegistry.register(fakeTool('read'));
     deps.toolRegistry.register(fakeTool('grep'));
     deps.toolRegistry.register(fakeTool('bash'));
-    // The Agent constructor resolves TOKENS.Logger from the container;
-    // bind a noop logger so factory-built agents can construct.
-    const logger = {
-      level: 'info' as const,
-      error() {},
-      warn() {},
-      info() {},
-      debug() {},
-      trace() {},
-      child() {
-        return logger;
-      },
-    };
-    deps.container.bind(TOKENS.Logger, () => logger);
     return deps;
   }
 

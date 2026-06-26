@@ -43,6 +43,19 @@ describe('verifyClient (WebSocket auth)', () => {
     }
   });
 
+  it('requires a token on loopback binds when requireToken is enabled', () => {
+    const base = {
+      origin: 'http://localhost:3000',
+      url: '/',
+      hostHeader: LOOPBACK_HOST,
+      wsHost: '127.0.0.1',
+      expectedToken: TOKEN,
+      requireToken: true,
+    } as const;
+    expect(verifyClient(base)).toBe(false);
+    expect(verifyClient({ ...base, cookieHeader: `ws_token=${TOKEN}` })).toBe(true);
+  });
+
   it('requires the cookie for a non-loopback browser origin — URL token is rejected (C-598)', () => {
     const base = { hostHeader: LOOPBACK_HOST, wsHost: '127.0.0.1', expectedToken: TOKEN } as const;
     // No credential at all → rejected.
@@ -51,6 +64,26 @@ describe('verifyClient (WebSocket auth)', () => {
     // token into history / referrer / proxy logs).
     expect(
       verifyClient({ origin: 'http://192.168.1.5:3000', url: `/?token=${TOKEN}`, ...base }),
+    ).toBe(false);
+    // Explicit public WS URL mode may keep URL-token auth for browser clients
+    // when the HttpOnly cookie cannot cross hostnames.
+    expect(
+      verifyClient({
+        origin: 'http://192.168.1.5:3000',
+        url: `/?token=${TOKEN}`,
+        allowBrowserUrlToken: true,
+        allowedHostnames: ['192.168.1.5'],
+        ...base,
+      }),
+    ).toBe(true);
+    expect(
+      verifyClient({
+        origin: 'http://192.168.1.5:3000',
+        url: `/?token=${TOKEN}`,
+        allowBrowserUrlToken: true,
+        allowedHostnames: ['other.example.com'],
+        ...base,
+      }),
     ).toBe(false);
     // The HttpOnly cookie is the accepted browser credential.
     expect(
@@ -165,6 +198,40 @@ describe('verifyClient (WebSocket auth)', () => {
       }),
     ).toBe(false);
   });
+
+  it('allows a configured tunnel hostname on a loopback bind only with cookie auth', () => {
+    const base = {
+      origin: 'https://wrongstack.example.com',
+      url: '/',
+      hostHeader: 'wrongstack.example.com',
+      wsHost: '127.0.0.1',
+      expectedToken: TOKEN,
+      requireToken: true,
+    } as const;
+
+    expect(verifyClient(base)).toBe(false);
+    expect(
+      verifyClient({
+        ...base,
+        allowedHostnames: ['wrongstack.example.com'],
+      }),
+    ).toBe(false);
+    expect(
+      verifyClient({
+        ...base,
+        url: `/?token=${TOKEN}`,
+        allowedHostnames: ['wrongstack.example.com'],
+        allowBrowserUrlToken: true,
+      }),
+    ).toBe(true);
+    expect(
+      verifyClient({
+        ...base,
+        allowedHostnames: ['wrongstack.example.com'],
+        cookieHeader: `ws_token=${TOKEN}`,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe('isWildcardBind (IPv4 + IPv6 wildcard parity)', () => {
@@ -193,12 +260,21 @@ describe('verifyClient — IPv6 wildcard (::) bind parity with 0.0.0.0', () => {
     ).toBe(true);
   });
 
-  it('requires a trusted loopback origin scheme on a :: bind (rejects file://)', () => {
+  it('requires the auth cookie for loopback browser origins on a :: bind', () => {
     expect(
       verifyClient({ origin: 'file://localhost', url: '/', wsHost: '::', expectedToken: TOKEN }),
     ).toBe(false);
     expect(
       verifyClient({ origin: 'http://localhost:3000', url: '/', wsHost: '::', expectedToken: TOKEN }),
+    ).toBe(false);
+    expect(
+      verifyClient({
+        origin: 'http://localhost:3000',
+        url: '/',
+        cookieHeader: `ws_token=${TOKEN}`,
+        wsHost: '::',
+        expectedToken: TOKEN,
+      }),
     ).toBe(true);
   });
 });
@@ -219,6 +295,16 @@ describe('hostHeaderOk (DNS-rebinding guard)', () => {
   it('skips the guard on a public (non-loopback) bind', () => {
     expect(hostHeaderOk({ hostHeader: 'evil.com:3456', wsHost: '0.0.0.0' })).toBe(true);
     expect(hostHeaderOk({ hostHeader: undefined, wsHost: '0.0.0.0' })).toBe(true);
+  });
+
+  it('accepts configured tunnel hostnames on a loopback bind', () => {
+    expect(
+      hostHeaderOk({
+        hostHeader: 'wrongstack.example.com:443',
+        wsHost: '127.0.0.1',
+        allowedHostnames: ['wrongstack.example.com'],
+      }),
+    ).toBe(true);
   });
 });
 

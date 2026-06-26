@@ -45,6 +45,20 @@ function isStreamChipVisible(
   return true;
 }
 
+function hasMailboxActivity(mailbox: MailboxStatus | undefined): boolean {
+  if (!mailbox) return false;
+  const peerClientCount =
+    Math.max(0, mailbox.onlineClients.tui - 1) +
+    mailbox.onlineClients.webui +
+    mailbox.onlineClients.repl;
+  return (
+    mailbox.unread > 0 ||
+    mailbox.onlineAgents > 1 ||
+    peerClientCount > 0 ||
+    Boolean(mailbox.lastSubject || mailbox.lastFrom)
+  );
+}
+
 // ─── Mode icon map ───────────────────────────────────────────────────────────
 
 /** Map mode ids to compact icons for the status bar chip. */
@@ -558,6 +572,7 @@ export function StatusBar({
   const isCompact = termWidth < COMPACT_THRESHOLD;
   const isComfortable = termWidth >= COMFORTABLE_THRESHOLD;
   const hiddenSet = useMemo(() => new Set(hiddenItems), [hiddenItems]);
+  const showChip = (item: StatuslineItem): boolean => !hiddenSet.has(item);
   // Use the refresh hook so token/cost updates appear immediately when
   // the provider responds, instead of waiting for the next nowTick poll.
   const tokenData = useTokenCounterRefresh(tokenCounter, events);
@@ -607,17 +622,19 @@ export function StatusBar({
   // change at most once per session.
   const hasAutoProceed = autoProceedCountdown != null && autoProceedCountdown > 0;
   const hasSecondLine =
-    yolo ||
-    (autonomy && autonomy !== 'off') ||
-    startedAt != null ||
-    (git !== null && git !== undefined) ||
-    (projectName !== undefined && projectName.length > 0) ||
-    (workingDir !== undefined && workingDir.length > 0) ||
-    (goalSummary !== null && goalSummary !== undefined) ||
-    !!modeLabel ||
-    hasAutoProceed ||
-    tokenSavingMode ||
-    (typeof toolCount === 'number' && toolCount > 0);
+    (yolo && showChip('yolo')) ||
+    (autonomy && autonomy !== 'off' && showChip('autonomy')) ||
+    (eternalStage != null && showChip('eternal_stage')) ||
+    (startedAt != null && showChip('elapsed')) ||
+    (git !== null && git !== undefined && showChip('git')) ||
+    (projectName !== undefined && projectName.length > 0 && showChip('project')) ||
+    (workingDir !== undefined && workingDir.length > 0 && showChip('working_dir')) ||
+    (goalSummary !== null && goalSummary !== undefined && showChip('goal')) ||
+    (!!modeLabel && showChip('mode')) ||
+    (hasAutoProceed && showChip('auto_proceed')) ||
+    (tokenSavingMode && showChip('token_saving')) ||
+    (typeof toolCount === 'number' && toolCount > 0 && showChip('tools')) ||
+    (sessionCount != null && sessionCount > 0 && showChip('sessions'));
 
   // Line 3 is *active work* — the dynamic chips that mutate as the
   // agent / subagents make progress. Hidden when nothing is in flight
@@ -630,6 +647,7 @@ export function StatusBar({
   const showBrain = isStreamChipVisible('brain', brain, hiddenSet, visibleChips);
   const showDebugStream = isStreamChipVisible('debug_stream', debugStreamStats, hiddenSet, visibleChips);
   const showEnhance = isStreamChipVisible('enhance', enhanceCountdown, hiddenSet, visibleChips);
+  const showMailbox = showChip('mailbox') && hasMailboxActivity(mailbox);
   const hasNextStepsAutoSubmit = nextStepsAutoSubmitCountdown != null && nextStepsAutoSubmitCountdown > 0;
 
   // Next-steps auto-submit countdown color: green → yellow → red as the timer
@@ -640,25 +658,25 @@ export function StatusBar({
 
   const hasTaskActivity = tasks && (tasks.pending > 0 || tasks.inProgress > 0 || tasks.completed > 0 || tasks.blocked > 0 || tasks.failed > 0);
   const hasThirdLine =
-    (todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0) && !hiddenSet.has('todos')) ||
-    (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0) && !hiddenSet.has('plan')) ||
-    (hasTaskActivity && !hiddenSet.has('tasks')) ||
-    (fleetHasActivity && !hiddenSet.has('fleet')) ||
+    (todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0) && showChip('todos')) ||
+    (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0) && showChip('plan')) ||
+    (hasTaskActivity && showChip('tasks')) ||
+    (fleetHasActivity && showChip('fleet')) ||
     showBrain ||
     showDebugStream ||
     showEnhance ||
-    hasNextStepsAutoSubmit;
+    (hasNextStepsAutoSubmit && showChip('next_steps'));
 
   const minimalWorkParts = [
-    queueCount > 0 ? `q${queueCount}` : '',
-    todos && !hiddenSet.has('todos') && todos.inProgress + todos.pending > 0
+    queueCount > 0 && showChip('queue') ? `q${queueCount}` : '',
+    todos && showChip('todos') && todos.inProgress + todos.pending > 0
       ? `todo ${todos.inProgress}/${todos.pending}`
       : '',
-    hasTaskActivity && !hiddenSet.has('tasks') ? `task ${tasks!.inProgress}/${tasks!.pending}` : '',
-    fleetHasActivity && !hiddenSet.has('fleet')
+    hasTaskActivity && showChip('tasks') ? `task ${tasks!.inProgress}/${tasks!.pending}` : '',
+    fleetHasActivity && showChip('fleet')
       ? fleet ? `agent ▶${fleet.running} ·${fleet.idle}` : `agent ${subagentCount}`
       : '',
-    typeof processCount === 'number' && processCount > 0 ? `proc ${processCount}` : '',
+    typeof processCount === 'number' && processCount > 0 && showChip('processes') ? `proc ${processCount}` : '',
   ].filter(Boolean);
 
   if (mode === 'minimum') {
@@ -677,21 +695,21 @@ export function StatusBar({
         borderRight={false}
       >
         <Box flexDirection="row" gap={2}>
-          {version ? (
+          {version && showChip('version') ? (
             <Text>
               <Text color="blue" bold>WS</Text>
               <Text dimColor> v{version}</Text>
             </Text>
           ) : null}
-          {version ? <Text dimColor>│</Text> : null}
-          {thinking ? (
+          {version && showChip('version') && (showChip('state') || showChip('model')) ? <Text dimColor>│</Text> : null}
+          {showChip('state') && thinking ? (
             <WaveText text={`${statePrefix} ${stateLabel}`} phase={spinnerIdx} />
-          ) : (
+          ) : showChip('state') ? (
             <Text color={stateColor}>{statePrefix} {stateLabel}</Text>
-          )}
-          <Text dimColor>│</Text>
-          <Text color="magenta">{model}</Text>
-          {ctxClampedRatio !== undefined && ctxPctText && ctxMax !== undefined && !hiddenSet.has('context') ? (
+          ) : null}
+          {showChip('state') && showChip('model') ? <Text dimColor>│</Text> : null}
+          {showChip('model') ? <Text color="magenta">{model}</Text> : null}
+          {ctxClampedRatio !== undefined && ctxPctText && ctxMax !== undefined && showChip('context') ? (
             <>
               <Text dimColor>│</Text>
               <Text color={ctxClampedRatio < 0.6 ? 'green' : ctxClampedRatio < 0.75 ? 'yellow' : 'red'}>
@@ -699,7 +717,7 @@ export function StatusBar({
               </Text>
             </>
           ) : null}
-          {showTokenDisplay ? (
+          {showTokenDisplay && showChip('tokens') ? (
             <>
               <Text dimColor>│</Text>
               <Text>
@@ -708,7 +726,7 @@ export function StatusBar({
               </Text>
             </>
           ) : null}
-          {cost && cost.total > 0 && !hiddenSet.has('cost') ? (
+          {cost && cost.total > 0 && showChip('cost') ? (
             <>
               <Text dimColor>│</Text>
               <Text color="yellow">${cost.total.toFixed(4)}</Text>
@@ -740,21 +758,21 @@ export function StatusBar({
         {isCompact ? (
           // Ultra-compact: state · model
           <>
-            {thinking ? (
+            {showChip('state') && thinking ? (
               <WaveText text={`${statePrefix}${stateLabel}`} phase={spinnerIdx} />
-            ) : (
+            ) : showChip('state') ? (
               <Text color={stateColor}>
                 {statePrefix}
                 {stateLabel}
               </Text>
-            )}
-            <Text dimColor>·</Text>
-            <Text color="magenta">{model}</Text>
+            ) : null}
+            {showChip('state') && showChip('model') ? <Text dimColor>·</Text> : null}
+            {showChip('model') ? <Text color="magenta">{model}</Text> : null}
           </>
         ) : (
           // Full mode: version · state · model · context · tokens · cost · queue · processes · hint
           <>
-            {version ? (
+            {version && showChip('version') ? (
               <>
                 <Text>
                   <Text color="blue" bold>
@@ -765,16 +783,20 @@ export function StatusBar({
                 <Text dimColor>│</Text>
               </>
             ) : null}
-            {thinking ? (
+            {showChip('state') && thinking ? (
               <WaveText text={`${statePrefix} ${stateLabel}`} phase={spinnerIdx} />
-            ) : (
+            ) : showChip('state') ? (
               <Text color={stateColor}>
                 {statePrefix} {stateLabel}
               </Text>
-            )}
-            <Text dimColor>│</Text>
-            <Text color="magenta">{model}</Text>
-            {context && !hiddenSet.has('context') ? (
+            ) : null}
+            {showChip('model') ? (
+              <>
+                <Text dimColor>│</Text>
+                <Text color="magenta">{model}</Text>
+              </>
+            ) : null}
+            {context && showChip('context') ? (
               <>
                 <Text dimColor>│</Text>
                 {(() => {
@@ -792,7 +814,7 @@ export function StatusBar({
                 })()}
               </>
             ) : null}
-            {showTokenDisplay ? (
+            {showTokenDisplay && showChip('tokens') ? (
               <>
                 <Text dimColor>│</Text>
                 <Text>
@@ -801,25 +823,25 @@ export function StatusBar({
                 </Text>
               </>
             ) : null}
-            {cache && cache.hitRatio > 0 && isComfortable ? (
+            {cache && cache.hitRatio > 0 && isComfortable && showChip('cache') ? (
               <>
                 <Text dimColor>│</Text>
                 <Text dimColor>cache {(cache.hitRatio * 100).toFixed(0)}%</Text>
               </>
             ) : null}
-            {cost && cost.total > 0 && !hiddenSet.has('cost') ? (
+            {cost && cost.total > 0 && showChip('cost') ? (
               <>
                 <Text dimColor>│</Text>
                 <Text color="yellow">${cost.total.toFixed(4)}</Text>
               </>
             ) : null}
-            {queueCount > 0 ? (
+            {queueCount > 0 && showChip('queue') ? (
               <>
                 <Text dimColor>│</Text>
                 <Text color="cyan">⌛ queued: {queueCount}</Text>
               </>
             ) : null}
-            {typeof processCount === 'number' && processCount > 0 ? (
+            {typeof processCount === 'number' && processCount > 0 && showChip('processes') ? (
               <>
                 <Text dimColor>│</Text>
                 <Text color="red">
@@ -827,26 +849,26 @@ export function StatusBar({
                 </Text>
               </>
             ) : null}
-            {hint ? (
+            {hint && showChip('hint') ? (
               <>
                 <Text dimColor>│</Text>
                 <Text dimColor>{hint}</Text>
               </>
             ) : null}
-            {indexState?.indexing ? (
+            {indexState?.indexing && showChip('index') ? (
               <>
                 <Text dimColor>│</Text>
                 <Text color="yellow">
                   ⚙ indexing {indexState.currentFile}/{indexState.totalFiles}
                 </Text>
               </>
-            ) : indexState?.circuit?.state === 'open' ? (
+            ) : indexState?.circuit?.state === 'open' && showChip('index') ? (
               <>
                 <Text dimColor>│</Text>
                 <Text color="red">⚙ index paused (/reindex)</Text>
               </>
             ) : null}
-            {breakerCountdown ? (() => {
+            {breakerCountdown && showChip('breaker') ? (() => {
               const secs = Math.ceil(breakerCountdown.remainingMs / 1000);
               const ratio = breakerCountdown.totalMs > 0
                 ? breakerCountdown.remainingMs / breakerCountdown.totalMs
@@ -873,12 +895,12 @@ export function StatusBar({
         <Box flexDirection="row" gap={2}>
           {renderChipLine(
             [
-              yolo ? (
+              yolo && showChip('yolo') ? (
                 <Text color="red" bold>
                   ⚠ YOLO
                 </Text>
               ) : null,
-              autonomy && autonomy !== 'off' ? (
+              autonomy && autonomy !== 'off' && showChip('autonomy') ? (
                 <Text
                   color={autonomy === 'eternal' ? 'red' : autonomy === 'auto' ? 'yellow' : 'cyan'}
                   bold
@@ -886,15 +908,15 @@ export function StatusBar({
                   ∞ {autonomy.toUpperCase()}
                 </Text>
               ) : null,
-              eternalStage ? <EternalStageChip stage={eternalStage} /> : null,
-              elapsedMs !== undefined && !hiddenSet.has('elapsed') ? (
+              eternalStage && showChip('eternal_stage') ? <EternalStageChip stage={eternalStage} /> : null,
+              elapsedMs !== undefined && showChip('elapsed') ? (
                 <Text dimColor>⏱ {fmtElapsed(elapsedMs)}</Text>
               ) : null,
-              projectName ? <Text color="blue">📁 {truncateChip(projectName, 24)}</Text> : null,
-              workingDir && !hiddenSet.has('working_dir') ? (
+              projectName && showChip('project') ? <Text color="blue">📁 {truncateChip(projectName, 24)}</Text> : null,
+              workingDir && showChip('working_dir') ? (
                 <Text color="blue">📂 {truncateChip(workingDir, 28)}</Text>
               ) : null,
-              goalSummary ? (
+              goalSummary && showChip('goal') ? (
                 <Text
                   color={
                     goalSummary.goalState === 'active'
@@ -913,26 +935,26 @@ export function StatusBar({
                   [{goalSummary.goalState}] (iter {goalSummary.iterations})
                 </Text>
               ) : null,
-              modeLabel ? <Text color="cyan">{modeIcon(modeLabel)}</Text> : null,
-              hasAutoProceed ? (
+              modeLabel && showChip('mode') ? <Text color="cyan">{modeIcon(modeLabel)}</Text> : null,
+              hasAutoProceed && showChip('auto_proceed') ? (
                 <Text color={autoProceedCountdown != null && autoProceedCountdown <= 5 ? 'yellow' : 'cyan'}>
                   ⏳ auto in {autoProceedCountdown}s
                 </Text>
               ) : null,
-              git && !hiddenSet.has('git') ? (
+              git && showChip('git') ? (
                 <Text>
                   <Text color="magenta">⎇ {truncateChip(git.branch, 24)}</Text>
                   {git.deleted > 0 ? <Text color="red"> -{git.deleted}</Text> : null}
                   {git.untracked > 0 ? <Text dimColor> ?{git.untracked}</Text> : null}
                 </Text>
               ) : null,
-              sessionCount != null && sessionCount > 0 ? (
+              sessionCount != null && sessionCount > 0 && showChip('sessions') ? (
                 <Text color="cyan">⧉ {sessionCount} session{sessionCount === 1 ? '' : 's'}</Text>
               ) : null,
-              toolCount != null ? (
+              toolCount != null && showChip('tools') ? (
                 <Text color="cyan">🔧 {toolCount} tool{toolCount === 1 ? '' : 's'}</Text>
               ) : null,
-              tokenSavingMode ? (
+              tokenSavingMode && showChip('token_saving') ? (
                 <Text color="yellow" bold>💾 save</Text>
               ) : null,
             ].filter((c): c is React.ReactElement => c !== null),
@@ -950,7 +972,7 @@ export function StatusBar({
         <Box flexDirection="row" gap={2}>
           {renderChipLine(
             [
-              todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0) && !hiddenSet.has('todos') ? (
+              todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0) && showChip('todos') ? (
                 <Text>
                   <Text dimColor>todos </Text>
                   {todos.inProgress > 0 ? <Text color="yellow">⌛{todos.inProgress}</Text> : null}
@@ -960,7 +982,7 @@ export function StatusBar({
                   {todos.completed > 0 ? <Text color="green">✓{todos.completed}</Text> : null}
                 </Text>
               ) : null,
-              plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0) && !hiddenSet.has('plan') ? (
+              plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0) && showChip('plan') ? (
                 <Text>
                   <Text color="cyan">📋 </Text>
                   {plan.inProgress > 0 ? <Text color="yellow">⌛{plan.inProgress}</Text> : null}
@@ -971,7 +993,7 @@ export function StatusBar({
                   {plan.scope ? <Text dimColor> [{plan.scope}]</Text> : null}
                 </Text>
               ) : null,
-              hasTaskActivity && !hiddenSet.has('tasks') ? (
+              hasTaskActivity && showChip('tasks') ? (
                 <Text>
                   <Text color="magenta">⚡ </Text>
                   {tasks!.inProgress > 0 ? <Text color="yellow">⌛{tasks!.inProgress}</Text> : null}
@@ -986,7 +1008,7 @@ export function StatusBar({
                   {tasks!.scope ? <Text dimColor> [{tasks!.scope}]</Text> : null}
                 </Text>
               ) : null,
-              fleetHasActivity && !hiddenSet.has('fleet') ? (
+              fleetHasActivity && showChip('fleet') ? (
                 fleet ? (
                   <Text>
                     <Text color="blue">🌐 </Text>
@@ -1021,7 +1043,7 @@ export function StatusBar({
                   ⏳ auto-send in {enhanceCountdown}s
                 </Text>
               ) : null,
-              hasNextStepsAutoSubmit && nextStepsAutoSubmitCountdown != null ? (
+              hasNextStepsAutoSubmit && nextStepsAutoSubmitCountdown != null && showChip('next_steps') ? (
                 <>
                   <Text color={nextStepsColor} bold>
                     ⏳ {nextStepsAutoSubmitCountdown}s
@@ -1046,7 +1068,7 @@ export function StatusBar({
       )}
 
       {/* Line 4: mailbox activity + fleet agent detail */}
-      {mailbox && !hiddenSet.has('mailbox') ? (
+      {mailbox && showMailbox ? (
         <Box flexDirection="row" gap={2}>
           {mailbox!.unread > 0 ? (
             <Text color="yellow" bold>
@@ -1083,7 +1105,7 @@ export function StatusBar({
               </Text>
             </>
           ) : null}
-          {fleetAgents && fleetAgents.length > 0
+          {fleetAgents && fleetAgents.length > 0 && showChip('fleet_agents')
             ? fleetAgents.map((a, i) => (
                 <Text key={i}>
                   <Text dimColor>│</Text>{' '}
@@ -1114,7 +1136,7 @@ export function StatusBar({
               ))
             : null}
         </Box>
-      ) : fleetAgents && fleetAgents.length > 0 ? (
+      ) : fleetAgents && fleetAgents.length > 0 && showChip('fleet_agents') ? (
         <Box flexDirection="row" gap={2}>
           {fleetAgents.map((a, i) => (
             <Text key={i}>

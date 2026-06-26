@@ -38,6 +38,8 @@ export interface StaticServeOptions {
   globalRoot: string;
   /** Push-on-write hook for `POST /api/fleet/ping` (immediate fleet re-broadcast). */
   onFleetPing?: (() => void) | undefined;
+  /** Public browser-facing WS URL injected into the React app. */
+  publicWsUrl?: string | undefined;
   /**
    * Shared auth token for `/ws-auth` and `/api/*` endpoints. Required for
    * the cookie-based auth flow: the frontend extracts this from the URL,
@@ -45,6 +47,8 @@ export interface StaticServeOptions {
    * cookie for subsequent WS upgrades (closing C-598 query-string exposure).
    */
   apiToken?: string | undefined;
+  /** Force token auth even when the server binds to loopback. */
+  requireToken?: boolean | undefined;
 }
 
 /**
@@ -94,7 +98,9 @@ export function startStaticServe(
     wsPort: opts.wsPort,
     globalRoot: opts.globalRoot,
     onFleetPing: opts.onFleetPing,
+    publicWsUrl: opts.publicWsUrl,
     apiToken: opts.apiToken,
+    requireToken: opts.requireToken,
   });
 
   server.listen(opts.httpPort, opts.host);

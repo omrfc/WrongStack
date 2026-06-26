@@ -80,7 +80,9 @@ import {
   createEternalSubscription,
   createToolLspCompletionSource,
   findFreePort,
-  generateAuthToken,
+  resolveAuthToken,
+  buildWebUIAccessUrl,
+  envFlag,
   handleCompletionRequest,
   handleFilesList,
   handleFilesRead,
@@ -249,8 +251,18 @@ interface CliWebUIOptions {
   session: SessionWriter;
   /** WebSocket backend port. Defaults to 3457 (auto-advances if taken). */
   port?: number | undefined;
+  /** Host/interface to bind HTTP and WS servers. Defaults to 127.0.0.1. */
+  host?: string | undefined;
   /** HTTP port serving the React frontend. Defaults to 3456 (auto-advances). */
   httpPort?: number | undefined;
+  /** Fixed access token/password. Defaults to WEBUI_TOKEN or random per process. */
+  accessToken?: string | undefined;
+  /** Browser-facing HTTP URL, used when WebUI is exposed behind a tunnel/proxy. */
+  publicUrl?: string | undefined;
+  /** Browser-facing WebSocket URL injected into the frontend. */
+  publicWsUrl?: string | undefined;
+  /** Force token/password protection even on loopback binds. */
+  requireToken?: boolean | undefined;
   /** Project root — recorded in the running-instance registry. */
   projectRoot?: string | undefined;
   /** Full app config, used for HQ client publishing settings. */
@@ -263,7 +275,7 @@ interface CliWebUIOptions {
    * port resolution now makes startup asynchronous, so a synchronous bind can
    * no longer be assumed.
    */
-  onListening?: (info: { httpPort: number; wsPort: number; host: string }) => void;
+  onListening?: (info: { httpPort: number; wsPort: number; host: string; url: string }) => void;
   modelsRegistry?: ModelsRegistry | undefined;
   globalConfigPath?: string | undefined;
   /**
@@ -345,7 +357,10 @@ interface ConnectedClient {
 }
 
 export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
-  const host = '127.0.0.1';
+  const host = opts.host ?? process.env['WEBUI_HOST'] ?? process.env['WS_HOST'] ?? '127.0.0.1';
+  const publicUrl = opts.publicUrl ?? process.env['WEBUI_PUBLIC_URL'];
+  const publicWsUrl = opts.publicWsUrl ?? process.env['WEBUI_PUBLIC_WS_URL'];
+  const requireToken = opts.requireToken ?? envFlag('WEBUI_REQUIRE_TOKEN');
   const requestedWsPort = opts.port ?? 3457;
   const requestedHttpPort = opts.httpPort ?? 3456;
   // Auto-advance past busy ports (unless WEBUI_STRICT_PORT) so this works
@@ -464,8 +479,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
    * the frontend always has the correct cost rates for live computation.
    *
    * Callers pass optional overrides for fields that vary per context
-   * (reset, mode, replayMessages, etc.). The connection handler adds
-   * wsToken on top.
+   * (reset, mode, replayMessages, etc.).
    */
   async function buildSessionStartPayload(overrides?: Record<string, unknown>, needsSetup = false) {
     let maxContext = 0;
@@ -602,7 +616,23 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // The token is passed to the frontend via the URL query param, which the
   // frontend then exchanges for an HttpOnly cookie via /ws-auth?token=...
   // This closes C-598 (query-string token exposure) after the first request.
-  const wsToken = generateAuthToken();
+  const wsToken = resolveAuthToken(opts.accessToken);
+  const publicHostnames = [publicUrl, publicWsUrl]
+    .map((value) => {
+      if (!value) return undefined;
+      try {
+        return new URL(value).hostname;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((value): value is string => Boolean(value));
+  const accessUrl = buildWebUIAccessUrl({
+    host,
+    port: httpPort,
+    token: wsToken,
+    publicUrl,
+  });
 
   const wss = new WebSocketServer({ port, host, maxPayload: 1 * 1024 * 1024 });
 
@@ -626,7 +656,9 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     onFleetPing: () => {
       void fleetBroadcastCli?.();
     },
+    publicWsUrl,
     apiToken: wsToken,
+    requireToken,
   });
   if (httpServer) {
     announceWebuiReady({
@@ -636,6 +668,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       wsPort,
       open: !!opts.open,
       wsToken,
+      publicUrl,
     });
   } else {
     console.warn(
@@ -653,12 +686,14 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       host,
       httpPort,
       wsPort,
+      publicUrl,
       projectRoot: opts.projectRoot,
       startedAt: new Date().toISOString(),
       registryBaseDir,
     });
   }
-  // Auth token is sent to clients via the session.start payload — do NOT log it.
+  // Auth token is delivered through the printed first-load URL and then
+  // exchanged for an HttpOnly cookie by /ws-auth.
 
   // Subscribe to events once
   const eventUnsubscribers: Array<() => void> = [];
@@ -1568,7 +1603,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     wss.on('listening', () => {
       console.log(`[WebUI] WebSocket server running on ws://${host}:${port}`);
       setupEvents();
-      opts.onListening?.({ httpPort, wsPort, host });
+      opts.onListening?.({ httpPort, wsPort, host, url: accessUrl });
 
       // ── Live session status poll ──────────────────────────────────
       // Periodically read the cross-process SessionRegistry and push
@@ -1673,6 +1708,9 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         cookieHeader: req.headers.cookie,
         wsHost: host,
         expectedToken: wsToken,
+        requireToken,
+        allowedHostnames: publicHostnames,
+        allowBrowserUrlToken: Boolean(publicWsUrl),
       });
       if (!ok) {
         ws.close(4003, 'Forbidden');

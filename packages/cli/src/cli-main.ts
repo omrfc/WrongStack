@@ -109,7 +109,7 @@ import { generateCommitMessageWithLLM } from './slash-commands/commit-llm.js';
 import { makeProviderClassifier } from './slash-commands/dispatch-llm.js';
 import { buildBuiltinSlashCommands } from './slash-commands/index.js';
 import { parseMcpArgs, runMcpManagementCommand } from './slash-commands/mcp-utils.js';
-import { DEFAULTS, loadStatuslineConfig, saveStatuslineConfig } from './slash-commands/statusline.js';
+import { DEFAULTS, STATUSLINE_CONFIG_KEYS, ensureStatuslineConfig, loadStatuslineConfig, saveStatuslineConfig, type StatuslineConfigKey } from './slash-commands/statusline.js';
 import { getSuggestions, setSuggestions } from './slash-commands/suggestion-store.js';
 import { fmtTaskResultLine, patchConfig } from './utils.js';
 import { CLI_VERSION } from './version.js';
@@ -1561,35 +1561,21 @@ export async function main(argv: string[]): Promise<number> {
   };
 
   // Statusline hidden items — derived from the config file, kept in sync with the TUI
-  const hiddenItemsFromConfig = await loadStatuslineConfig();
-  const hiddenItemsList: Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'
-  > = [];
-  const ALL_ITEMS = ['todos', 'plan', 'tasks', 'fleet', 'git', 'elapsed', 'context', 'cost'] as const;
-  for (const k of ALL_ITEMS) {
+  const hiddenItemsFromConfig = await ensureStatuslineConfig();
+  const hiddenItemsList: StatuslineConfigKey[] = [];
+  for (const k of STATUSLINE_CONFIG_KEYS) {
     if (!hiddenItemsFromConfig[k]) hiddenItemsList.push(k);
   }
   const statuslineHiddenItems = hiddenItemsList;
-  let currentHiddenItems = [...statuslineHiddenItems] as Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-  >;
-  const setStatuslineHiddenItems = (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => {
+  let currentHiddenItems = [...statuslineHiddenItems];
+  const setStatuslineHiddenItems = (items: StatuslineConfigKey[]) => {
     currentHiddenItems = items;
   };
   /** Atomically saves hidden items to disk and updates in-memory state. */
-  const ALL_STATUSLINE_KEYS = ['todos', 'plan', 'tasks', 'fleet', 'git', 'elapsed', 'context', 'cost', 'working_dir'] as const;
-  const saveStatuslineHiddenItems = async (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ): Promise<void> => {
+  const saveStatuslineHiddenItems = async (items: StatuslineConfigKey[]): Promise<void> => {
     currentHiddenItems = items;
     const cfg: import('./slash-commands/statusline.js').StatuslineConfig = { ...DEFAULTS };
-    for (const k of ALL_STATUSLINE_KEYS) {
+    for (const k of STATUSLINE_CONFIG_KEYS) {
       cfg[k] = !items.includes(k);
     }
     await saveStatuslineConfig(cfg);

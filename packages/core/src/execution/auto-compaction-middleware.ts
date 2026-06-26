@@ -260,6 +260,7 @@ export class AutoCompactionMiddleware {
         level,
         tokens,
         load,
+        hardThreshold: adaptiveThresholds.hard,
         budget,
         signals: { repeatedReadCount: repetition },
       });
@@ -326,10 +327,12 @@ export class AutoCompactionMiddleware {
       level: PressureLevel;
       tokens: number;
       load: number;
+      hardThreshold: number;
       budget: ContextWindowBudgetSnapshot;
       signals: { repeatedReadCount: number };
     },
   ): Promise<void> {
+    let postCompactionOverflow: AgentError | null = null;
     try {
       const report = await this.compactor.compact(ctx, { aggressive });
       this.recordAttempt(pressure.level, pressure.tokens, report);
@@ -368,6 +371,42 @@ export class AutoCompactionMiddleware {
       // Stale file-read metadata from before the compaction boundary is no
       // longer useful and would cause hasRead() to skip legitimate re-reads.
       ctx.clearFileTracking();
+
+      const afterTokens = report.fullRequestTokensAfter ?? report.after;
+      const afterLoad = this._maxContext > 0 ? afterTokens / this._maxContext : 0;
+      const stillHard = afterLoad >= pressure.hardThreshold;
+      const fatal =
+        stillHard &&
+        (this.failureMode === 'throw' ||
+          (this.failureMode === 'throw_on_hard' && pressure.level === 'hard'));
+      if (stillHard) {
+        const error = new Error(
+          `Auto-compaction left context above the hard threshold after ${pressure.level} compaction`,
+        );
+        this.events?.emit('compaction.failed', {
+          err: error,
+          aggressive,
+          level: pressure.level,
+          tokens: afterTokens,
+          maxContext: this._maxContext,
+          budget: computeContextWindowBudget(ctx, afterTokens, this._maxContext),
+          signals: pressure.signals,
+          load: afterLoad,
+          fatal,
+        });
+        if (fatal) {
+          postCompactionOverflow = new AgentError({
+            message: `Auto-compaction did not reduce context below hard threshold`,
+            code: ERROR_CODES.AGENT_CONTEXT_OVERFLOW,
+            recoverable: true,
+            context: {
+              level: pressure.level,
+              tokens: afterTokens,
+              maxContext: this._maxContext,
+            },
+          });
+        }
+      }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       const fatal =
@@ -398,6 +437,7 @@ export class AutoCompactionMiddleware {
         });
       }
     }
+    if (postCompactionOverflow) throw postCompactionOverflow;
   }
 }
 

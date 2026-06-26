@@ -64,7 +64,7 @@ import { CoordinatorPanel } from './components/coordinator-panel.js';
 import { ResumePicker } from './components/resume-picker.js';
 import { SessionsPanel } from './components/sessions-panel.js';
 import { SettingsPicker, type ContextMode, type StatuslineMode } from './components/settings-picker.js';
-import { StatuslinePicker, STATUSLINE_ITEMS, isChipExpired } from './components/statusline-picker.js';
+import { StatuslinePicker, STATUSLINE_ITEMS, isChipExpired, type StatuslineItem } from './components/statusline-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
 import { KeyHintBar, type KeyHintContext } from './components/key-hint-bar.js';
 import {
@@ -625,23 +625,13 @@ export interface AppProps {
    * visible bar without a round-trip. The initial value is loaded from
    * the config file before App mounts.
    */
-  statuslineHiddenItems: Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-  >;
-  setStatuslineHiddenItems: (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => void;
+  statuslineHiddenItems: StatuslineItem[];
+  setStatuslineHiddenItems: (items: StatuslineItem[]) => void;
   /**
    * Atomically persists statusline hidden items to disk. Used by the
    * statusline picker so each toggle is immediately durable.
    */
-  saveStatuslineHiddenItems: (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => Promise<void>;
+  saveStatuslineHiddenItems: (items: StatuslineItem[]) => Promise<void>;
   /**
    * Controller for the agents monitor overlay. App installs a dispatch-backed
    * setter on mount so the `/agents on|off` slash command can toggle the
@@ -1125,9 +1115,7 @@ export function App({
     if (state.statuslinePicker.open) {
       const pickerHidden = state.statuslinePicker.hiddenItems;
       // Only sync if the lists differ (avoid infinite loops). Compare as plain
-      // strings: the picker's hiddenItems is typed StatuslineItem[] (the wide
-      // union incl. stream chips), while hiddenItems is the narrower
-      // StatuslineHiddenItem[] — membership checks don't care about the union.
+      // Compare as plain strings to avoid order-only churn.
       const currentHidden = new Set<string>(hiddenItems);
       const pickerHiddenSet = new Set<string>(pickerHidden);
       const differs =
@@ -1302,6 +1290,22 @@ export function App({
   const draftRef = useRef({ buffer: state.buffer, cursor: state.cursor });
   draftRef.current = { buffer: state.buffer, cursor: state.cursor };
 
+  const statuslineHiddenForPicker = useCallback((): StatuslineItem[] => {
+    const hookHidden = hiddenItemsRef.current;
+    const hookHiddenSet = new Set<StatuslineItem>(hookHidden);
+    const reducerOnlyHidden = stateRef.current.statuslinePicker.hiddenItems.filter(
+      (item) => !hookHiddenSet.has(item),
+    );
+    return [...hookHidden, ...reducerOnlyHidden];
+  }, []);
+
+  const openStatuslinePicker = useCallback((field?: number) => {
+    if (field !== undefined) {
+      dispatch({ type: 'statuslineFieldSet', field });
+    }
+    dispatch({ type: 'statuslineOpen', hiddenItems: statuslineHiddenForPicker() });
+  }, [statuslineHiddenForPicker]);
+
   // Live mirror of the `mouse` opt-in so `/mouse` can toggle full mouse mode
   // mid-session (swap History ↔ ScrollableHistory, flip SGR tracking) without a
   // restart. Seeded from the prop (--mouse / WRONGSTACK_MOUSE / saved setting).
@@ -1320,6 +1324,8 @@ export function App({
     state.settingsPicker.open ||
     state.projectPicker.open ||
     state.slashPicker.open ||
+    state.statuslinePicker.open ||
+    state.fKeyPicker.open ||
     state.picker.open;
   const mouseTrackingOn = mouseMode || pickerOverlayOpen;
   const mouseWrittenRef = useRef(false);
@@ -2949,24 +2955,54 @@ export function App({
   }, [slashRegistry, getSettings, saveSettings, openSettings]);
 
   // Register the TUI-only `/statusline` command — opens the interactive
-  // StatuslinePicker overlay. Arguments (item, on|off) delegate to the CLI's
-  // built-in command. When called with no args, opens the picker.
+  // StatuslinePicker overlay. Arguments (item, on|off) are handled here too
+  // because official TUI commands do not fall through to the CLI builtin.
   useEffect(() => {
     const cmd = {
       name: 'statusline',
       aliases: ['sl'],
       description: 'Customize status bar chips: /statusline (interactive) or /statusline <item> [on|off]',
       async run(args: string) {
-        // If there are arguments, don't open the picker — let the CLI builtin handle it.
-        if (args.trim()) return { message: undefined };
-        // Open the interactive picker with the current hiddenItems from the
-        // hook state (config-backed), merged with any stream chips that were
-        // toggled in a previous picker session (tracked in reducer state).
-        const hookHidden = hiddenItemsRef.current as string[];
-        const reducerStreamHidden = stateRef.current.statuslinePicker.hiddenItems.filter(
-          (item: string) => !hookHidden.includes(item),
-        );
-        dispatch({ type: 'statuslineOpen', hiddenItems: [...hookHidden, ...reducerStreamHidden] as import('./components/statusline-picker.js').StatuslineItem[] });
+        const trimmed = args.trim();
+        if (trimmed) {
+          const [rawItem, rawAction] = trimmed.split(/\s+/);
+          const item = rawItem as StatuslineItem | 'all' | 'reset' | undefined;
+          const action = rawAction?.toLowerCase();
+          const applyHidden = (items: StatuslineItem[]) => {
+            const deduped = [...new Set(items)];
+            hiddenItemsRef.current = deduped;
+            setHiddenItems(deduped);
+          };
+
+          if (item === 'reset') {
+            applyHidden([]);
+            return { message: 'StatusBar config reset to defaults.' };
+          }
+
+          if (item === 'all') {
+            if (action !== 'on' && action !== 'off') {
+              return { message: 'Usage: /statusline all on|off' };
+            }
+            applyHidden(action === 'off' ? [...STATUSLINE_ITEMS] : []);
+            return { message: `statusline all: ${action === 'on' ? 'showing all chips' : 'hiding all chips'}` };
+          }
+
+          if (!item || !STATUSLINE_ITEMS.includes(item as StatuslineItem)) {
+            return { message: `Unknown item "${rawItem ?? ''}". Run /statusline to see available items.` };
+          }
+
+          if (action !== undefined && action !== 'on' && action !== 'off') {
+            return { message: `Usage: /statusline ${item} on|off` };
+          }
+
+          const hidden = new Set<StatuslineItem>(hiddenItemsRef.current);
+          const nextVisible = action ? action === 'on' : hidden.has(item);
+          if (nextVisible) hidden.delete(item);
+          else hidden.add(item);
+          applyHidden([...hidden]);
+          return { message: `statusline ${item}: ${nextVisible ? 'on' : 'off'}` };
+        }
+        openStatuslinePicker();
         return { message: undefined };
       },
     };
@@ -2976,7 +3012,7 @@ export function App({
     return () => {
       slashRegistry.unregister('statusline');
     };
-  }, [slashRegistry]);
+  }, [slashRegistry, openStatuslinePicker, setHiddenItems]);
 
   // Register the TUI-only `/mailbox` command — toggles the mailbox panel.
   useEffect(() => {
@@ -4294,7 +4330,7 @@ export function App({
           openProjectPicker();
           return;
         }
-        const action = actionForFKeyPanel(entry, state.statuslinePicker.hiddenItems);
+        const action = actionForFKeyPanel(entry, statuslineHiddenForPicker());
         if (action) dispatch(action);
         return;
       }
@@ -4684,7 +4720,7 @@ export function App({
     // F12 → status line picker. Mirrors /statusline for terminals where slash
     // commands are inconvenient during a busy session.
     if (key.fn === 12) {
-      dispatch({ type: 'statuslineOpen', hiddenItems: state.statuslinePicker.hiddenItems });
+      openStatuslinePicker();
       return;
     }
     // Settings editor (also openable via `/settings`). Opening closes any other
@@ -5185,27 +5221,24 @@ export function App({
         // Field indices are derived from STATUSLINE_ITEMS so they can't drift
         // when the picker's item order changes (line 3: todos/plan/tasks;
         // line 4: fleet).
-        const hiddenSet = new Set(state.statuslinePicker.hiddenItems);
+        const hiddenSet = new Set(statuslineHiddenForPicker());
         if (my === rowFor(2)) {
           const mxLocal = mx - SB_PADX - 1;
           if (!hiddenSet.has('todos') && mxLocal >= 0 && mxLocal < 20) {
-            dispatch({ type: 'statuslineFieldSet', field: STATUSLINE_ITEMS.indexOf('todos') });
-            dispatch({ type: 'statuslineOpen', hiddenItems: state.statuslinePicker.hiddenItems });
+            openStatuslinePicker(STATUSLINE_ITEMS.indexOf('todos'));
             return;
           }
           if (!hiddenSet.has('plan')) {
             const planStart = 21;
             if (mxLocal >= planStart && mxLocal < planStart + 22) {
-              dispatch({ type: 'statuslineFieldSet', field: STATUSLINE_ITEMS.indexOf('plan') });
-              dispatch({ type: 'statuslineOpen', hiddenItems: state.statuslinePicker.hiddenItems });
+              openStatuslinePicker(STATUSLINE_ITEMS.indexOf('plan'));
               return;
             }
           }
           if (!hiddenSet.has('tasks')) {
             const tasksStart = 44;
             if (mxLocal >= tasksStart && mxLocal < tasksStart + 26) {
-              dispatch({ type: 'statuslineFieldSet', field: STATUSLINE_ITEMS.indexOf('tasks') });
-              dispatch({ type: 'statuslineOpen', hiddenItems: state.statuslinePicker.hiddenItems });
+              openStatuslinePicker(STATUSLINE_ITEMS.indexOf('tasks'));
               return;
             }
           }
@@ -5214,8 +5247,7 @@ export function App({
           const mxLocal = mx - SB_PADX - 1;
           const fleetStart = 0;
           if (mxLocal >= fleetStart && mxLocal < fleetStart + 22) {
-            dispatch({ type: 'statuslineFieldSet', field: STATUSLINE_ITEMS.indexOf('fleet') });
-            dispatch({ type: 'statuslineOpen', hiddenItems: state.statuslinePicker.hiddenItems });
+            openStatuslinePicker(STATUSLINE_ITEMS.indexOf('fleet'));
             return;
           }
         }

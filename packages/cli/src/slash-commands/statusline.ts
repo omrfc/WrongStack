@@ -6,28 +6,120 @@ import { toErrorMessage } from '@wrongstack/core/utils';
 const CONFIG_ENV = 'WRONGSTACK_STATUSLINE_CONFIG';
 
 export interface StatuslineConfig {
+  version?: boolean | undefined;
+  state?: boolean | undefined;
+  model?: boolean | undefined;
   todos?: boolean | undefined;
   plan?: boolean | undefined;
   tasks?: boolean | undefined;
   fleet?: boolean | undefined;
+  fleet_agents?: boolean | undefined;
   git?: boolean | undefined;
   elapsed?: boolean | undefined;
   context?: boolean | undefined;
+  tokens?: boolean | undefined;
+  cache?: boolean | undefined;
   cost?: boolean | undefined;
+  queue?: boolean | undefined;
+  processes?: boolean | undefined;
+  hint?: boolean | undefined;
+  index?: boolean | undefined;
+  breaker?: boolean | undefined;
   working_dir?: boolean | undefined;
+  project?: boolean | undefined;
+  yolo?: boolean | undefined;
+  autonomy?: boolean | undefined;
+  eternal_stage?: boolean | undefined;
+  goal?: boolean | undefined;
+  mode?: boolean | undefined;
+  auto_proceed?: boolean | undefined;
+  sessions?: boolean | undefined;
+  tools?: boolean | undefined;
+  token_saving?: boolean | undefined;
+  brain?: boolean | undefined;
+  mailbox?: boolean | undefined;
+  enhance?: boolean | undefined;
+  debug_stream?: boolean | undefined;
+  next_steps?: boolean | undefined;
 }
 
 export const DEFAULTS: StatuslineConfig = {
+  version: true,
+  state: true,
+  model: true,
   todos: true,
   plan: true,
   tasks: true,
   fleet: true,
+  fleet_agents: true,
   git: true,
   elapsed: true,
   context: true,
+  tokens: true,
+  cache: true,
   cost: true,
+  queue: true,
+  processes: true,
+  hint: true,
+  index: true,
+  breaker: true,
   working_dir: true,
+  project: true,
+  yolo: true,
+  autonomy: true,
+  eternal_stage: true,
+  goal: true,
+  mode: true,
+  auto_proceed: true,
+  sessions: true,
+  tools: true,
+  token_saving: true,
+  brain: true,
+  mailbox: true,
+  enhance: true,
+  debug_stream: true,
+  next_steps: true,
 };
+
+export type StatuslineConfigKey = keyof StatuslineConfig;
+
+export const STATUSLINE_CONFIG_KEYS: StatuslineConfigKey[] = [
+  'version',
+  'state',
+  'model',
+  'context',
+  'tokens',
+  'cache',
+  'cost',
+  'queue',
+  'processes',
+  'hint',
+  'index',
+  'breaker',
+  'yolo',
+  'autonomy',
+  'eternal_stage',
+  'elapsed',
+  'project',
+  'working_dir',
+  'goal',
+  'mode',
+  'auto_proceed',
+  'git',
+  'sessions',
+  'tools',
+  'token_saving',
+  'todos',
+  'plan',
+  'tasks',
+  'fleet',
+  'brain',
+  'debug_stream',
+  'enhance',
+  'next_steps',
+  'mailbox',
+  'fleet_agents',
+];
 
 function resolveConfigPath(): string {
   return (
@@ -35,12 +127,55 @@ function resolveConfigPath(): string {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeStatuslineConfig(value: unknown): StatuslineConfig {
+  const cfg: StatuslineConfig = { ...DEFAULTS };
+  if (!isRecord(value)) return cfg;
+  for (const key of STATUSLINE_CONFIG_KEYS) {
+    const raw = value[key];
+    if (typeof raw === 'boolean') cfg[key] = raw;
+  }
+  return cfg;
+}
+
+function isMissingKnownStatuslineKeys(value: unknown): boolean {
+  if (!isRecord(value)) return true;
+  return STATUSLINE_CONFIG_KEYS.some((key) => typeof value[key] !== 'boolean');
+}
+
+function hasFsCode(err: unknown, code: string): boolean {
+  return isRecord(err) && err['code'] === code;
+}
+
 export async function loadStatuslineConfig(): Promise<StatuslineConfig> {
   const p = resolveConfigPath();
   try {
     const raw = await fs.readFile(p, 'utf8');
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<StatuslineConfig>) };
+    return normalizeStatuslineConfig(JSON.parse(raw));
   } catch {
+    return { ...DEFAULTS };
+  }
+}
+
+export async function ensureStatuslineConfig(): Promise<StatuslineConfig> {
+  const p = resolveConfigPath();
+  try {
+    const raw = await fs.readFile(p, 'utf8');
+    const parsed = JSON.parse(raw);
+    const cfg = normalizeStatuslineConfig(parsed);
+    if (isMissingKnownStatuslineKeys(parsed)) {
+      await saveStatuslineConfig(cfg);
+    }
+    return cfg;
+  } catch (err) {
+    if (hasFsCode(err, 'ENOENT')) {
+      const cfg = { ...DEFAULTS };
+      await saveStatuslineConfig(cfg);
+      return cfg;
+    }
     return { ...DEFAULTS };
   }
 }
@@ -69,11 +204,11 @@ export interface StatuslineCommandDeps {
   cwd: string;
   /** Current hidden items list. Written by the command when toggling. */
   hiddenItems: Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
+    StatuslineConfigKey
   >;
   setHiddenItems: (
     items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
+      StatuslineConfigKey
     >,
   ) => void;
   getConfig: () => Promise<StatuslineConfig>;
@@ -84,35 +219,51 @@ export interface StatuslineCommandDeps {
    */
   saveStatuslineHiddenItems?: (
     items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
+      StatuslineConfigKey
     >,
   ) => Promise<void>;
 }
 
 /** Item descriptions for help display */
 const ITEM_DESCRIPTIONS: Record<keyof StatuslineConfig, string> = {
+  version: 'WrongStack version chip',
+  state: 'Agent run state / thinking spinner',
+  model: 'Current provider/model id',
   todos: 'Todo items (pending/in-progress/done counts)',
   plan: 'Plan board items (open/in-progress/done)',
   tasks: 'Task board items (structured work with type/priority)',
   fleet: 'Fleet agent status (running/idle/pending/completed)',
+  fleet_agents: 'Per-agent live detail row',
   git: 'Git branch name',
   elapsed: 'Session elapsed time',
   context: 'Context window usage (input tokens)',
+  tokens: 'Input/output token counters',
+  cache: 'Prompt cache hit ratio',
   cost: 'Token cost estimate (input/output/total)',
+  queue: 'Queued prompt count',
+  processes: 'Tracked shell/process count',
+  hint: 'Transient status hint text',
+  index: 'Codebase indexing status',
+  breaker: 'Process breaker countdown',
   working_dir: 'Current working directory',
+  project: 'Project name',
+  yolo: 'YOLO permission mode',
+  autonomy: 'Autonomy mode',
+  eternal_stage: 'Autonomy stage',
+  goal: 'Active goal summary',
+  mode: 'Active agent mode label',
+  auto_proceed: 'Auto-proceed countdown',
+  sessions: 'Live session count',
+  tools: 'Registered tool count',
+  token_saving: 'Token-saving mode indicator',
+  brain: 'Brain arbiter decisions',
+  mailbox: 'Mailbox unread messages and peers',
+  enhance: 'Prompt-enhance countdown',
+  debug_stream: 'Stream debug telemetry',
+  next_steps: 'Next-step auto-submit countdown',
 };
 
-const ALL_CONFIG_KEYS: (keyof StatuslineConfig)[] = [
-  'todos',
-  'plan',
-  'tasks',
-  'fleet',
-  'git',
-  'elapsed',
-  'context',
-  'cost',
-  'working_dir',
-];
+const ALL_CONFIG_KEYS = STATUSLINE_CONFIG_KEYS;
 
 export function buildStatuslineCommand(deps: StatuslineCommandDeps): SlashCommand {
   return {

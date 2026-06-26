@@ -21,17 +21,23 @@ The Web UI listens on **two** ports:
 
 | Port | Env var | Default | Purpose |
 |---|---|---|---|
-| HTTP | `PORT` | `3456` | serves the built React app (`index.html` + assets) |
+| HTTP | `WEBUI_PORT` / `PORT` | `3456` | serves the built React app (`index.html` + assets) |
 | WebSocket | `WS_PORT` | `3457` | the agent backend (messages, tool stream, provider/key mgmt) |
 
-Bind host is `WS_HOST` (default `127.0.0.1`). On loopback the server also listens on
+Bind host is `WEBUI_HOST` / `WS_HOST` (default `127.0.0.1`). On loopback the server also listens on
 the IPv6 loopback `::1` for the same WS port, so browsers that resolve `localhost`
-to IPv6 first don't flap. Set `WS_HOST=0.0.0.0` to expose on the LAN (this also
-requires the auth token for non-loopback clients — see Security).
+to IPv6 first don't flap. Set `--host 0.0.0.0` or `WEBUI_HOST=0.0.0.0` to expose
+on LAN/Tailscale (this requires the auth token for HTTP, API, and WS access — see
+Security).
 
 The frontend learns the **real** WS port from a `<meta name="wrongstack-ws-port">`
 tag the HTTP server injects into the served HTML — it is *not* hardcoded. This is
 what makes multiple instances work.
+
+Behind a tunnel or reverse proxy, the browser-facing URL can differ from the local
+bind address. Set `WEBUI_PUBLIC_URL` / `--public-url` for the HTTP URL printed to
+the user, and `WEBUI_PUBLIC_WS_URL` / `--public-ws-url` when the WebSocket endpoint
+is exposed on a separate public URL.
 
 ### Running multiple instances
 
@@ -54,7 +60,8 @@ To pin ports instead (e.g. behind a reverse proxy), set them explicitly and disa
 auto-advance:
 
 ```bash
-PORT=8080 WS_PORT=8081 WEBUI_STRICT_PORT=1 webui   # fail loudly if 8080/8081 are taken
+webui --host 0.0.0.0 --port 8080 --ws-port 8081 --token "$WEBUI_TOKEN"
+WEBUI_STRICT_PORT=1 webui --port 8080 --ws-port 8081   # fail loudly if taken
 ```
 
 ## Running-instance registry
@@ -100,27 +107,93 @@ the same registry as standalone ones.
 | Flag (CLI `--webui`) | Standalone equiv. | Effect |
 |---|---|---|
 | `--webui` | `webui` | start the server |
-| `--port <n>` | `WS_PORT=<n>` | WebSocket port (HTTP auto-resolves) |
+| `--host <h>` / `--webui-host <h>` | `webui --host <h>` | bind host/interface (`0.0.0.0` for LAN/Tailscale) |
+| `--webui-port <n>` / `--http-port <n>` | `webui --port <n>` | HTTP frontend port |
+| `--ws-port <n>` / `--port <n>` | `webui --ws-port <n>` | WebSocket backend port (`--port` kept for CLI compatibility) |
+| `--webui-token <t>` | `webui --token <t>` | fixed access token/password instead of a random process token |
+| `--webui-public-url <url>` / `--public-url <url>` | `webui --public-url <url>` | browser-facing HTTP URL for tunnels/proxies |
+| `--webui-public-ws-url <url>` / `--public-ws-url <url>` | `webui --public-ws-url <url>` | browser-facing `ws://` or `wss://` URL for tunnels/proxies |
+| `--webui-require-token` / `--require-token` | `webui --require-token` | require the token even on loopback binds |
 | `--open` | `webui --open` / `WEBUI_OPEN=1` | open the browser after the server is ready |
 | — | `webui --list` | print running instances and exit |
 
 | Env var | Default | Effect |
 |---|---|---|
-| `PORT` | `3456` | HTTP port |
+| `WEBUI_PORT` / `PORT` | `3456` | HTTP port |
 | `WS_PORT` | `3457` | WebSocket port |
-| `WS_HOST` | `127.0.0.1` | bind host (`0.0.0.0` for LAN) |
+| `WEBUI_HOST` / `WS_HOST` | `127.0.0.1` | bind host (`0.0.0.0` for LAN) |
+| `WEBUI_TOKEN` | random | fixed access token/password |
+| `WEBUI_PUBLIC_URL` | unset | browser-facing HTTP URL for tunnels/proxies |
+| `WEBUI_PUBLIC_WS_URL` | unset | browser-facing `ws://` or `wss://` URL for tunnels/proxies |
+| `WEBUI_REQUIRE_TOKEN` | unset | `1` requires token auth even on loopback binds |
 | `WEBUI_STRICT_PORT` | unset | `1` disables port auto-advance (fail on conflict) |
 | `WEBUI_OPEN` | unset | `1` opens the browser on start (standalone) |
 
 ## Security
 
-- The server binds loopback by default. **Loopback** clients connect without a token.
-- A random per-process **auth token** is generated and sent to the page via the
-  `session.start` payload; **non-loopback** clients (e.g. when `WS_HOST=0.0.0.0`) must
-  present it as `?token=…`.
+- The server binds loopback by default. **Loopback bind** keeps the existing local
+  dev ergonomics and does not require a token.
+- For public tunnels that connect to a local loopback port, set
+  `WEBUI_REQUIRE_TOKEN=1` or `--require-token`; otherwise the server sees the tunnel
+  daemon as a local client.
+- On a non-loopback bind, the HTTP UI, `/api/*` routes, and WebSocket upgrade all
+  require the access token. A random per-process token is generated unless you set
+  `WEBUI_TOKEN` / `--token` / `--webui-token`.
+- The printed URL includes `?token=...` for first load. The frontend exchanges it
+  for an HttpOnly `ws_token` cookie via `/ws-auth`, then removes the token from the
+  browser address bar. Browser WebSocket auth uses the cookie, not URL-token auth.
 - DNS-rebinding defense: the WS upgrade rejects non-loopback `Host` headers; the HTTP
-  responses set a strict CSP whose `connect-src` only allows the loopback WS port.
+  responses set a strict CSP whose `connect-src` allows the loopback WS port and the
+  current request host's WS/WSS port.
 - Inbound WS frames are size-capped and per-connection rate-limited.
+
+### Remote access examples
+
+```bash
+# Tailscale/LAN: expose both HTTP and WS ports on the machine's Tailscale IP.
+WEBUI_TOKEN="$(openssl rand -hex 16)" webui --host 0.0.0.0 --port 8080 --ws-port 8081
+
+# CLI-embedded WebUI, same live agent as the terminal.
+wstack --webui --host 0.0.0.0 --webui-port 8080 --ws-port 8081 --webui-token "$WEBUI_TOKEN"
+```
+
+Cloudflare Tunnel or another reverse proxy can keep WrongStack bound to loopback and
+publish only the tunnel endpoints:
+
+```bash
+export WEBUI_TOKEN="$(openssl rand -hex 16)"
+WEBUI_REQUIRE_TOKEN=1 \
+WEBUI_PUBLIC_URL=https://wrongstack.example.com \
+WEBUI_PUBLIC_WS_URL=wss://wrongstack-ws.example.com \
+webui --host 127.0.0.1 --port 8080 --ws-port 8081 --token "$WEBUI_TOKEN"
+```
+
+Example `cloudflared` ingress:
+
+```yaml
+ingress:
+  - hostname: wrongstack.example.com
+    service: http://127.0.0.1:8080
+  - hostname: wrongstack-ws.example.com
+    service: http://127.0.0.1:8081
+  - service: http_status:404
+```
+
+Then open `https://wrongstack.example.com?token=<WEBUI_TOKEN>`. The frontend exchanges
+the token for the HttpOnly cookie and then connects to `wss://wrongstack-ws.example.com`.
+When HTTP and WS use different public hostnames, the WS token also remains on the
+in-memory WS URL because the browser cookie cannot cross hostnames. Prefer a same-host
+WS route such as `wss://wrongstack.example.com/ws` if your proxy supports path-based
+routing.
+For CLI-embedded WebUI, use the matching flags:
+
+```bash
+wstack --webui \
+  --host 127.0.0.1 --webui-port 8080 --ws-port 8081 \
+  --webui-token "$WEBUI_TOKEN" --webui-require-token \
+  --webui-public-url https://wrongstack.example.com \
+  --webui-public-ws-url wss://wrongstack-ws.example.com
+```
 
 ## UI surfaces
 

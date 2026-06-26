@@ -4,6 +4,9 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   buildStatuslineCommand,
+  DEFAULTS,
+  STATUSLINE_CONFIG_KEYS,
+  ensureStatuslineConfig,
   loadStatuslineConfig,
   saveStatuslineConfig,
   type StatuslineCommandDeps,
@@ -31,6 +34,10 @@ afterEach(async () => {
 });
 
 describe('loadStatuslineConfig', () => {
+  it('keeps DEFAULTS in sync with the canonical key list', () => {
+    expect(Object.keys(DEFAULTS).sort()).toEqual([...STATUSLINE_CONFIG_KEYS].sort());
+  });
+
   it('returns DEFAULTS when no file present', async () => {
     const cfg = await loadStatuslineConfig();
     expect(cfg.todos).toBe(true);
@@ -65,6 +72,34 @@ describe('loadStatuslineConfig', () => {
     await fs.writeFile(custom, JSON.stringify({ fleet: false }));
     const cfg = await loadStatuslineConfig();
     expect(cfg.fleet).toBe(false);
+  });
+});
+
+describe('ensureStatuslineConfig', () => {
+  it('writes all default settings when no file is present', async () => {
+    const cfg = await ensureStatuslineConfig();
+    const written = JSON.parse(
+      await fs.readFile(path.join(tmp, '.wrongstack', 'statusline.json'), 'utf8'),
+    );
+
+    expect(cfg).toEqual(DEFAULTS);
+    expect(written).toEqual(DEFAULTS);
+    expect(Object.keys(written).sort()).toEqual([...STATUSLINE_CONFIG_KEYS].sort());
+  });
+
+  it('persists missing default keys for old partial config files', async () => {
+    const dir = path.join(tmp, '.wrongstack');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'statusline.json'), JSON.stringify({ git: false }));
+
+    const cfg = await ensureStatuslineConfig();
+    const written = JSON.parse(await fs.readFile(path.join(dir, 'statusline.json'), 'utf8'));
+
+    expect(cfg.git).toBe(false);
+    expect(cfg.mailbox).toBe(true);
+    expect(written.git).toBe(false);
+    expect(written.mailbox).toBe(true);
+    expect(Object.keys(written).sort()).toEqual([...STATUSLINE_CONFIG_KEYS].sort());
   });
 });
 

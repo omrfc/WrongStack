@@ -17,6 +17,7 @@ import {
   buildCspHeader,
   createHttpServer,
   decodeSessionId,
+  injectWsConfig,
   injectWsPort,
   isInsideDist,
 } from '../../src/server/http-server.js';
@@ -58,6 +59,17 @@ describe('buildCspHeader', () => {
     expect(csp).toContain('wss://127.0.0.1:3457');
     expect(csp).not.toContain('[::1]');
     expect(csp).toContain("frame-ancestors 'none'");
+  });
+
+  it('allows the request host for remote/tunnel access', () => {
+    const csp = buildCspHeader(3457, 'wrongstack.example.com');
+    expect(csp).toContain('ws://wrongstack.example.com:3457');
+    expect(csp).toContain('wss://wrongstack.example.com:3457');
+  });
+
+  it('allows an explicit public WebSocket URL for tunnel access', () => {
+    const csp = buildCspHeader(3457, undefined, 'wss://wrongstack-ws.example.com/ws');
+    expect(csp).toContain('wss://wrongstack-ws.example.com');
   });
 });
 
@@ -101,6 +113,19 @@ describe('injectWsPort', () => {
     const twice = injectWsPort(once, 9999);
     expect(twice).toBe(once);
     expect(twice.match(/wrongstack-ws-port/g)).toHaveLength(1);
+  });
+});
+
+describe('injectWsConfig', () => {
+  it('injects the live WS port and explicit public WS URL', () => {
+    const out = injectWsConfig('<html><head><title>x</title></head><body></body></html>', {
+      wsPort: 3557,
+      publicWsUrl: 'wss://wrongstack-ws.example.com/socket?x=1&y="2"',
+    });
+    expect(out).toContain('<meta name="wrongstack-ws-port" content="3557" />');
+    expect(out).toContain(
+      '<meta name="wrongstack-ws-url" content="wss://wrongstack-ws.example.com/socket?x=1&amp;y=&quot;2&quot;" />',
+    );
   });
 });
 
@@ -154,6 +179,61 @@ describe('createHttpServer', () => {
     // SPA fallback must also include the CSP — the audit found an
     // unprotected deep-link window otherwise.
     expect(res.headers.get('content-security-policy')).toContain('ws://127.0.0.1:9999');
+  });
+
+  it('requires token access on non-loopback binds and sets the auth cookie from ?token=', async () => {
+    const token = 'test-token-123';
+    const protectedServer = createHttpServer({
+      host: '0.0.0.0',
+      distDir,
+      wsPort: 9997,
+      apiToken: token,
+    });
+    await new Promise<void>((resolve) => protectedServer.listen(0, '127.0.0.1', resolve));
+    const addr = protectedServer.address();
+    if (!addr || typeof addr === 'string') throw new Error('bad listen address');
+    const protectedBase = `http://127.0.0.1:${addr.port}`;
+    try {
+      const denied = await fetch(`${protectedBase}/`);
+      expect(denied.status).toBe(401);
+
+      const allowed = await fetch(`${protectedBase}/?token=${encodeURIComponent(token)}`);
+      expect(allowed.status).toBe(200);
+      const cookie = allowed.headers.get('set-cookie') ?? '';
+      expect(cookie).toContain('ws_token=');
+
+      const api = await fetch(`${protectedBase}/api/sessions`, {
+        headers: { cookie },
+      });
+      expect(api.status).not.toBe(401);
+    } finally {
+      await new Promise<void>((resolve) => protectedServer.close(() => resolve()));
+    }
+  });
+
+  it('can require token access on loopback binds for public tunnels', async () => {
+    const token = 'loopback-tunnel-token';
+    const protectedServer = createHttpServer({
+      host: '127.0.0.1',
+      distDir,
+      wsPort: 9996,
+      apiToken: token,
+      requireToken: true,
+    });
+    await new Promise<void>((resolve) => protectedServer.listen(0, '127.0.0.1', resolve));
+    const addr = protectedServer.address();
+    if (!addr || typeof addr === 'string') throw new Error('bad listen address');
+    const protectedBase = `http://127.0.0.1:${addr.port}`;
+    try {
+      const denied = await fetch(`${protectedBase}/`);
+      expect(denied.status).toBe(401);
+
+      const allowed = await fetch(`${protectedBase}/?token=${encodeURIComponent(token)}`);
+      expect(allowed.status).toBe(200);
+      expect(await allowed.text()).toContain('<meta name="wrongstack-ws-port" content="9996" />');
+    } finally {
+      await new Promise<void>((resolve) => protectedServer.close(() => resolve()));
+    }
   });
 
   it('always sets X-Content-Type-Options=nosniff and X-Frame-Options=DENY', async () => {

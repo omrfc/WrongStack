@@ -150,6 +150,41 @@ describe('announceWebuiReady', () => {
     server.fire();
     expect(opened).toEqual(['http://127.0.0.1:3456?token=abc%2Bdef%2Fghi%3D']);
   });
+
+  it('prints wildcard binds as a navigable local URL', () => {
+    const server = fakeServer();
+    const opened: string[] = [];
+    announceWebuiReady({
+      server,
+      host: '0.0.0.0',
+      httpPort: 8080,
+      wsPort: 8081,
+      open: true,
+      wsToken: 'abc123',
+      log: () => {},
+      openBrowserFn: (u) => opened.push(u),
+    });
+    server.fire();
+    expect(opened).toEqual(['http://127.0.0.1:8080?token=abc123']);
+  });
+
+  it('uses publicUrl for the browser URL when provided', () => {
+    const server = fakeServer();
+    const opened: string[] = [];
+    announceWebuiReady({
+      server,
+      host: '127.0.0.1',
+      httpPort: 8080,
+      wsPort: 8081,
+      publicUrl: 'https://wrongstack.example.com/ui',
+      open: true,
+      wsToken: 'abc123',
+      log: () => {},
+      openBrowserFn: (u) => opened.push(u),
+    });
+    server.fire();
+    expect(opened).toEqual(['https://wrongstack.example.com/ui?token=abc123']);
+  });
 });
 
 describe('createWebuiShutdown', () => {

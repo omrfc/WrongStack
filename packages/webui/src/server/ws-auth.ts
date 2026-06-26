@@ -14,13 +14,13 @@
  *     a token; the Host-header guard above already blocks cross-site pages.
  *
  * Browser clients (those that send an `Origin` header) authenticate via the
- * HttpOnly cookie ONLY — the URL `?token=` path is rejected for them, closing
- * the C-598 (Information Exposure Through Query String) class (token in browser
- * history / referrer / proxy logs). The frontend bootstraps the cookie via
- * `ensureAuthCookie()` (a same-origin `/ws-auth` GET) before its first connect,
- * so the cookie is present on the WS upgrade. Non-browser clients (no `Origin`:
- * curl, scripts, tests) keep the URL-token path for ergonomics — query-string
- * exposure is a browser-only concern.
+ * HttpOnly cookie by default — the URL `?token=` path is rejected for them,
+ * closing the C-598 (Information Exposure Through Query String) class (token in
+ * browser history / referrer / proxy logs). The only browser URL-token exception
+ * is an explicit public-WS tunnel URL whose origin is allowlisted by the server;
+ * that covers separate HTTP/WS hostnames where cookies cannot cross hosts.
+ * Non-browser clients (no `Origin`: curl, scripts, tests) keep the URL-token
+ * path for ergonomics — query-string exposure is a browser-only concern.
  *
  * Extracted from `index.ts` as pure functions so the auth contract can be unit
  * tested without standing up a real `http.Server`/`WebSocketServer`. `index.ts`
@@ -47,11 +47,15 @@ export function isLoopbackHostname(hostname: string): boolean {
 function isTrustedLoopbackOrigin(origin: string): boolean {
   try {
     const url = new URL(origin);
-    // Only allow http(s)://localhost(:PORT) and http(s)://127.0.0.1(:PORT)
+    // Only allow explicit loopback http(s) origins.
     // Reject file://, data://, and other schemes even on loopback.
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    // Require explicit localhost or 127.0.0.1 (not just any loopback like ::1)
-    return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    return (
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname === '::1' ||
+      url.hostname === '[::1]'
+    );
   } catch {
     return false;
   }
@@ -71,6 +75,16 @@ export function isLoopbackBind(wsHost: string): boolean {
  */
 export function isWildcardBind(wsHost: string): boolean {
   return wsHost === '0.0.0.0' || wsHost === '::' || wsHost === '[::]';
+}
+
+function normalizeHostname(hostname: string): string {
+  const h = hostname.trim().toLowerCase();
+  return h.startsWith('[') && h.endsWith(']') ? h.slice(1, -1) : h;
+}
+
+function allowedHostname(hostname: string, allowedHostnames?: readonly string[]): boolean {
+  const normalized = normalizeHostname(hostname);
+  return (allowedHostnames ?? []).some((candidate) => normalizeHostname(candidate) === normalized);
 }
 
 /**
@@ -130,7 +144,11 @@ export function extractTokenFromCookie(cookieHeader: string | string[] | undefin
  * a LAN/0.0.0.0 address) the Host is legitimately non-loopback, so the guard is
  * skipped and connection auth falls to the token check.
  */
-export function hostHeaderOk(input: { hostHeader: string | undefined; wsHost: string }): boolean {
+export function hostHeaderOk(input: {
+  hostHeader: string | undefined;
+  wsHost: string;
+  allowedHostnames?: readonly string[] | undefined;
+}): boolean {
   if (!isLoopbackBind(input.wsHost)) return true; // operator opted into wider exposure
   const hostHeader = (input.hostHeader ?? '').trim();
   if (!hostHeader) return false;
@@ -141,7 +159,7 @@ export function hostHeaderOk(input: { hostHeader: string | undefined; wsHost: st
   } catch {
     return false;
   }
-  return isLoopbackHostname(hostname);
+  return isLoopbackHostname(hostname) || allowedHostname(hostname, input.allowedHostnames);
 }
 
 export interface VerifyClientInput {
@@ -160,6 +178,12 @@ export interface VerifyClientInput {
   wsHost: string;
   /** The server's generated auth token. */
   expectedToken: string;
+  /** Force token auth even for loopback binds, useful behind public tunnels. */
+  requireToken?: boolean | undefined;
+  /** Extra Host header names allowed on loopback binds, e.g. a tunnel hostname. */
+  allowedHostnames?: readonly string[] | undefined;
+  /** Allow browser WS URL tokens for explicit public WS URLs where cookies cannot cross hostnames. */
+  allowBrowserUrlToken?: boolean | undefined;
 }
 
 /**
@@ -177,14 +201,25 @@ export interface VerifyClientInput {
  * and tests continue to work.
  */
 export function verifyClient(input: VerifyClientInput): boolean {
-  const { origin, url, hostHeader, remoteAddress, cookieHeader, wsHost, expectedToken } = input;
+  const {
+    origin,
+    url,
+    hostHeader,
+    remoteAddress,
+    cookieHeader,
+    wsHost,
+    expectedToken,
+    requireToken,
+    allowedHostnames,
+    allowBrowserUrlToken,
+  } = input;
   const urlTokenOk = tokenMatches(extractToken(url ?? ''), expectedToken);
   const cookieTokenOk = tokenMatches(extractTokenFromCookie(cookieHeader), expectedToken);
 
   // DNS-rebinding guard runs first on a loopback bind — independent of token
   // and Origin. Blocks a rebound attacker page (Host = attacker domain) even
   // though the TCP peer is 127.0.0.1.
-  if (!hostHeaderOk({ hostHeader, wsHost })) return false;
+  if (!hostHeaderOk({ hostHeader, wsHost, allowedHostnames })) return false;
 
   if (!origin) {
     // Non-browser clients (curl, scripts): require token unless on loopback.
@@ -196,29 +231,27 @@ export function verifyClient(input: VerifyClientInput): boolean {
     const remoteIp = remoteAddress ?? '';
     const isRemoteLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1';
     if (!isRemoteLoopback && isWildcardBind(wsHost)) return false; // LAN exposure = deny
-    return urlTokenOk || cookieTokenOk || isLoopbackBind(wsHost);
+    return urlTokenOk || cookieTokenOk || (isLoopbackBind(wsHost) && !requireToken);
   }
   try {
-    const { hostname } = new URL(origin);
+    const { hostname: originHostname } = new URL(origin);
     // Loopback browser origins: allow without token only if the origin is
     // explicitly http://localhost or http://127.0.0.1 (defense-in-depth).
     // Reject file://, data://, and other schemes even on loopback.
-    if (isLoopbackHostname(hostname)) {
-      // For stricter security on wildcard binds (0.0.0.0 / ::), require a
-      // trusted origin scheme.
-      if (isWildcardBind(wsHost) && !isTrustedLoopbackOrigin(origin)) {
-        return false;
-      }
-      return true;
+    if (isLoopbackHostname(originHostname)) {
+      if (requireToken || !isLoopbackBind(wsHost)) return cookieTokenOk;
+      return isTrustedLoopbackOrigin(origin);
     }
-    // Non-loopback BROWSER origin: the HttpOnly cookie (set via /ws-auth) is the
-    // ONLY accepted credential. The URL `?token=` path is rejected for browser
-    // clients — it would leak the token into browser history, referrer headers,
-    // and reverse-proxy access logs (CWE-598). The frontend bootstraps the
-    // cookie via `ensureAuthCookie()` before its first connect, so the cookie is
-    // present on the WS upgrade; the URL token it still appends is simply
-    // ignored here.
-    return cookieTokenOk;
+    // Non-loopback browser origins normally authenticate via the HttpOnly cookie
+    // set by `/ws-auth`. When an operator supplies a separate public WS URL, the
+    // cookie may not cross hostnames, so an explicit opt-in keeps URL-token auth
+    // available for that tunnel endpoint.
+    return (
+      cookieTokenOk ||
+      (Boolean(allowBrowserUrlToken) &&
+        urlTokenOk &&
+        allowedHostname(originHostname, allowedHostnames))
+    );
   } catch {
     return false;
   }

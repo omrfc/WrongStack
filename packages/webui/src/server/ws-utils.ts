@@ -65,3 +65,47 @@ export function errMessage(err: unknown): string {
 export function generateAuthToken(): string {
   return randomBytes(16).toString('hex');
 }
+
+export function resolveAuthToken(explicit?: string | undefined): string {
+  const configured =
+    explicit?.trim() ||
+    process.env['WEBUI_TOKEN']?.trim() ||
+    process.env['WEBUI_AUTH_TOKEN']?.trim();
+  return configured || generateAuthToken();
+}
+
+export function hostForBrowserUrl(bindHost: string): string {
+  if (bindHost === '0.0.0.0') return '127.0.0.1';
+  if (bindHost === '::' || bindHost === '[::]') return '[::1]';
+  if (bindHost.includes(':') && !bindHost.startsWith('[')) return `[${bindHost}]`;
+  return bindHost;
+}
+
+export function buildWebUIAccessUrl(opts: {
+  host: string;
+  port: number;
+  token?: string | undefined;
+  protocol?: 'http' | 'https' | undefined;
+  publicUrl?: string | undefined;
+}): string {
+  const protocol = opts.protocol ?? 'http';
+  const base = opts.publicUrl?.trim() || `${protocol}://${hostForBrowserUrl(opts.host)}:${opts.port}`;
+  if (!opts.token) return base;
+  try {
+    const url = new URL(base);
+    url.searchParams.set('token', opts.token);
+    const rendered = url.toString();
+    const afterOrigin = base.slice(url.origin.length);
+    if (url.pathname === '/' && !afterOrigin.startsWith('/')) {
+      return `${url.origin}${url.search}${url.hash}`;
+    }
+    return rendered;
+  } catch {
+    return `${base}${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(opts.token)}`;
+  }
+}
+
+export function envFlag(name: string): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}

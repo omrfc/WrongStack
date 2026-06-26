@@ -11,6 +11,7 @@ import {
   type WstackPaths,
 } from '@wrongstack/core';
 import { setupSlashCommands } from '../src/wiring/slash-commands.js';
+import { DEFAULTS } from '../src/slash-commands/statusline.js';
 
 let tmp: string;
 let prevEnv: string | undefined;
@@ -113,6 +114,8 @@ function callSetup(overrides: Record<string, unknown> = {}): Promise<void> {
 describe('setupSlashCommands', () => {
   it('runs to completion when no statusline config file exists', async () => {
     await expect(callSetup()).resolves.toBeUndefined();
+    const written = JSON.parse(await fs.readFile(process.env.WRONGSTACK_STATUSLINE_CONFIG!, 'utf8'));
+    expect(written).toEqual(DEFAULTS);
   });
 
   it('runs with all chips enabled (default statusline)', async () => {

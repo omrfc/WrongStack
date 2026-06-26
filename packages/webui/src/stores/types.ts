@@ -176,6 +176,7 @@ export interface SubagentEvent {
   costUsd?: number | undefined;
   currentTool?: string | undefined;
   load?: number | undefined;
+  rawLoad?: number | undefined;
   tokens?: number | undefined;
   maxContext?: number | undefined;
   totalExtensions?: number | undefined;

@@ -152,7 +152,15 @@ import { handleSddBoardRoute, type SddBoardRouteHandlers } from './sdd-board-rou
 import { setupEvents, type FileWatcherMetrics } from './setup-events.js';
 import { createCustomModeStore } from './custom-context-modes.js';
 import { maskedKey, normalizeKeys } from './provider-keys.js';
-import { send, broadcast, sendResult, errMessage, generateAuthToken } from './ws-utils.js';
+import {
+  send,
+  broadcast,
+  sendResult,
+  errMessage,
+  resolveAuthToken,
+  buildWebUIAccessUrl,
+  envFlag,
+} from './ws-utils.js';
 import { createEternalSubscription } from './eternal-iteration-broadcast.js';
 import { handleShellOpen, type ShellOpenRequest, type ShellOpenResult } from './shell-open.js';
 import { handleGitChanges, handleGitDiff, handleGitInfo } from './git-handlers.js';
@@ -218,6 +226,10 @@ export {
   sendResult,
   errMessage,
   generateAuthToken,
+  resolveAuthToken,
+  hostForBrowserUrl,
+  buildWebUIAccessUrl,
+  envFlag,
 } from './ws-utils.js';
 
 // File operation handlers shared with CLI (files.tree, files.read, files.write, files.list)
@@ -338,6 +350,11 @@ export async function startWebUI(
   opts: WebUIOptions & {
     wsPort?: number | undefined;
     wsHost?: string | undefined;
+    httpPort?: number | undefined;
+    accessToken?: string | undefined;
+    publicUrl?: string | undefined;
+    publicWsUrl?: string | undefined;
+    requireToken?: boolean | undefined;
     open?: boolean | undefined;
   } = {},
 ): Promise<void> {
@@ -351,8 +368,15 @@ export async function startWebUI(
   // Bind to loopback IP by default (not the string "localhost", which on some
   // hosts resolves to IPv6 ::1 and surprises older WS clients). Set WS_HOST or
   // pass opts.wsHost to override (e.g. "0.0.0.0" for LAN access).
-  const wsHost = opts.wsHost ?? '127.0.0.1';
-  const requestedHttpPort = Number.parseInt(process.env['PORT'] ?? '3456', 10);
+  const wsHost = opts.wsHost ?? process.env['WEBUI_HOST'] ?? process.env['WS_HOST'] ?? '127.0.0.1';
+  const requestedHttpPort =
+    opts.httpPort ??
+    opts.webuiPort ??
+    opts.port ??
+    Number.parseInt(process.env['WEBUI_PORT'] ?? process.env['PORT'] ?? '3456', 10);
+  const publicUrl = opts.publicUrl ?? process.env['WEBUI_PUBLIC_URL'];
+  const publicWsUrl = opts.publicWsUrl ?? process.env['WEBUI_PUBLIC_WS_URL'];
+  const requireToken = opts.requireToken ?? envFlag('WEBUI_REQUIRE_TOKEN');
 
   // Port resolution. Unless WEBUI_STRICT_PORT is set, auto-advance past any port
   // already taken by another instance so running `webui` several times "just
@@ -1448,10 +1472,20 @@ export async function startWebUI(
   // can connect. Printed to console on startup; the frontend reads it from
   // the URL query param `?token=...`. Without a token, any client on the
   // network can connect and send `user_message`/`key.add`/`model.switch`.
-  const wsToken = generateAuthToken();
-  // Token is sent to clients via session.start payload — log without any
-  // token characters to prevent search-space reduction for brute-force attacks.
-  console.log('[WebUI] WS auth token generated (redacted from logs)');
+  const wsToken = resolveAuthToken(opts.accessToken);
+  // Token is delivered through the printed first-load URL and then exchanged
+  // for an HttpOnly cookie by /ws-auth.
+  console.log('[WebUI] WS auth token ready');
+  const publicHostnames = [publicUrl, publicWsUrl]
+    .map((value) => {
+      if (!value) return undefined;
+      try {
+        return new URL(value).hostname;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((value): value is string => Boolean(value));
 
   // CSWSH guard + token auth: when the user exposes the socket beyond loopback,
   // require the shared token; loopback connections bootstrap without one. The
@@ -1475,6 +1509,9 @@ export async function startWebUI(
       cookieHeader: info.req.headers.cookie,
       wsHost,
       expectedToken: wsToken,
+      requireToken,
+      allowedHostnames: publicHostnames,
+      allowBrowserUrlToken: Boolean(publicWsUrl),
     });
   // Cap inbound frame size (8 MiB) so a single oversized message can't exhaust
   // memory. Agent messages are small; large pastes/attachments stay well under.
@@ -2687,8 +2724,10 @@ export async function startWebUI(
     host: wsHost,
     distDir: path.resolve(import.meta.dirname, '../../dist'),
     wsPort,
+    publicWsUrl,
     globalRoot: wpaths.globalRoot,
     apiToken: wsToken,
+    requireToken,
     watcherMetrics,
     onFleetPing: () => { void fleetBroadcast?.(); },
   });
@@ -2697,7 +2736,12 @@ export async function startWebUI(
   // the wstack home state (config.json lives here too).
   const registryBaseDir = path.dirname(globalConfigPath);
   httpServer.listen(httpPort, wsHost, () => {
-    const openUrl = `http://${wsHost}:${httpPort}`;
+    const openUrl = buildWebUIAccessUrl({
+      host: wsHost,
+      port: httpPort,
+      token: wsToken,
+      publicUrl,
+    });
     console.log(`[WebUI] HTTP server running on ${openUrl}`);
     // Optionally pop the browser open (best-effort; the URL is always printed).
     if (opts.open) openBrowser(openUrl);
@@ -2713,7 +2757,7 @@ export async function startWebUI(
         projectRoot,
         projectName: path.basename(projectRoot) || projectRoot,
         startedAt: new Date().toISOString(),
-        url: `http://${wsHost}:${httpPort}`,
+        url: buildWebUIAccessUrl({ host: wsHost, port: httpPort, publicUrl }),
       },
       registryBaseDir,
     ).catch((err) => console.warn(JSON.stringify({

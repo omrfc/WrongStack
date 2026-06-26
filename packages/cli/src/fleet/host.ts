@@ -17,6 +17,7 @@ import {
   Context,
   createDefaultPipelines,
   DEFAULT_SUBAGENT_BASELINE,
+  DefaultTokenCounter,
   type DefaultMultiAgentCoordinator,
   Director,
   type DirectorSessionFactory,
@@ -798,13 +799,23 @@ export class MultiAgentHost {
       }
 
       const tools = subCfg.tools ? [...subCfg.tools] : undefined;
+      const subTokenCounter = new DefaultTokenCounter({
+        registry: this.deps.modelsRegistry,
+        providerId: effProvider,
+        events,
+      });
 
       const ctx = new Context({
         systemPrompt: baseSystem,
         provider,
         session: subSession,
         signal: new AbortController().signal,
-        tokenCounter: this.deps.tokenCounter,
+        // Keep per-request context pressure isolated. The leader statusline
+        // reads currentRequestTokens() from the leader counter; sharing it with
+        // subagents lets the latest subagent provider call overwrite the ctx
+        // chip even though subagent ctx is reported separately as
+        // subagent.ctx_pct.
+        tokenCounter: subTokenCounter,
         cwd: subCwd,
         projectRoot: this.deps.projectRoot,
         // Subagents inherit the leader's filesystem-access scope.

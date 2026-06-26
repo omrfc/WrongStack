@@ -214,6 +214,11 @@ function ContextBar({
   );
 }
 
+function pctTextFromRatio(pct: number | undefined): string {
+  if (typeof pct !== 'number' || !Number.isFinite(pct)) return '0%';
+  return `${Math.min(100, Math.max(0, Math.round(pct * 100)))}%`;
+}
+
 /**
  * Compact single-line agent row. All the essential info in one line:
  * status icon, name, model, iterations/tools, context bar, cost.
@@ -519,12 +524,12 @@ export function AgentsMonitor({
       <Box flexDirection="row" gap={1}>
         <Text dimColor>pulse</Text>
         <Text color={pressure >= 0.9 ? 'red' : pressure >= 0.75 ? 'yellow' : 'green'}>
-          max ctx {Math.round(pressure * 100)}%
+          max ctx {pctTextFromRatio(pressure)}
         </Text>
         <Text dimColor>· hot</Text>
         {hotAgent ? (
           <Text color={riskMeta(agentRisk(hotAgent)).color}>
-            {hotAgent.name} {hotAgent.ctxPct !== undefined ? `${Math.round(hotAgent.ctxPct * 100)}%` : ''}
+            {hotAgent.name} {hotAgent.ctxPct !== undefined ? pctTextFromRatio(hotAgent.ctxPct) : ''}
           </Text>
         ) : (
           <Text dimColor>none</Text>

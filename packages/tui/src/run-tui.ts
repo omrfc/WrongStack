@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import React from 'react';
 import { App } from './app.js';
+import type { StatuslineItem } from './components/statusline-picker.js';
 import { MOUSE_OFF } from './mouse.js';
 import { startTerminalTitle } from './terminal-title.js';
 
@@ -217,24 +218,14 @@ export interface RunTuiOptions {
    * visible bar without a round-trip. The initial value is loaded from
    * the config file before App mounts.
    */
-  statuslineHiddenItems: Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-  >;
-  setStatuslineHiddenItems: (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => void;
+  statuslineHiddenItems: StatuslineItem[];
+  setStatuslineHiddenItems: (items: StatuslineItem[]) => void;
   /**
    * Atomically updates in-memory state AND persists to
    * ~/.wrongstack/statusline.json. Used by the statusline picker to
    * make each toggle immediately durable.
    */
-  saveStatuslineHiddenItems: (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => Promise<void>;
+  saveStatuslineHiddenItems: (items: StatuslineItem[]) => Promise<void>;
   /**
    * Controller for the agents monitor overlay. App installs a dispatch-backed
    * setter on mount so the `/agents on|off` slash command can toggle the

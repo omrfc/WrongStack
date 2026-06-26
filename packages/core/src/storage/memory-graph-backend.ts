@@ -60,6 +60,16 @@ export class GraphMemoryBackend implements MemoryBackend {
   private loaded = false;
 
   /**
+   * Inverted index for O(1) term → node lookup during search.
+   * Built incrementally on remember/forget, rebuilt on loadGraph if absent.
+   * Maps lowercase term (min 3 chars) → Set of node IDs containing that term.
+   */
+  private invertedIndex = new Map<string, Set<string>>();
+
+  /** Minimum term length to index — avoids noise from 1-2 char fragments. */
+  private static readonly MIN_TERM_LEN = 3;
+
+  /**
    * Promise that resolves when the current in-flight _saveGraph completes.
    * Tests call flush() to await this before deleting the backend or its temp dir.
    * Each save operation chains onto the previous one so concurrent saves are serialised.
@@ -85,6 +95,8 @@ export class GraphMemoryBackend implements MemoryBackend {
       existing.type = entry.type;
       existing.tags = entry.tags;
       existing.priority = entry.priority;
+      // Update inverted index for the modified node's text and tags
+      this.updateNodeIndex(nodeId, entry);
     } else {
       this.nodes.set(nodeId, {
         id: nodeId,
@@ -95,6 +107,9 @@ export class GraphMemoryBackend implements MemoryBackend {
         tags: entry.tags,
         priority: entry.priority,
       });
+
+      // Index the new node in the inverted index
+      this.indexNode(nodeId, entry);
 
       // Create similarity edges — but only against the last SIMILARITY_WINDOW most
       // recent nodes instead of the full in-memory set. This converts O(N²) on
@@ -138,7 +153,11 @@ export class GraphMemoryBackend implements MemoryBackend {
           toRemove.push(id);
         }
       }
-      for (const id of toRemove) this.nodes.delete(id);
+      for (const id of toRemove) {
+        // Remove from inverted index before deleting the node
+        this.removeNodeFromIndex(id, this.nodes.get(id)?.entry);
+        this.nodes.delete(id);
+      }
       this.edges = this.edges.filter((e) => !toRemove.includes(e.from) && !toRemove.includes(e.to));
       this._saveDone = this._saveGraph(scope);
       await this._saveDone;
@@ -185,25 +204,48 @@ export class GraphMemoryBackend implements MemoryBackend {
 
   async search(scope: MemoryScope, query: string, _filePath: string, limit?: number): Promise<MemoryEntry[]> {
     await this.loadGraph(scope);
-    const needle = query.toLowerCase().split(/\s+/);
+    const needle = query.toLowerCase().split(/\s+/).filter((t) => t.length >= GraphMemoryBackend.MIN_TERM_LEN);
 
-    // Use in-memory nodes directly instead of re-reading the file.
-    // loadGraph() already keeps nodes/edges synchronized incrementally.
-    const scored: { entry: MemoryEntry; score: number }[] = [];
-    for (const node of this.nodes.values()) {
-      // Skip nodes from other scopes
+    // Use inverted index to find candidate nodes — O(K * avg_results) instead of O(N)
+    const candidates = new Map<string, number>();
+    for (const term of needle) {
+      const nodeIds = this.invertedIndex.get(term);
+      if (!nodeIds) continue;
+      for (const nodeId of nodeIds) {
+        const node = this.nodes.get(nodeId);
+        if (!node || node.entry.scope !== scope) continue;
+        // Count how many terms matched this node
+        candidates.set(nodeId, (candidates.get(nodeId) ?? 0) + 1);
+      }
+    }
+
+    // Also include high-priority entries even without lexical matches (priority boost > 0)
+    // This preserves the original behavior where priority/count could surface entries
+    // that don't match any query terms.
+    for (const [nodeId, node] of this.nodes) {
       if (node.entry.scope !== scope) continue;
+      if (candidates.has(nodeId)) continue; // Already in candidates
+      // Include if priority boost > 0 (critical=3, high=2)
+      if (node.priority === 'critical' || node.priority === 'high') {
+        candidates.set(nodeId, 0); // 0 lexical matches but priority boost applies
+      }
+    }
 
-      const words = node.entry.text.toLowerCase().split(/\s+/);
+    // Score candidates: text match (1pt/term), tag match (2pts/term), priority, count
+    const scored: { entry: MemoryEntry; score: number }[] = [];
+    for (const [nodeId] of candidates) {
+      const node = this.nodes.get(nodeId)!;
       let score = 0;
-      for (const n of needle) {
-        if (words.some((w) => w.includes(n))) score += 1;
-        if (node.entry.tags?.some((t) => t.toLowerCase().includes(n))) score += 2;
+      // Text match score: 1pt per matching term
+      score += (candidates.get(nodeId) ?? 0) * 1;
+      // Tag match score: 2pts per term that appears in any tag
+      for (const term of needle) {
+        if (node.entry.tags?.some((t) => t.toLowerCase().includes(term))) score += 2;
       }
       if (node.priority === 'critical') score += 3;
       else if (node.priority === 'high') score += 2;
       score += node.count * 0.5;
-      if (score > 0) scored.push({ entry: node.entry, score });
+      scored.push({ entry: node.entry, score });
     }
 
     scored.sort((a, b) => b.score - a.score);
@@ -215,6 +257,7 @@ export class GraphMemoryBackend implements MemoryBackend {
     await this.file.clear(scope, filePath);
     this.nodes.clear();
     this.edges = [];
+    this.invertedIndex = new Map();
     this.loadedScope = scope;
     this.loaded = true;
     // Write empty graph
@@ -276,6 +319,8 @@ export class GraphMemoryBackend implements MemoryBackend {
       this.nodes = new Map();
       this.edges = [];
     }
+    // Build inverted index from loaded nodes
+    this.buildInvertedIndex();
     this.loadedScope = scope;
     this.loaded = true;
   }
@@ -306,6 +351,96 @@ export class GraphMemoryBackend implements MemoryBackend {
    */
   async flush(): Promise<void> {
     await this._saveDone;
+  }
+
+  // ── Inverted Index Helpers ───────────────────────────────────────────
+
+  /**
+   * Build the inverted index from all currently loaded nodes.
+   * Called on loadGraph() to reconstruct the index after loading from disk.
+   */
+  private buildInvertedIndex(): void {
+    this.invertedIndex = new Map();
+    for (const [nodeId, node] of this.nodes) {
+      for (const term of this.extractTerms(node.entry)) {
+        let nodeIds = this.invertedIndex.get(term);
+        if (!nodeIds) {
+          nodeIds = new Set();
+          this.invertedIndex.set(term, nodeIds);
+        }
+        nodeIds.add(nodeId);
+      }
+    }
+  }
+
+  /**
+   * Index a node in the inverted index. Adds the node's ID to all term entries.
+   */
+  private indexNode(nodeId: string, entry: MemoryEntry): void {
+    for (const term of this.extractTerms(entry)) {
+      let nodeIds = this.invertedIndex.get(term);
+      if (!nodeIds) {
+        nodeIds = new Set();
+        this.invertedIndex.set(term, nodeIds);
+      }
+      nodeIds.add(nodeId);
+    }
+  }
+
+  /**
+   * Remove a node's terms from the inverted index before deleting it.
+   * Used in forget() and when updating existing nodes.
+   */
+  private removeNodeFromIndex(nodeId: string, entry?: MemoryEntry): void {
+    if (!entry) return;
+    for (const term of this.extractTerms(entry)) {
+      const nodeIds = this.invertedIndex.get(term);
+      if (nodeIds) {
+        nodeIds.delete(nodeId);
+        if (nodeIds.size === 0) {
+          this.invertedIndex.delete(term);
+        }
+      }
+    }
+  }
+
+  /**
+   * Update an existing node's entries in the inverted index.
+   * Removes old terms and adds new ones.
+   */
+  private updateNodeIndex(nodeId: string, entry: MemoryEntry): void {
+    // Remove old entries for this node
+    const existing = this.nodes.get(nodeId);
+    if (existing) {
+      this.removeNodeFromIndex(nodeId, existing.entry);
+    }
+    // Add new entries
+    this.indexNode(nodeId, entry);
+  }
+
+  /**
+   * Extract searchable terms from a memory entry.
+   * Returns lowercase words from text (min length) and full tag strings.
+   */
+  private extractTerms(entry: MemoryEntry): string[] {
+    const terms: string[] = [];
+    // Extract words from text (only terms >= MIN_TERM_LEN to avoid noise)
+    const words = entry.text.toLowerCase().split(/\s+/);
+    for (const word of words) {
+      if (word.length >= GraphMemoryBackend.MIN_TERM_LEN) {
+        terms.push(word);
+      }
+    }
+    // Index full tags as complete strings (not individual words)
+    if (entry.tags) {
+      for (const tag of entry.tags) {
+        const lower = tag.toLowerCase();
+        if (lower.length >= GraphMemoryBackend.MIN_TERM_LEN && !terms.includes(lower)) {
+          terms.push(lower);
+        }
+      }
+    }
+    return terms;
   }
 }
 

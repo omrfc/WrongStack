@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { streamCoalescer } from '../../src/lib/stream-coalescer';
 import { WrongStackWebSocketClient } from '../../src/lib/ws-client';
 
@@ -49,5 +49,60 @@ describe('WrongStackWebSocketClient session transitions', () => {
     streamCoalescer.flushAll();
 
     expect(flush).not.toHaveBeenCalled();
+  });
+});
+
+describe('WrongStackWebSocketClient auth bootstrap', () => {
+  const originalLocation = window.location;
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'location', {
+      value: {
+        hostname: 'wrongstack.example.com',
+        port: '',
+        protocol: 'https:',
+        search: '?token=abc123',
+        href: 'https://wrongstack.example.com?token=abc123',
+      },
+      writable: true,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true }) as Response),
+    );
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, 'location', {
+      value: originalLocation,
+      writable: true,
+    });
+    vi.stubGlobal('fetch', originalFetch);
+    vi.restoreAllMocks();
+  });
+
+  it('strips the WS URL token when the auth cookie applies to the WS host', async () => {
+    const client = new WrongStackWebSocketClient(
+      'wss://wrongstack.example.com/socket?token=abc123&x=1',
+    );
+
+    await client.ensureAuthCookie();
+
+    expect((client as unknown as { url: string }).url).toBe(
+      'wss://wrongstack.example.com/socket?x=1',
+    );
+  });
+
+  it('keeps the WS URL token when public WS uses a different hostname', async () => {
+    const client = new WrongStackWebSocketClient(
+      'wss://wrongstack-ws.example.com/socket?token=abc123',
+    );
+
+    await client.ensureAuthCookie();
+
+    expect((client as unknown as { url: string }).url).toBe(
+      'wss://wrongstack-ws.example.com/socket?token=abc123',
+    );
   });
 });

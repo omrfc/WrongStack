@@ -150,7 +150,7 @@ describe('ctx_pct', () => {
     expect(get('a1')!.ctxPct).toBe(73);
     expect(get('a1')!.ctxTokens).toBe(73_200);
     expect(get('a1')!.maxContext).toBe(100_000);
-    // load > 1.0 is a valid backend signal, but the UI display stays capped.
+    // Legacy/malformed load > 1.0 stays capped in the UI display.
     fleet().applyEvent({ kind: 'ctx_pct', subagentId: 'a1', load: 1.5 });
     expect(get('a1')!.ctxPct).toBe(100);
   });

@@ -76,4 +76,46 @@ describe('StatusBar chip separators', () => {
     expect((line.match(/│/g) ?? []).length).toBe(2);
     expect(line).toMatch(/YOLO\s*│\s*∞ ETERNAL\s*│\s*📁 proj/);
   });
+
+  it('hides mailbox line content when mailbox is disabled', () => {
+    const frame = frameOf({
+      mailbox: {
+        unread: 2,
+        onlineAgents: 3,
+        onlineClients: { tui: 1, webui: 1, repl: 0 },
+        lastSubject: 'handoff',
+        lastFrom: 'worker',
+      },
+      hiddenItems: ['mailbox'],
+    });
+
+    expect(frame).not.toContain('✉');
+    expect(frame).not.toContain('handoff');
+  });
+
+  it('does not render an idle mailbox chip for the current TUI alone', () => {
+    const frame = frameOf({
+      mailbox: {
+        unread: 0,
+        onlineAgents: 1,
+        onlineClients: { tui: 1, webui: 0, repl: 0 },
+      },
+    });
+
+    expect(frame).not.toContain('✉');
+    expect(frame).not.toContain('👥');
+  });
+
+  it('renders mailbox when a peer surface is online even with no unread mail', () => {
+    const frame = frameOf({
+      mailbox: {
+        unread: 0,
+        onlineAgents: 1,
+        onlineClients: { tui: 1, webui: 1, repl: 0 },
+      },
+    });
+
+    expect(frame).toContain('✉ 0');
+    expect(frame).toContain('🌐 WebUI');
+  });
 });

@@ -123,6 +123,7 @@ function AgentDetailPanel({
   const lastTool = agent.toolLog[0];
   const toolTimestamps = agent.toolLog.map((t) => t.at);
   const spark = sparkline(bucketActivity(toolTimestamps, now));
+  const ctxPct = Math.min(100, Math.max(0, agent.ctxPct));
 
   // Build streaming / final text
   const outputText = agent.partialText || agent.finalText || undefined;
@@ -256,7 +257,7 @@ function AgentDetailPanel({
                 <span className="text-muted-foreground">Tokens</span>
                 <span className="font-mono font-medium">{fmtTok(agent.ctxTokens)}</span>
               </div>
-              <ContextFillBar pct={agent.ctxPct} tokens={agent.ctxTokens} maxTokens={agent.maxContext} />
+              <ContextFillBar pct={ctxPct} tokens={agent.ctxTokens} maxTokens={agent.maxContext} />
             </div>
           </div>
         </div>
@@ -268,12 +269,12 @@ function AgentDetailPanel({
               <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Context Usage</span>
               <span className={cn(
                 'text-[11px] font-mono font-medium',
-                agent.ctxPct >= 85 ? 'text-destructive' : agent.ctxPct >= 70 ? 'text-amber-500' : 'text-[hsl(var(--success))]'
+                ctxPct >= 85 ? 'text-destructive' : ctxPct >= 70 ? 'text-amber-500' : 'text-[hsl(var(--success))]'
               )}>
-                {agent.ctxPct}%
+                {ctxPct}%
               </span>
             </div>
-            <ContextFillBar pct={agent.ctxPct} tokens={agent.ctxTokens} maxTokens={agent.maxContext} />
+            <ContextFillBar pct={ctxPct} tokens={agent.ctxTokens} maxTokens={agent.maxContext} />
           </div>
         )}
 
@@ -442,6 +443,7 @@ function AgentRow({
     ? `${agent.provider}/${agent.model}`
     : agent.model ?? '—';
   const projectName = useSessionStore((s) => s.projectName);
+  const ctxPct = Math.min(100, Math.max(0, agent.ctxPct));
 
   return (
     <button
@@ -491,10 +493,10 @@ function AgentRow({
       </span>
 
       {/* Context bar */}
-      {agent.ctxPct > 0 && agent.maxContext > 0 && (
+      {ctxPct > 0 && agent.maxContext > 0 && (
         <div className="shrink-0">
           <ContextFillBar
-            pct={agent.ctxPct}
+            pct={ctxPct}
             tokens={agent.ctxTokens}
             maxTokens={agent.maxContext}
             onClick={onContextClick}
