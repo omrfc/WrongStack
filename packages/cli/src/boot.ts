@@ -473,7 +473,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
       // Best-effort — never blocks launch.
     }
 
-    printLaunchHints(renderer, flags, {
+    await printLaunchHints(renderer, flags, {
       cursorFile: path.join(wpaths.cacheDir, 'hint-cursor'),
     });
   } else {

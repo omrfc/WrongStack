@@ -16,7 +16,7 @@
  * lands better than `command.description` boilerplate.
  */
 
-import * as fs from 'node:fs';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { color } from '@wrongstack/core';
 import type { TerminalRenderer } from './renderer.js';
@@ -166,19 +166,20 @@ const wrap = (n: number): number => ((n % GROUPS.length) + GROUPS.length) % GROU
  * filesystem error falls back to a random category so a boot is never
  * blocked on hint bookkeeping.
  */
-function pickGroupIndex(opts: LaunchHintOptions): number {
+async function pickGroupIndex(opts: LaunchHintOptions): Promise<number> {
   if (typeof opts.groupIndex === 'number') return wrap(opts.groupIndex);
   if (opts.cursorFile) {
     try {
       let current = 0;
       try {
-        const parsed = Number.parseInt(fs.readFileSync(opts.cursorFile, 'utf8').trim(), 10);
+        const raw = await fs.readFile(opts.cursorFile, 'utf8');
+        const parsed = Number.parseInt(raw.trim(), 10);
         if (Number.isFinite(parsed)) current = wrap(parsed);
       } catch {
         // No cursor yet — start at the first category.
       }
-      fs.mkdirSync(path.dirname(opts.cursorFile), { recursive: true });
-      fs.writeFileSync(opts.cursorFile, String(wrap(current + 1)));
+      await fs.mkdir(path.dirname(opts.cursorFile), { recursive: true });
+      await fs.writeFile(opts.cursorFile, String(wrap(current + 1)));
       return current;
     } catch {
       // Fall through to random on any FS error.
@@ -191,14 +192,14 @@ function pickGroupIndex(opts: LaunchHintOptions): number {
  * Print one rotating category of launch hints to `renderer`. No-op when
  * suppressed via `--no-hints` or `WRONGSTACK_NO_HINTS=1`.
  */
-export function printLaunchHints(
+export async function printLaunchHints(
   renderer: Pick<TerminalRenderer, 'write'>,
   flags: Record<string, string | boolean>,
   opts: LaunchHintOptions = {},
-): void {
+): Promise<void> {
   if (shouldSuppress(flags)) return;
 
-  const idx = pickGroupIndex(opts);
+  const idx = await pickGroupIndex(opts);
   const group = GROUPS[idx];
   if (!group) return;
 

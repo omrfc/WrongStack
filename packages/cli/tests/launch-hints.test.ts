@@ -35,9 +35,9 @@ describe('printLaunchHints', () => {
     expect(HINT_COUNT).toBeGreaterThanOrEqual(20);
   });
 
-  it('shows ONE category per launch, not the whole list', () => {
+  it('shows ONE category per launch, not the whole list', async () => {
     const r = makeRenderer();
-    printLaunchHints(r, {}, { groupIndex: 0 });
+    await printLaunchHints(r, {}, { groupIndex: 0 });
     const out = r.output();
     // Header names the category and its position in the rotation.
     expect(out).toContain(HINT_GROUP_TITLES[0] as string);
@@ -49,30 +49,30 @@ describe('printLaunchHints', () => {
     expect(out).toContain('/help');
   });
 
-  it('rotates to a different category on the next index', () => {
+  it('rotates to a different category on the next index', async () => {
     const r0 = makeRenderer();
-    printLaunchHints(r0, {}, { groupIndex: 0 });
+    await printLaunchHints(r0, {}, { groupIndex: 0 });
     const r1 = makeRenderer();
-    printLaunchHints(r1, {}, { groupIndex: 1 });
+    await printLaunchHints(r1, {}, { groupIndex: 1 });
     expect(r0.output()).not.toEqual(r1.output());
     expect(r1.output()).toContain(HINT_GROUP_TITLES[1] as string);
   });
 
-  it('wraps groupIndex out of range', () => {
+  it('wraps groupIndex out of range', async () => {
     const r = makeRenderer();
-    printLaunchHints(r, {}, { groupIndex: HINT_GROUP_COUNT });
+    await printLaunchHints(r, {}, { groupIndex: HINT_GROUP_COUNT });
     // Index N wraps to 0.
     expect(r.output()).toContain(`(1/${HINT_GROUP_COUNT}`);
   });
 
-  it('advances a persisted cursor across launches (round-robin)', () => {
+  it('advances a persisted cursor across launches (round-robin)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wstack-hints-'));
     const cursorFile = path.join(dir, 'sub', 'hint-cursor');
     try {
       const seen: string[] = [];
       for (let i = 0; i < HINT_GROUP_COUNT; i++) {
         const r = makeRenderer();
-        printLaunchHints(r, {}, { cursorFile });
+        await printLaunchHints(r, {}, { cursorFile });
         // First non-empty content line after the header carries the title.
         const header = r
           .output()
@@ -88,28 +88,28 @@ describe('printLaunchHints', () => {
     }
   });
 
-  it('skips output when --no-hints is set', () => {
+  it('skips output when --no-hints is set', async () => {
     const r = makeRenderer();
-    printLaunchHints(r, { 'no-hints': true });
+    await printLaunchHints(r, { 'no-hints': true });
     expect(r.write).not.toHaveBeenCalled();
   });
 
-  it('skips output when WRONGSTACK_NO_HINTS=1 is set', () => {
+  it('skips output when WRONGSTACK_NO_HINTS=1 is set', async () => {
     process.env.WRONGSTACK_NO_HINTS = '1';
     const r = makeRenderer();
-    printLaunchHints(r, {});
+    await printLaunchHints(r, {});
     expect(r.write).not.toHaveBeenCalled();
   });
 
-  it('treats WRONGSTACK_NO_HINTS=0 / false as not suppressed', () => {
+  it('treats WRONGSTACK_NO_HINTS=0 / false as not suppressed', async () => {
     process.env.WRONGSTACK_NO_HINTS = '0';
     const r1 = makeRenderer();
-    printLaunchHints(r1, {}, { groupIndex: 0 });
+    await printLaunchHints(r1, {}, { groupIndex: 0 });
     expect(r1.write).toHaveBeenCalled();
 
     process.env.WRONGSTACK_NO_HINTS = 'false';
     const r2 = makeRenderer();
-    printLaunchHints(r2, {}, { groupIndex: 0 });
+    await printLaunchHints(r2, {}, { groupIndex: 0 });
     expect(r2.write).toHaveBeenCalled();
   });
 });
