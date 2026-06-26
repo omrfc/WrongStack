@@ -333,15 +333,7 @@ export function createAgentLoopHandler(
    * alternation intact between tool batches).
    */
   function foldBlockIntoConversation(block: TextBlock): void {
-    const messages = a.ctx.messages;
-    const last = messages[messages.length - 1];
-    if (last && last.role === 'user') {
-      const content: ContentBlock[] =
-        typeof last.content === 'string'
-          ? [{ type: 'text', text: last.content }, block]
-          : [...last.content, block];
-      a.ctx.state.replaceMessages([...messages.slice(0, -1), { ...last, content }]);
-    } else {
+    if (!a.ctx.state.appendBlockToLastUserMessage(block)) {
       a.ctx.state.appendMessage({ role: 'user', content: [block] });
     }
   }

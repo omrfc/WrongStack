@@ -1,3 +1,4 @@
+import type { ContentBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
 import { computeMessageTokens } from '../utils/token-estimate.js';
 import type { Context, TodoItem } from './context.js';
@@ -17,6 +18,7 @@ import type { Context, TodoItem } from './context.js';
 export type StateChange =
   | { kind: 'message_appended'; message: Message }
   | { kind: 'messages_replaced'; messages: readonly Message[] }
+  | { kind: 'message_updated'; index: number; message: Message }
   | { kind: 'todos_replaced'; todos: readonly TodoItem[] }
   | { kind: 'meta_set'; key: string; value: unknown }
   | { kind: 'meta_deleted'; key: string }
@@ -81,6 +83,37 @@ export class ConversationState {
     }
     this.ctx.messages.splice(this.ctx.messages.length, 0, message);
     this.emit({ kind: 'message_appended', message });
+  }
+
+  /**
+   * Append a content block to the trailing user message's content array.
+   * Mutates only that one message (a single indexed assignment) — avoids
+   * the O(n) array copy + token-cache re-walk that `replaceMessages()`
+   * would do for a single-message edit. Used by the agent loop to fold
+   * btw-notes / queued-mailbox blocks into the conversation.
+   *
+   * The block is folded only into a *user* message (preserves
+   * user/assistant alternation between tool batches). Returns false when
+   * there is no trailing user message to fold into — callers should
+   * `appendMessage({ role: 'user', content: [block] })` instead.
+   */
+  appendBlockToLastUserMessage(block: ContentBlock): boolean {
+    const arr = this.ctx.messages;
+    const last = arr[arr.length - 1];
+    if (!last || last.role !== 'user') return false;
+    const content: ContentBlock[] =
+      typeof last.content === 'string'
+        ? [{ type: 'text', text: last.content }, block]
+        : [...last.content, block];
+    // Replace only the trailing message object — O(1), no full-array copy.
+    // Recompute the token estimate for the one changed message; everything
+    // else in the array is untouched and its cache stays valid.
+    const updated: Message = { ...last, content, _estTokens: computeMessageTokens({ ...last, content }) };
+    arr[arr.length - 1] = updated;
+    // Text/informational blocks never carry tool_use/tool_result, so
+    // toolAdjacencyDirty is unaffected — no need to set it here.
+    this.emit({ kind: 'message_updated', index: arr.length - 1, message: updated });
+    return true;
   }
 
   replaceMessages(messages: Message[]): void {

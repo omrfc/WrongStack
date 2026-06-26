@@ -69,7 +69,7 @@ export {
  * primitives or stable reducer references, so default shallow
  * comparison is sufficient.
  */
-export const History = memo(function History({ entries, generation, streamingText, toolStream, setSuggestions, autonomyMode, autoSubmitCountdown, multiDiffSummaryThreshold }: HistoryProps): React.ReactElement {
+export const History = memo(function History({ entries, generation, streamingText, toolStream, setSuggestions, autonomyMode, multiDiffSummaryThreshold }: HistoryProps): React.ReactElement {
   const { stdout } = useStdout();
   const [termSize, setTermSize] = useState({
     columns: stdout?.columns ?? 80,
@@ -104,7 +104,7 @@ export const History = memo(function History({ entries, generation, streamingTex
       <Static key={generation ?? 0} items={entries}>
         {(entry) => (
           <Box key={entry.id} marginBottom={entry.kind === 'turn-summary' ? 1 : 0}>
-            <Entry entry={entry} termWidth={termWidth} setSuggestions={setSuggestions} autonomyMode={autonomyMode} autoSubmitCountdown={autoSubmitCountdown} multiDiffSummaryThreshold={multiDiffSummaryThreshold} />
+            <Entry entry={entry} termWidth={termWidth} setSuggestions={setSuggestions} autonomyMode={autonomyMode} multiDiffSummaryThreshold={multiDiffSummaryThreshold} />
           </Box>
         )}
       </Static>

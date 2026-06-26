@@ -128,6 +128,46 @@ describe('ConversationState — write API and onChange', () => {
     expect((change as { kind: string }).kind).toBe('messages_replaced');
   });
 
+  it('appendBlockToLastUserMessage folds a block without copying the array', () => {
+    const ctx = mkContext();
+    ctx.state.appendMessage(userMessage('first'));
+    ctx.state.appendMessage(userMessage('second'));
+    const originalArray = ctx.messages;
+    const state = wrapAsState(ctx);
+    const cb = vi.fn();
+    state.onChange(cb);
+
+    const block = { type: 'text', text: 'btw note' } as TextBlock;
+    const folded = state.appendBlockToLastUserMessage(block);
+
+    expect(folded).toBe(true);
+    // Same array reference — no O(n) copy/realloc.
+    expect(ctx.messages).toBe(originalArray);
+    expect(ctx.messages).toHaveLength(2);
+    // Last message now has two content blocks.
+    const last = ctx.messages[1]!;
+    expect(Array.isArray(last.content)).toBe(true);
+    expect((last.content as Array<{ text?: string }>).map((b) => b.text)).toEqual(['second', 'btw note']);
+    // Recomputed token estimate is cached for the one changed message.
+    expect(last._estTokens).toBeGreaterThan(0);
+    // First message's cache is untouched.
+    expect(ctx.messages[0]!._estTokens).toBeGreaterThan(0);
+    expect(cb).toHaveBeenCalledOnce();
+    expect((cb.mock.calls[0]![0] as { kind: string }).kind).toBe('message_updated');
+  });
+
+  it('appendBlockToLastUserMessage returns false when there is no trailing user message', () => {
+    const ctx = mkContext();
+    ctx.state.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'hi' }] });
+    const state = wrapAsState(ctx);
+    const cb = vi.fn();
+    state.onChange(cb);
+
+    const folded = state.appendBlockToLastUserMessage({ type: 'text', text: 'x' } as TextBlock);
+    expect(folded).toBe(false);
+    expect(cb).not.toHaveBeenCalled();
+  });
+
   it('replaceTodos updates and notifies', () => {
     const ctx = mkContext();
     const state = wrapAsState(ctx);

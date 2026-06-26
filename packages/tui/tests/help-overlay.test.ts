@@ -21,6 +21,15 @@ describe('helpSections', () => {
     expect(keys).toContain('/help');
     expect(keys).toContain('Ctrl+S or /settings');
     expect(keys).toContain('/settings');
+    expect(keys).toContain('/settings-get');
+  });
+
+  it('documents the /settings inline syntax variants', () => {
+    const settingsEntry = helpSections()
+      .find((s) => s.title === 'Commands')
+      ?.entries.find((e) => e.keys === '/settings');
+    expect(settingsEntry?.desc).toContain('<chord> <value>');
+    expect(settingsEntry?.desc).toContain('reset');
   });
 
   it('lists every F-key panel entry advertised by the F-key picker', () => {
