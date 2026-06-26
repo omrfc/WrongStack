@@ -46,6 +46,7 @@
 // every test that needs to set up a fake `BootContext`.
 
 import type { Config } from '@wrongstack/core';
+import { ensureSessionShell } from '@wrongstack/tools';
 import type { UpdateInfo } from './update-check.js';
 import { printUpdateNotice } from './cli-update-notice.js';
 
@@ -76,6 +77,20 @@ export function applyNodeEnvDefault(): void {
     process.env['NODE_ENV'] = 'production';
     process.env['WRONGSTACK_NODE_ENV_DEFAULTED'] = '1';
   }
+}
+
+/**
+ * Pin one stable shell for the session on Windows via `WRONGSTACK_SHELL`, so
+ * the bash tool's shell routing and the system-prompt Environment block agree
+ * on a single target the model can write syntax for. No-op on POSIX and when
+ * the user already set a valid `WRONGSTACK_SHELL`. Defaults Windows to
+ * PowerShell (pwsh 7+ when present); `WRONGSTACK_SHELL=cmd` opts back to cmd.exe.
+ *
+ * Like `applyNodeEnvDefault()`, this is idempotent — once the env var is set the
+ * second call (inside `runPreflight()`) is a no-op.
+ */
+export function applySessionShellDefault(): void {
+  ensureSessionShell();
 }
 
 /**
@@ -115,6 +130,7 @@ export async function runPreflight(
   initialUpdateInfo: UpdateInfo | undefined,
 ): Promise<PreflightResult> {
   applyNodeEnvDefault();
+  applySessionShellDefault();
   const updateInfo = await applyPrintUpdateNotice(initialUpdateInfo);
   await applyDebugStreamSeed(config);
   return {

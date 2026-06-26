@@ -415,6 +415,26 @@ export function stripUnsafeInProjectFields(
     }
     stripped.push(k);
   }
+
+  // Nested strip: `tools` is allow-listed (it carries benign limits), but
+  // `tools.exec.allow` EXPANDS what the agent may execute — never honor that
+  // from an attacker-controllable repo config. Remove it while preserving
+  // `tools.exec.deny` (removing commands only narrows, so it is always safe).
+  // Clone the affected objects so the caller's input is not mutated.
+  const outTools = (out as Record<string, unknown>)['tools'];
+  if (outTools && typeof outTools === 'object') {
+    const execCfg = (outTools as Record<string, unknown>)['exec'];
+    if (execCfg && typeof execCfg === 'object' && 'allow' in (execCfg as Record<string, unknown>)) {
+      const clonedExec = { ...(execCfg as Record<string, unknown>) };
+      delete clonedExec['allow'];
+      (out as Record<string, unknown>)['tools'] = {
+        ...(outTools as Record<string, unknown>),
+        exec: clonedExec,
+      };
+      stripped.push('tools.exec.allow');
+    }
+  }
+
   if (stripped.length > 0) {
     warn(
       JSON.stringify({

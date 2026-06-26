@@ -19,6 +19,7 @@ import {
 } from '@wrongstack/core';
 import {
   builtinToolsPack,
+  configureExecPolicy,
   forgetTool,
   relatedMemoryTool,
   rememberTool,
@@ -93,6 +94,11 @@ export function getToolsForTier(tier: TokenSavingTier, allTools: Tool[]): Tool[]
 export async function setupTools(params: ToolsWiringDeps): Promise<ToolsWiringResult> {
   const { config, toolRegistry, modelsRegistry, memoryStore, wpaths, container, projectRoot, cwd } =
     params;
+
+  // Apply the configured exec command policy (DEFAULT ∪ allow − deny). `allow`
+  // is trusted-config-only — the config loader already stripped
+  // `tools.exec.allow` from any in-project repo config before this point.
+  configureExecPolicy(config.tools?.exec ?? {});
 
   // Tool registry — already created by caller, just configure it here.
   // Determine token-saving tier (handles boolean backward-compat: true → 'medium')

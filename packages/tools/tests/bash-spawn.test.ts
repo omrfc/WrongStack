@@ -397,6 +397,42 @@ describe('bashTool Windows shell selection (Codex + PowerShell)', () => {
     });
   });
 
+  it('appends a bash-ism hint when a win32 command fails using POSIX syntax', async () => {
+    cfg.platform = 'win32';
+    cfg.stdout = "The term '/dev/null' is not recognized";
+    cfg.code = 1; // non-zero exit triggers the advisory guard
+    await withShell('powershell', async () => {
+      const out = await runFinal({ command: 'foo 2>/dev/null' });
+      expect(out.exit_code).toBe(1);
+      // Original output is preserved...
+      expect(out.output).toContain('is not recognized');
+      // ...and the advisory hint is appended with the PowerShell replacement.
+      expect(out.output).toContain('[wrongstack]');
+      expect(out.output).toContain('2>$null');
+    });
+  });
+
+  it('does NOT append a hint when the same command succeeds', async () => {
+    cfg.platform = 'win32';
+    cfg.stdout = 'ok';
+    cfg.code = 0; // success → silent, no false positive
+    await withShell('powershell', async () => {
+      const out = await runFinal({ command: 'foo 2>/dev/null' });
+      expect(out.output).not.toContain('[wrongstack]');
+    });
+  });
+
+  it('does NOT append a hint for a clean failing command (no bash-ism)', async () => {
+    cfg.platform = 'win32';
+    cfg.stdout = 'boom';
+    cfg.code = 2;
+    await withShell('powershell', async () => {
+      const out = await runFinal({ command: 'Get-Content missing.txt' });
+      expect(out.exit_code).toBe(2);
+      expect(out.output).not.toContain('[wrongstack]');
+    });
+  });
+
   it('streams the script to stdin in background mode too', async () => {
     cfg.platform = 'win32';
     cfg.stdout = 'started';

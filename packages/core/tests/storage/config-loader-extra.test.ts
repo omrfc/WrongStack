@@ -229,6 +229,39 @@ describe('DefaultConfigLoader in-project config hardening (WS-06)', () => {
     warn.mockRestore();
   });
 
+  it('strips tools.exec.allow from in-project config but keeps tools.exec.deny', () => {
+    // `tools` is allow-listed (benign limits), but `tools.exec.allow` EXPANDS
+    // what the agent may execute — a repo must never be able to widen the exec
+    // allowlist. `deny` only narrows, so it survives.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const out = stripUnsafeInProjectFields(
+      {
+        tools: {
+          maxIterations: 7,
+          exec: { allow: ['curl', 'powershell'], deny: ['rm'] },
+        },
+      } as never,
+      '/tmp/.wrongstack/config.json',
+      warn,
+    );
+    const tools = (out as { tools?: { maxIterations?: number; exec?: { allow?: unknown; deny?: unknown } } }).tools;
+    expect(tools?.maxIterations).toBe(7); // benign limit survives
+    expect(tools?.exec?.allow).toBeUndefined(); // dangerous: stripped
+    expect(tools?.exec?.deny).toEqual(['rm']); // safe: kept
+    const warned = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(warned).toContain('tools.exec.allow');
+    warn.mockRestore();
+  });
+
+  it('does not mutate the caller input when stripping tools.exec.allow', () => {
+    const input = { tools: { exec: { allow: ['curl'], deny: ['rm'] } } } as never;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stripUnsafeInProjectFields(input, '/tmp/.wrongstack/config.json', warn);
+    warn.mockRestore();
+    // Original object still has its allow entry — we cloned before deleting.
+    expect((input as { tools: { exec: { allow: string[] } } }).tools.exec.allow).toEqual(['curl']);
+  });
+
   it('still merges benign project-level preferences from the in-project config', async () => {
     await fs.writeFile(
       paths.inProjectConfig,

@@ -43,7 +43,8 @@
 
 import type { EventBus, MemoryStore, ToolDescriptionModeConfig, ToolRegistry, WstackPaths } from '@wrongstack/core';
 import { applyToolDescriptionModes, createContextManagerTool, makeMailboxTool, makeMailInboxTool, makeMailSendTool, normalizeTokenSavingTier } from '@wrongstack/core';
-import { builtinToolsPack, forgetTool, relatedMemoryTool, rememberTool, searchMemoryTool, TIER1_TOOLS, TIER2_TOOLS, TIER3_TOOLS } from '@wrongstack/tools';
+import { builtinToolsPack, configureExecPolicy, forgetTool, relatedMemoryTool, rememberTool, searchMemoryTool, TIER1_TOOLS, TIER2_TOOLS, TIER3_TOOLS } from '@wrongstack/tools';
+import { configureAutophasePolicy } from '../autophase-host.js';
 import type { TokenSavingTier } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 
@@ -52,7 +53,12 @@ export interface RegisterBuiltinToolsDeps {
   compactor: unknown;
   config: {
     features: { memory: boolean; tokenSavingMode?: TokenSavingTier | boolean | undefined };
-    tools?: { descriptionMode?: ToolDescriptionModeConfig | undefined } | undefined;
+    tools?:
+      | {
+          descriptionMode?: ToolDescriptionModeConfig | undefined;
+          exec?: { allow?: string[] | undefined; deny?: string[] | undefined } | undefined;
+        }
+      | undefined;
   };
   memoryStore: MemoryStore | null | undefined;
   events: EventBus;
@@ -133,4 +139,12 @@ export function registerBuiltinTools(deps: RegisterBuiltinToolsDeps): void {
     makeMailInboxTool({ projectDir: deps.wpaths.projectDir, events: deps.events }),
   );
   applyToolDescriptionModes(deps.toolRegistry, deps.config.tools?.descriptionMode);
+  // Apply the configured exec command policy (DEFAULT ∪ allow − deny). `allow`
+  // is trusted-config-only — the config loader strips `tools.exec.allow` from
+  // any in-project repo config before this point.
+  configureExecPolicy(deps.config.tools?.exec ?? {});
+  // Autonomous autophase verification honors the same trusted exec.allow opt-ins
+  // (added to autophase's narrower base), so non-JS projects (go/cargo/…) can
+  // run their verify command without confirmation when the user allowed it.
+  configureAutophasePolicy(deps.config.tools?.exec ?? {});
 }

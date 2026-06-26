@@ -91,11 +91,47 @@ async function isGitRepo(cwd: string): Promise<boolean> {
   return code === 0 && out.trim() === 'true';
 }
 
-// Commands allowed for autonomous autophase verification. This mirrors
-// @wrongstack/tools exec.ts ALLOWED_COMMANDS but is intentionally narrower:
-// autophase only ever runs package-manager script invocations and an optional
-// user-configured custom verify command.
-const AUTOPHASE_SAFE_CMDS: ReadonlySet<string> = new Set(['pnpm', 'npm', 'yarn', 'bun']);
+// Commands allowed for autonomous autophase verification. Intentionally NARROW:
+// autophase runs WITHOUT user confirmation, so its base set is just the
+// package-manager script runners — far narrower than the `exec` tool's default
+// allowlist (which includes build tools like go/cargo/make that execute
+// arbitrary build scripts; fine when each call is user-confirmed, not for
+// autonomous runs).
+const AUTOPHASE_BASE_SAFE_CMDS: ReadonlySet<string> = new Set(['pnpm', 'npm', 'yarn', 'bun']);
+
+// Effective autonomous allowlist = base ∪ the user's EXPLICIT trusted
+// `tools.exec.allow` − `tools.exec.deny`. We extend by the user's explicit
+// opt-ins only (not exec's broadened defaults), and only from trusted config —
+// `tools.exec.allow` is stripped from untrusted in-project repo config by the
+// config loader, so a repo cannot widen what runs autonomously here.
+let autophaseAllowed: Set<string> = new Set(AUTOPHASE_BASE_SAFE_CMDS);
+
+/**
+ * Extend/trim the autonomous autophase command allowlist from the user's exec
+ * policy. Mirrors `configureExecPolicy` but keeps autophase's narrower base.
+ * Idempotent (always rebuilt from the base).
+ */
+export function configureAutophasePolicy(
+  opts: { allow?: readonly string[] | undefined; deny?: readonly string[] | undefined } = {},
+): void {
+  const next = new Set(AUTOPHASE_BASE_SAFE_CMDS);
+  for (const c of opts.allow ?? []) {
+    const n = c.trim();
+    if (n) next.add(n);
+  }
+  for (const c of opts.deny ?? []) next.delete(c.trim());
+  autophaseAllowed = next;
+}
+
+/** Reset the autophase allowlist to its built-in base (tests / re-init). */
+export function resetAutophasePolicy(): void {
+  autophaseAllowed = new Set(AUTOPHASE_BASE_SAFE_CMDS);
+}
+
+/** Whether `cmd` may run in autonomous autophase verification. */
+export function isAutophaseCommandAllowed(cmd: string): boolean {
+  return autophaseAllowed.has(cmd.trim());
+}
 
 // Destructive shell patterns that must never execute autonomously.
 // Mirrors the yolo-risk.ts pattern set for autophase context.
@@ -117,13 +153,14 @@ function runCmd(
   shell = false,
 ): Promise<{ code: number; out: string }> {
   // ── allowlist gate ──────────────────────────────────────────────────
-  if (!AUTOPHASE_SAFE_CMDS.has(cmd)) {
+  if (!isAutophaseCommandAllowed(cmd)) {
     return Promise.resolve({
       code: 1,
       out:
         `autophase: command "${cmd}" not in autonomous safe-commands allowlist. ` +
-        `Allowed: ${[...AUTOPHASE_SAFE_CMDS].join(', ')}. ` +
-        `Set WRONGSTACK_AUTOPHASE_VERIFY_CMD to one of these.`,
+        `Allowed: ${[...autophaseAllowed].join(', ')}. ` +
+        `Add it to tools.exec.allow in ~/.wrongstack/config.json (trusted config only), ` +
+        `or set WRONGSTACK_AUTOPHASE_VERIFY_CMD to an allowed command.`,
     });
   }
 

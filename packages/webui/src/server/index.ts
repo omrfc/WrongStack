@@ -106,7 +106,7 @@ import {
 import { ToolExecutor } from '@wrongstack/core/execution';
 import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
-import { builtinToolsPack, forgetTool, rememberTool, searchMemoryTool, relatedMemoryTool } from '@wrongstack/tools';
+import { builtinToolsPack, configureExecPolicy, ensureSessionShell, forgetTool, rememberTool, searchMemoryTool, relatedMemoryTool } from '@wrongstack/tools';
 import { MCPRegistry } from '@wrongstack/mcp';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createDefaultContainer } from '../../../runtime/src/container.js';
@@ -342,6 +342,12 @@ export async function startWebUI(
     open?: boolean | undefined;
   } = {},
 ): Promise<void> {
+  // Pin one stable shell for the session on Windows (PowerShell by default) via
+  // WRONGSTACK_SHELL before the system-prompt builder is constructed below, so
+  // the model is told exactly which shell + syntax to use. No-op on POSIX / when
+  // the user already set WRONGSTACK_SHELL.
+  ensureSessionShell();
+
   const requestedWsPort = opts.wsPort ?? 3457;
   // Bind to loopback IP by default (not the string "localhost", which on some
   // hosts resolves to IPv6 ::1 and surprises older WS clients). Set WS_HOST or
@@ -551,6 +557,10 @@ export async function startWebUI(
   toolRegistry.register(makeMailSendTool({ projectDir: wpaths.projectDir, events }));
   toolRegistry.register(makeMailInboxTool({ projectDir: wpaths.projectDir, events }));
   applyToolDescriptionModes(toolRegistry, config.tools?.descriptionMode);
+  // Apply the configured exec command policy (DEFAULT ∪ allow − deny). `allow`
+  // is trusted-config-only; the config loader strips `tools.exec.allow` from
+  // any in-project repo config before it reaches here.
+  configureExecPolicy(config.tools?.exec ?? {});
   console.log('[WebUI] Tool registry loaded:', toolRegistry.list().length, 'tools');
 
   // ── MCP registry — the live counterpart to config.mcpServers. ────────────

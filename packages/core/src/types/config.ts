@@ -256,6 +256,31 @@ export interface ToolsConfig {
    * `/settings` ("Filesystem access").
    */
   restrictToProjectRoot?: boolean | undefined;
+  /**
+   * Per-command policy for the `exec` tool's allowlist. The tool ships a
+   * curated default allowlist of dev/build commands; this extends or trims it.
+   *
+   * SECURITY: `allow` EXPANDS what the agent may execute, so it is honored only
+   * from TRUSTED config (`~/.wrongstack/config.json`) — the config loader
+   * strips `tools.exec.allow` from the untrusted, repo-committed
+   * `<project>/.wrongstack/config.json`. `deny` only ever REMOVES commands, so
+   * it is honored from any source.
+   */
+  exec?: ExecToolConfig | undefined;
+}
+
+/** Allow/deny extension of the `exec` tool's built-in command allowlist. */
+export interface ExecToolConfig {
+  /**
+   * Extra command names to add to the allowlist (e.g. `["make", "dotnet"]`).
+   * Trusted sources only — stripped from in-project repo config.
+   */
+  allow?: string[] | undefined;
+  /**
+   * Command names to remove from the allowlist. Honored from any source —
+   * removing a command can only narrow what runs, so it is always safe.
+   */
+  deny?: string[] | undefined;
 }
 
 export type ToolDescriptionMode = 'extend' | 'simple';

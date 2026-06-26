@@ -5,7 +5,21 @@ export { replaceTool } from './replace.js';
 export { globTool } from './glob.js';
 export { grepTool } from './grep.js';
 export { bashTool } from './bash.js';
+export {
+  resolveSessionShell,
+  ensureSessionShell,
+  normalizeShell,
+  type ResolveSessionShellDeps,
+  type EnsureSessionShellOptions,
+} from './_session-shell.js';
+export type { BashShell } from './_shell-pick.js';
 export { execTool } from './exec.js';
+export {
+  configureExecPolicy,
+  resetExecPolicy,
+  isExecCommandAllowed,
+  getExecAllowlist,
+} from './exec.js';
 export { fetchTool } from './fetch.js';
 export { searchTool } from './search.js';
 export { todoTool } from './todo.js';

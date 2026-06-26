@@ -321,3 +321,68 @@ export function shellArgs(shell: BashShell): string[] {
   }
   return ['/c'];
 }
+
+/**
+ * Post-failure diagnosis: when a Windows shell command exits non-zero, scan it
+ * for bash/POSIX idioms the shell does not accept and return a short, targeted
+ * hint (with the right replacement) so the model self-corrects on the next turn.
+ *
+ * Deliberately **failure-coupled** — the bash tool only calls this on a
+ * non-zero exit. That keeps it noise-free (PowerShell aliases `ls`/`cat`/`rm`
+ * succeed, so they never reach here) and side-steps shell-version nuance: `&&`
+ * works in PowerShell 7 and cmd.exe (so those commands succeed and are never
+ * flagged) but breaks in Windows PowerShell 5.1 (where the command fails and is
+ * flagged). Never mutates or blocks — advisory only.
+ *
+ * Returns `undefined` when nothing actionable is found (including any POSIX
+ * call — bash idioms are correct there).
+ */
+export function diagnoseBashism(command: string, shell: BashShell): string | undefined {
+  if (!command) return undefined;
+  const isCmd = shell === 'cmd';
+  const hints: string[] = [];
+  const add = (h: string) => {
+    if (!hints.includes(h)) hints.push(h);
+  };
+
+  if (/\/dev\/null/.test(command)) {
+    add(
+      isCmd
+        ? 'use `nul` instead of `/dev/null` (e.g. `2>nul`)'
+        : 'use `$null` instead of `/dev/null` (e.g. `2>$null`)',
+    );
+  }
+  if (/(^|[;&|]\s*)export\s+[A-Za-z_]\w*=/.test(command)) {
+    add(
+      isCmd
+        ? 'set env vars with `set NAME=value`, not `export`'
+        : "set env vars with `$env:NAME = 'value'`, not `export`",
+    );
+  }
+  if (/<<-?\s*['"]?[A-Za-z_]\w*/.test(command)) {
+    add(
+      isCmd
+        ? 'cmd has no heredocs — write the content to a file or use multiple `echo` lines'
+        : "PowerShell has no heredocs — use a single-quoted here-string `@'…'@` (closing `'@` at column 0)",
+    );
+  }
+  // && / || only break in Windows PowerShell 5.1; pwsh 7 and cmd.exe accept them
+  // (and those commands therefore succeed and never reach this diagnosis).
+  if (shell === 'powershell' && /(&&|\|\|)/.test(command)) {
+    add('Windows PowerShell 5.1 has no `&&`/`||` — separate commands with `;` (check `$LASTEXITCODE`)');
+  }
+  if (/\brm\s+-[A-Za-z]*[rf]/.test(command)) {
+    add(
+      isCmd
+        ? '`rm` is not a cmd builtin — use `del` (files) or `rmdir /s /q` (dirs)'
+        : "use `Remove-Item -Recurse -Force` — the `rm -rf` bash flags don't exist in PowerShell",
+    );
+  }
+  if (/\bwhich\s+\S/.test(command)) {
+    add(isCmd ? 'use `where <cmd>` instead of `which`' : 'use `Get-Command <cmd>` instead of `which`');
+  }
+
+  if (hints.length === 0) return undefined;
+  const label = isCmd ? 'cmd.exe' : shell === 'pwsh' ? 'PowerShell 7' : 'Windows PowerShell';
+  return `[wrongstack] This command failed and contains bash/POSIX syntax that ${label} does not accept — ${hints.join('; ')}. Rewrite it in ${isCmd ? 'cmd' : 'PowerShell'} syntax and retry.`;
+}

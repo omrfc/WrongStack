@@ -7,7 +7,7 @@ import { normalizeCommandOutput } from './_util.js';
 import { killWin32Tree, redactCommand } from './process-registry.js';
 import { getProcessRegistry } from './process-registry.js';
 import { checkAndBlockKillCommand } from './bash-kill-guard.js';
-import { pickShell, shellArgs, type BashShell, wrapPowerShellScript } from './_shell-pick.js';
+import { pickShell, shellArgs, type BashShell, wrapPowerShellScript, diagnoseBashism } from './_shell-pick.js';
 import { resolvePowerShell } from './_win32-resolve.js';
 
 interface BashInput {
@@ -192,10 +192,15 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       stdinBody: string | undefined;
     };
     let plan: ShellPlan;
+    // The resolved Windows shell kind, kept in scope so the post-failure
+    // bash-ism diagnosis below can speak the right shell's syntax. undefined on
+    // POSIX (no diagnosis there — bash idioms are correct).
+    let winShellKind: BashShell | undefined;
     if (isWin) {
       const shell: BashShell = pickShell('win32', input.command, {
         get: (k) => process.env[k],
       });
+      winShellKind = shell;
       // Resolve a sensible default binary. `pickShell` decided the shell
       // kind, but the actual spawn uses a real path:
       //   - 'cmd'         → COMSPEC or `cmd.exe`. The user can override
@@ -556,10 +561,21 @@ export const bashTool: Tool<BashInput, BashOutput> = {
             yield { type: 'partial_output', text: remainder };
           }
           const spooled = spool.finalize();
+          // Advisory bash-ism guard: on a genuine non-zero exit (not a
+          // timeout), if the command used POSIX syntax the resolved Windows
+          // shell can't accept, append a targeted hint so the model rewrites it
+          // next turn. Never mutates/blocks; silent on success and on POSIX.
+          const hint =
+            !timedOut && typeof c.code === 'number' && c.code !== 0 && winShellKind
+              ? diagnoseBashism(input.command, winShellKind)
+              : undefined;
           yield {
             type: 'final',
             output: {
-              output: normalizeCommandOutput(buf) + (spooled ? spoolNote(spooled) : ''),
+              output:
+                normalizeCommandOutput(buf) +
+                (spooled ? spoolNote(spooled) : '') +
+                (hint ? `\n\n${hint}` : ''),
               exit_code: c.code,
               timed_out: timedOut,
             },

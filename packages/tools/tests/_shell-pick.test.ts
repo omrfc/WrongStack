@@ -6,6 +6,7 @@ import {
   pickShell,
   POSIX_DEFAULT,
   shellArgs,
+  diagnoseBashism,
   type BashShell,
 } from '../src/_shell-pick.js';
 
@@ -256,5 +257,43 @@ describe('shellArgs', () => {
       '-Command',
       '-',
     ]);
+  });
+});
+
+describe('diagnoseBashism', () => {
+  it('returns undefined for clean commands / empty input', () => {
+    expect(diagnoseBashism('', 'pwsh')).toBeUndefined();
+    expect(diagnoseBashism('Get-ChildItem -Recurse', 'pwsh')).toBeUndefined();
+    expect(diagnoseBashism('git status', 'cmd')).toBeUndefined();
+    expect(diagnoseBashism('node build.js && node test.js', 'pwsh')).toBeUndefined();
+  });
+
+  it('flags /dev/null with the right per-shell replacement', () => {
+    expect(diagnoseBashism('foo 2>/dev/null', 'pwsh')).toContain('$null');
+    expect(diagnoseBashism('foo 2>/dev/null', 'powershell')).toContain('2>$null');
+    expect(diagnoseBashism('foo 2>/dev/null', 'cmd')).toContain('nul');
+  });
+
+  it('flags && only on Windows PowerShell 5.1, not pwsh 7 or cmd', () => {
+    expect(diagnoseBashism('a && b', 'powershell')).toContain('&&');
+    // pwsh 7 + cmd accept && — those commands succeed and never reach here, so
+    // even if called, we must not flag them.
+    expect(diagnoseBashism('a && b', 'pwsh')).toBeUndefined();
+    expect(diagnoseBashism('a && b', 'cmd')).toBeUndefined();
+  });
+
+  it('flags export, heredoc, rm -rf, and which', () => {
+    expect(diagnoseBashism('export FOO=bar', 'pwsh')).toContain('$env:NAME');
+    expect(diagnoseBashism('cat <<EOF\nx\nEOF', 'pwsh')).toContain('here-string');
+    expect(diagnoseBashism('rm -rf dist', 'pwsh')).toContain('Remove-Item');
+    expect(diagnoseBashism('rm -rf dist', 'cmd')).toContain('rmdir');
+    expect(diagnoseBashism('which node', 'pwsh')).toContain('Get-Command');
+    expect(diagnoseBashism('which node', 'cmd')).toContain('where');
+  });
+
+  it('names the shell and is advisory (asks to rewrite, does not block)', () => {
+    const hint = diagnoseBashism('foo 2>/dev/null', 'pwsh');
+    expect(hint).toContain('PowerShell 7');
+    expect(hint).toContain('Rewrite it in PowerShell syntax and retry.');
   });
 });

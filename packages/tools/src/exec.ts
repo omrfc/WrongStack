@@ -9,49 +9,81 @@ import { assertSafeWin32ShellArgs, resolveWin32Command } from './_win32-resolve.
 
 const isWin = process.platform === 'win32';
 
-const ALLOWED_COMMANDS: Record<string, string[]> = {
-  node: ['--version', '-r', '--input-type=module'],
-  npm: ['--version', 'list', 'pkg', 'doctor', 'view', 'outdated', 'audit'],
-  pnpm: ['--version', 'remove', 'list', 'view', 'outdated', 'audit'],
-  npx: ['--version'],
-  git: [
-    '--version',
-    'status',
-    'log',
-    'diff',
-    'branch',
-    'checkout',
-    'stash',
-    'add',
-    'commit',
-    'push',
-    'pull',
-  ],
-  ls: ['-la', '-l', '-a'],
-  cat: [],
-  head: ['-n'],
-  tail: ['-n'],
-  wc: ['-l', '-w', '-c'],
-  grep: [],
-  find: [],
-  echo: [],
-  mkdir: ['-p'],
-  cp: ['-r'],
-  mv: [],
-  rm: ['-rf'],
-  touch: [],
-  bun: ['--version'],
-  tsc: ['--version', '--noEmit', '--project'],
-  vitest: ['--version', 'run', '--coverage'],
-  biome: ['--version', 'lint', 'format', 'check'],
-  cargo: ['--version', 'build', 'test', 'check'],
-  rustc: ['--version'],
-  go: ['version', 'run', 'build', 'test'],
-  python: ['--version'],
-  pip: ['--version', 'list'],
-  docker: ['--version', 'ps', 'images'],
-  kubectl: ['version', 'get', 'describe', 'logs'],
-};
+// Curated default allowlist of command NAMES the `exec` tool may run. Only the
+// command name is gated (per-arg safety is the BLOCKED_ARG_PATTERNS denylist
+// below + the per-call `confirm` permission). A prior version mapped each
+// command to an allowed-args array, but those arrays were never enforced (dead
+// code) — a plain Set is the honest shape.
+//
+// Extend/trim at runtime via `configureExecPolicy()` (wired from
+// `config.tools.exec.{allow,deny}` at boot). `allow` is trusted-config-only;
+// see the security note on ExecToolConfig.
+const DEFAULT_ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
+  // JS / TS toolchain
+  'node', 'npm', 'pnpm', 'yarn', 'npx', 'bun', 'deno',
+  'tsc', 'vitest', 'jest', 'biome', 'eslint', 'prettier',
+  // version control
+  'git',
+  // Rust
+  'cargo', 'rustc',
+  // Go
+  'go',
+  // Python
+  'python', 'python3', 'pip', 'pip3',
+  // Ruby
+  'ruby', 'gem', 'bundle',
+  // JVM
+  'java', 'javac', 'mvn', 'gradle', 'gradlew',
+  // .NET
+  'dotnet',
+  // C / C++ / native build
+  'make', 'cmake',
+  // containers / orchestration (read-only subcommands; see BLOCKED_ARG_PATTERNS)
+  'docker', 'kubectl',
+  // common POSIX file/text utilities
+  'ls', 'cat', 'head', 'tail', 'wc', 'grep', 'find', 'echo',
+  'mkdir', 'cp', 'mv', 'rm', 'touch',
+]);
+
+// The live, effective allowlist: DEFAULT ∪ config.allow − config.deny. Replaced
+// wholesale by configureExecPolicy(); defaults until boot wires the config.
+let allowedCommands: Set<string> = new Set(DEFAULT_ALLOWED_COMMANDS);
+
+const normalizeCmd = (c: string): string => c.trim();
+
+/**
+ * Apply the configured exec command policy. Recomputes the effective allowlist
+ * as `DEFAULT ∪ allow − deny`. Call once at boot from
+ * `config.tools.exec.{allow,deny}`. Idempotent (always rebuilt from defaults).
+ *
+ * SECURITY: `allow` must originate from TRUSTED config only — the config loader
+ * strips `tools.exec.allow` from the untrusted in-project repo config before it
+ * reaches here. `deny` is safe from any source (it only narrows).
+ */
+export function configureExecPolicy(opts: { allow?: readonly string[] | undefined; deny?: readonly string[] | undefined } = {}): void {
+  const next = new Set(DEFAULT_ALLOWED_COMMANDS);
+  for (const c of opts.allow ?? []) {
+    const n = normalizeCmd(c);
+    if (n) next.add(n);
+  }
+  for (const c of opts.deny ?? []) next.delete(normalizeCmd(c));
+  allowedCommands = next;
+}
+
+/** Reset the exec allowlist to the built-in defaults (tests / re-init). */
+export function resetExecPolicy(): void {
+  allowedCommands = new Set(DEFAULT_ALLOWED_COMMANDS);
+}
+
+/** Whether `cmd` is currently in the effective exec allowlist. */
+export function isExecCommandAllowed(cmd: string): boolean {
+  return allowedCommands.has(normalizeCmd(cmd));
+}
+
+/** Snapshot of the effective allowlist (sorted) — for tests / diagnostics. */
+export function getExecAllowlist(): string[] {
+  return [...allowedCommands].sort();
+}
 
 const MAX_ARGS = 20;
 // 200 KB — larger than bash's 32 KB cap. exec commands produce structured,
@@ -148,10 +180,10 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
   usageHint:
     'PREFERRED SHELL TOOL for most cases.\n\n' +
     'Use this instead of `bash` whenever possible.\n' +
-    '- `command` must be one of the allowed commands (node, npm, pnpm, git, tsc, eslint, vitest, etc.).\n' +
+    '- `command` must be in the allowlist. Defaults cover JS (node/npm/pnpm/yarn/bun/deno/tsc/vitest/eslint/biome), Go (`go build`/`go test`), Rust (cargo), Python (python/pip), Ruby (gem/bundle), JVM (java/mvn/gradle), .NET (dotnet), native (make/cmake), and git. Users can extend it via `tools.exec.allow` in config.\n' +
     '- Arguments are passed as a clean array (no shell interpretation).\n' +
     '- `cwd` is validated to stay inside the project.\n' +
-    '- For anything that requires real shell features (pipes, complex redirection, arbitrary commands), fall back to `bash` (with strong justification).\n' +
+    '- If a command is not allowlisted, the error explains how to add it; for one-off arbitrary commands, fall back to `bash` (with strong justification).\n' +
     'This tool significantly reduces the risk compared to full shell access.',
   permission: 'confirm',
   mutating: true,
@@ -208,12 +240,15 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
         allowed: false,
       };
 
-    if (!(cmd in ALLOWED_COMMANDS)) {
+    if (!isExecCommandAllowed(cmd)) {
       return {
         command: cmd,
         args: input.args ?? [],
         stdout: '',
-        stderr: `Command "${cmd}" not in allowlist. Use the bash tool for arbitrary commands.`,
+        stderr:
+          `Command "${cmd}" not in allowlist. ` +
+          `Add it to your ~/.wrongstack/config.json under "tools": { "exec": { "allow": ["${cmd}"] } }, ` +
+          `or use the bash tool for one-off arbitrary commands.`,
         exitCode: 1,
         truncated: false,
         allowed: false,

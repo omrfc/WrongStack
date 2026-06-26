@@ -505,7 +505,7 @@ Each key is a plugin name. The value is a free-form object validated by the plug
 | `WRONGSTACK_FETCH_ALLOW_PRIVATE` | Set `1` to allow localhost/private IPs in the `fetch` tool. |
 | `WRONGSTACK_BASH_ENV_PASSTHROUGH` | Set `1` to disable the bash-tool env allowlist (legacy unsafe mode). |
 | `WRONGSTACK_CHILD_ENV_PASSTHROUGH` | Set `1` to opt back to old child-process env behavior. |
-| `WRONGSTACK_SHELL` | Windows only. Force the shell the `bash` tool uses: `cmd`/`cmd.exe`, `powershell`/`powershell.exe`, or `pwsh`/`pwsh.exe`. When unset, auto-detects PowerShell commands, otherwise `cmd.exe`. See [Windows shell selection](#windows-shell-selection-wrongstack_shell). |
+| `WRONGSTACK_SHELL` | Windows only. Force the shell the `bash` tool uses: `cmd`/`cmd.exe`, `powershell`/`powershell.exe`, or `pwsh`/`pwsh.exe`. When unset, WrongStack pins one shell for the session at boot — **PowerShell by default** (pwsh 7+ if present, else Windows PowerShell 5.1) — and tells the model to write that shell's syntax. Set `WRONGSTACK_SHELL=cmd` to opt back into cmd.exe. See [Windows shell selection](#windows-shell-selection-wrongstack_shell). |
 | `WRONGSTACK_INDEX_QUESTION_THRESHOLD` | File-count threshold for the "Run codebase indexing now?" pre-launch prompt. Default `500`. Set to a high number to suppress the question. |
 | `WRONGSTACK_HQ_URL` | HQ command center URL for telemetry publishing (e.g. `http://localhost:3499`). When set, TUI/REPL/WebUI/CLI hosts connect to this HQ and publish mailbox events, fleet snapshots, and client lifecycle telemetry. See [HQ Command Center Plan](./plans/hq-command-center-2026-06.md). |
 | `WRONGSTACK_HQ_TOKEN` | Client enrollment token for HQ authentication. Required for non-loopback HQ servers. Passed as `?token=` on the outbound `/ws/client` WebSocket. |
@@ -543,15 +543,52 @@ export WRONGSTACK_HQ_PROJECT_ALIAS=my-project
 
 ### Windows shell selection (`WRONGSTACK_SHELL`)
 
-The `bash` tool historically ran everything through `cmd.exe` on Windows. That works for `echo`, `dir`, `set`, and other internal commands, but fails on PowerShell cmdlets (`Get-Content`, `Set-Location`, …) with "'Get-Content' is not recognized as an internal or external command." WrongStack now auto-detects PowerShell commands and routes them to the right shell.
+The `bash` tool historically ran everything through `cmd.exe` on Windows. That works for `echo`, `dir`, `set`, and other internal commands, but fails on PowerShell cmdlets (`Get-Content`, `Set-Location`, …) with "'Get-Content' is not recognized as an internal or external command." It also left a gap: the model was never told which shell it was writing for, so it would emit bash-isms (`2>/dev/null`, `rm -rf`, here-docs) that the heuristic then had to guess at.
+
+WrongStack now **pins one shell for the whole session at boot** and tells the model exactly which shell + syntax to use (a guidance block in the system-prompt Environment section). One stable target replaces per-command guessing.
 
 **Selection precedence** (Windows only):
 
-1. **`WRONGSTACK_SHELL` override** — if set to `cmd`/`cmd.exe`, `powershell`/`powershell.exe`, or `pwsh`/`pwsh.exe` (case-insensitive), that shell is used unconditionally. Unknown values (typos, other shells) are **silently ignored** — the override is a safety hatch, not a free-form field, so a config typo falls back to auto-detection rather than throwing.
-2. **Auto-detection** — if the command "looks like" PowerShell (see below), it runs in PowerShell. PowerShell 7 (`pwsh`) is preferred; Windows PowerShell 5.1 (`powershell`) is the fallback when `pwsh` is not on `PATH`.
-3. **Default** — `cmd.exe`, preserving legacy behavior.
+1. **`WRONGSTACK_SHELL` override** — if you set it to `cmd`/`cmd.exe`, `powershell`/`powershell.exe`, or `pwsh`/`pwsh.exe` (case-insensitive), that shell is used unconditionally and left untouched. Unknown values (typos, other shells) are **silently ignored**.
+2. **Session default (boot-time pin)** — when `WRONGSTACK_SHELL` is unset, boot resolves one shell and exports it: **PowerShell 7 (`pwsh`)** when `pwsh.exe` is on `PATH`, else **Windows PowerShell 5.1 (`powershell`)**, else `cmd.exe`. Because this is written back into `WRONGSTACK_SHELL`, every command in the session — and the system prompt's `Shell:` line and syntax guidance — agree on it.
+3. **Per-command auto-detection (fallback)** — only reached when `WRONGSTACK_SHELL` is somehow still unset (e.g. an embedding that did not run boot). If the command "looks like" PowerShell (see below), it runs there; otherwise `cmd.exe`.
 
-On non-Windows the picker is a no-op; the tool routes through `/bin/bash -c`.
+This is a deliberate behavior change: the Windows default is now **PowerShell**, not `cmd.exe`. To keep the old cmd.exe behavior, set `WRONGSTACK_SHELL=cmd`.
+
+On non-Windows the picker is a no-op; the tool routes through `/bin/bash -c` and no session pin is applied (`WRONGSTACK_SHELL` there is treated by `bash.ts` as an explicit shell binary path, unchanged).
+
+**Advisory bash-ism guard.** As a final safety net for models that ignore the prompt guidance, when a Windows `bash`-tool command **exits non-zero**, WrongStack scans it for POSIX idioms the resolved shell can't accept (`/dev/null`, `export`, heredocs, `&&` on PowerShell 5.1, `rm -rf`, `which`, …) and appends a short `[wrongstack]` hint with the correct replacement so the model can rewrite and retry. It is **advisory only** — never rewrites or blocks the command — and is **failure-coupled**, so it stays silent on success (PowerShell aliases like `ls`/`cat` work) and never fires on POSIX.
+
+### `exec` tool command allowlist (`tools.exec`)
+
+The `exec` tool — the safer, structured alternative to `bash` — only runs commands on a curated allowlist. The defaults cover the common dev/build toolchains:
+
+- **JS/TS:** `node`, `npm`, `pnpm`, `yarn`, `npx`, `bun`, `deno`, `tsc`, `vitest`, `jest`, `biome`, `eslint`, `prettier`
+- **Go:** `go` · **Rust:** `cargo`, `rustc` · **Python:** `python`, `python3`, `pip`, `pip3`
+- **Ruby:** `ruby`, `gem`, `bundle` · **JVM:** `java`, `javac`, `mvn`, `gradle`, `gradlew` · **.NET:** `dotnet`
+- **Native:** `make`, `cmake` · **VCS:** `git` · **Containers:** `docker`, `kubectl` (read-only subcommands)
+- Common POSIX file/text utilities (`ls`, `cat`, `head`, `tail`, `grep`, `find`, …)
+
+Extend or trim the list in config:
+
+```jsonc
+// ~/.wrongstack/config.json
+{
+  "tools": {
+    "exec": {
+      "allow": ["terraform", "bazel"],  // add commands
+      "deny":  ["docker", "rm"]          // remove commands
+    }
+  }
+}
+```
+
+**Security:**
+- `allow` **expands** what the agent may execute, so it is honored **only from the trusted user config** (`~/.wrongstack/config.json`). The config loader strips `tools.exec.allow` from the untrusted, repo-committed `<project>/.wrongstack/config.json` (with a `config.in_project_unsafe_fields_ignored` warning naming `tools.exec.allow`).
+- `deny` only ever **removes** commands, so it is honored from any source (in-project repo config included).
+- Per-argument safety is unchanged: dangerous argument patterns (`rm -rf /`, `git --exec=`, `npm run`, `find -exec`, …) are still blocked, `cwd` is confined to the project, args are passed as a clean array (no shell parsing), and every `exec` call is still gated by the `confirm` permission. For anything outside the allowlist, the model falls back to `bash`.
+
+**Autonomous autophase.** The autonomous AutoPhase verifier runs its verify command *without* per-call confirmation, so it keeps a narrower base allowlist (`pnpm`/`npm`/`yarn`/`bun`). It additionally honors your **explicit** `tools.exec.allow` opt-ins (not the broadened `exec` defaults), so a Go/Rust project can run e.g. `go test ./...` autonomously once you add `go` to `tools.exec.allow` and point `WRONGSTACK_AUTOPHASE_VERIFY_CMD` at it. Because `tools.exec.allow` is trusted-config-only, a repo still cannot widen what runs autonomously.
 
 **Auto-detection signals.** A command is routed to PowerShell if it contains any of these unambiguous patterns:
 

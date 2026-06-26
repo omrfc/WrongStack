@@ -26,7 +26,7 @@ vi.mock('../src/cli-update-notice.js', () => ({
 // setDebugStreamEnabled(true)`; we just assert the boolean
 // returned by runPreflight.
 
-import { applyNodeEnvDefault, runPreflight } from '../src/preflight.js';
+import { applyNodeEnvDefault, applySessionShellDefault, runPreflight } from '../src/preflight.js';
 import type { Config } from '@wrongstack/core';
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
@@ -44,17 +44,33 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 
 const ORIGINAL_NODE_ENV = process.env['NODE_ENV'];
 const ORIGINAL_DEFAULTED_FLAG = process.env['WRONGSTACK_NODE_ENV_DEFAULTED'];
+const ORIGINAL_SHELL = process.env['WRONGSTACK_SHELL'];
 
 describe('preflight (PR 2 of #29)', () => {
   beforeEach(() => {
     delete process.env['NODE_ENV'];
     delete process.env['WRONGSTACK_NODE_ENV_DEFAULTED'];
+    delete process.env['WRONGSTACK_SHELL'];
   });
   afterEach(() => {
     if (ORIGINAL_NODE_ENV === undefined) delete process.env['NODE_ENV'];
     else process.env['NODE_ENV'] = ORIGINAL_NODE_ENV;
     if (ORIGINAL_DEFAULTED_FLAG === undefined) delete process.env['WRONGSTACK_NODE_ENV_DEFAULTED'];
     else process.env['WRONGSTACK_NODE_ENV_DEFAULTED'] = ORIGINAL_DEFAULTED_FLAG;
+    // `applySessionShellDefault` (run inside `runPreflight`) pins WRONGSTACK_SHELL
+    // on Windows — restore it so the env stays hermetic across files.
+    if (ORIGINAL_SHELL === undefined) delete process.env['WRONGSTACK_SHELL'];
+    else process.env['WRONGSTACK_SHELL'] = ORIGINAL_SHELL;
+  });
+
+  it('applySessionShellDefault pins a shell on win32, no-ops elsewhere', () => {
+    applySessionShellDefault();
+    if (process.platform === 'win32') {
+      // One of the canonical shells is now pinned.
+      expect(['cmd', 'powershell', 'pwsh']).toContain(process.env['WRONGSTACK_SHELL']);
+    } else {
+      expect(process.env['WRONGSTACK_SHELL']).toBeUndefined();
+    }
   });
 
   it('defaulting NODE_ENV sets both NODE_ENV and the marker flag', () => {

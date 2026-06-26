@@ -2,8 +2,14 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Context } from '@wrongstack/core';
-import { describe, expect, it } from 'vitest';
-import { execTool } from '../src/exec.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  execTool,
+  configureExecPolicy,
+  resetExecPolicy,
+  isExecCommandAllowed,
+  getExecAllowlist,
+} from '../src/exec.js';
 
 const makeOpts = () => ({ signal: new AbortController().signal });
 const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
@@ -310,5 +316,73 @@ describe('exec abort and ENOENT hardening (#99)', () => {
       await sb.cleanup();
     }
     expect(crashed).toBe(false);
+  });
+});
+
+describe('exec command policy (configurable allowlist)', () => {
+  const makeCtx2 = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
+  const makeOpts2 = () => ({ signal: new AbortController().signal });
+
+  afterEach(() => resetExecPolicy());
+
+  it('ships common build tools in the default allowlist (incl. go)', () => {
+    for (const cmd of ['go', 'cargo', 'make', 'dotnet', 'gradle', 'mvn', 'deno', 'yarn']) {
+      expect(isExecCommandAllowed(cmd)).toBe(true);
+    }
+  });
+
+  it('go build is gated through (allowlisted command, unblocked args)', async () => {
+    // go is allowlisted and `build` is not in BLOCKED_ARG_PATTERNS — the gate
+    // lets it through (it may still ENOENT if go is not installed, but `allowed`
+    // proves the allowlist did not reject it). Needs a real cwd because the
+    // cwd-containment check (after the allowlist) realpath-resolves it.
+    const sb = await mkRealSandbox();
+    try {
+      const result = await execTool.execute({ command: 'go', args: ['build', './...'] }, sb.ctx, makeOpts2());
+      expect(result.allowed).toBe(true);
+    } finally {
+      await sb.cleanup();
+    }
+  });
+
+  it('configureExecPolicy adds allow entries and removes deny entries', () => {
+    configureExecPolicy({ allow: ['terraform', 'kubectl'], deny: ['rm', 'docker'] });
+    expect(isExecCommandAllowed('terraform')).toBe(true); // added
+    expect(isExecCommandAllowed('rm')).toBe(false); // removed from defaults
+    expect(isExecCommandAllowed('docker')).toBe(false); // removed
+    expect(isExecCommandAllowed('go')).toBe(true); // default preserved
+  });
+
+  it('is rebuilt from defaults each call (not cumulative)', () => {
+    configureExecPolicy({ allow: ['terraform'] });
+    expect(isExecCommandAllowed('terraform')).toBe(true);
+    configureExecPolicy({ deny: ['go'] }); // no allow → terraform gone again
+    expect(isExecCommandAllowed('terraform')).toBe(false);
+    expect(isExecCommandAllowed('go')).toBe(false);
+  });
+
+  it('resetExecPolicy restores the built-in defaults', () => {
+    configureExecPolicy({ allow: ['terraform'], deny: ['go'] });
+    resetExecPolicy();
+    expect(isExecCommandAllowed('terraform')).toBe(false);
+    expect(isExecCommandAllowed('go')).toBe(true);
+    expect(getExecAllowlist()).toContain('node');
+  });
+
+  it('a configured-allow command runs through the gate; the unallowed error names the config key', async () => {
+    // Unallowed: rejected before cwd resolution, so a fake ctx is fine here.
+    const blocked = await execTool.execute({ command: 'terraform' }, makeCtx2(), makeOpts2());
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.stderr).toContain('tools": { "exec": { "allow"');
+
+    // Allowed: reaches cwd resolution, so use a real sandbox dir.
+    configureExecPolicy({ allow: ['terraform'] });
+    const sb = await mkRealSandbox();
+    try {
+      const allowed = await execTool.execute({ command: 'terraform', args: ['version'] }, sb.ctx, makeOpts2());
+      expect(allowed.allowed).toBe(true);
+    } finally {
+      await sb.cleanup();
+    }
   });
 });
