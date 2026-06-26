@@ -146,6 +146,187 @@ describe('DefaultMailbox lifecycle + stubs', () => {
   it('purgeStale on an empty mailbox is a no-op', async () => {
     expect((await mb.purgeStale()).totalPurged).toBe(0);
   });
+
+  it('ackMany sets cache metadata synchronously (no zombie stat race)', async () => {
+    // Regression: the previous _setMessageCache() did a fire-and-forget
+    // fsp.stat() when called without mtime/size. ackMany, clearAll, and
+    // purgeStale all used that path. After the rewrite released the file
+    // lock, the cache metadata was at the sentinel (-1, -1) or stale
+    // values from before the rewrite. A subsequent _readAllCached() call
+    // could take the "file only grew" branch against those stale values
+    // and append the rewritten file's contents onto the still-cached
+    // old messages, producing duplicates.
+    //
+    // After the fix, the cache metadata is set synchronously under the
+    // same lock that produced it. A query immediately after ackMany (no
+    // intervening send/append) must return the post-ack state without
+    // any duplication or loss.
+    const sent: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const m = await send({ subject: `m${i}` });
+      sent.push(m.id);
+    }
+    // ackMany rewrites the file under the lock. Previously the cache
+    // metadata was set asynchronously after the lock released, so a
+    // query landing in the gap could see a racy intermediate state.
+    await mb.ackMany({ acks: [{ messageId: sent[0]!, readerId: 'b' }] });
+    const all = await mb.query({ limit: 100 });
+    // No sends happened after ackMany, so the cache and the file must
+    // be in lock-step: 5 messages, no duplicates.
+    expect(all.length).toBe(5);
+    const ids = new Set(all.map((m) => m.id));
+    expect(ids.size).toBe(5);
+    for (const id of sent) expect(ids.has(id)).toBe(true);
+    // The first message must reflect the ack we issued.
+    const acked = all.find((m) => m.id === sent[0]);
+    expect(acked?.readBy?.b).toBeTruthy();
+  });
+
+  it('clearAll sets cache metadata synchronously (no zombie stat)', async () => {
+    // Same regression shape: clearAll rewrites the file to empty under
+    // the lock, and previously did not pass mtime/size to the cache
+    // helper. A query right after clearAll must return [] (no race).
+    await send({ subject: 'will-be-cleared' });
+    await send({ subject: 'will-be-cleared' });
+    await mb.clearAll();
+    const all = await mb.query({ limit: 100 });
+    expect(all).toEqual([]);
+  });
+
+  it('purgeStale sets cache metadata synchronously (no zombie stat)', async () => {
+    // purgeStale rewrites the file under the lock when it drops
+    // messages. Previously did not pass mtime/size to the cache
+    // helper. A query right after purgeStale must return only the
+    // post-purge state, with no race-induced extra messages.
+    const oldTs = new Date(Date.now() - 10 * 86_400_000).toISOString();
+    const stale = {
+      id: 'stale-1', from: 'a', to: 'b', type: 'info',
+      subject: 'stale', body: '', priority: 'normal', readBy: {},
+      completed: false, timestamp: oldTs,
+    };
+    const recent = {
+      id: 'recent-1', from: 'a', to: 'b', type: 'info',
+      subject: 'recent', body: '', priority: 'normal', readBy: {},
+      completed: false, timestamp: new Date().toISOString(),
+    };
+    await fs.writeFile(
+      mb.mailboxPath,
+      `${[stale, recent].map((m) => JSON.stringify(m)).join('\n')}\n`,
+    );
+    await mb.purgeStale();
+    const all = await mb.query({ limit: 100 });
+    const ids = new Set(all.map((m) => m.id));
+    expect(ids.has('stale-1')).toBe(false);
+    expect(ids.has('recent-1')).toBe(true);
+    expect(all.length).toBe(1);
+  });
+
+  it('send after a prior read does not duplicate messages (cache size stays in lock-step)', async () => {
+    // Regression: send() used to call _pushToCache(msg) but did not
+    // advance _messageCacheSize. The next _readAllCached() saw
+    // st.size > _messageCacheSize, took the incremental "file only
+    // grew" branch, and re-parsed the just-appended bytes — pushing
+    // them onto the cache a second time.
+    //
+    // This is most visible when the cache is already populated (so
+    // _messageCacheSize is non-negative) and a send() happens after
+    // a read. The fix stats the file under the same lock as the
+    // append and updates the cache size/mtime, so the next read
+    // hits the fast path and returns exactly the messages on disk.
+    const m0 = await send({ subject: 'first' });
+    // Force a read so the cache is populated and the file size is
+    // known. Before the fix, _messageCacheSize is now S1 (the size
+    // after one message) and _messageCacheMtime is M1.
+    const firstRead = await mb.query({ limit: 100 });
+    expect(firstRead.length).toBe(1);
+    // Now send more messages. The pre-fix code would push them to
+    // the cache but leave _messageCacheSize at S1.
+    for (let i = 0; i < 4; i++) {
+      await send({ subject: `extra-${i}` });
+    }
+    const all = await mb.query({ limit: 100 });
+    // Must be exactly 5 messages, not 10.
+    expect(all.length).toBe(5);
+    const ids = new Set(all.map((m) => m.id));
+    expect(ids.size).toBe(5);
+    expect(ids.has(m0.id)).toBe(true);
+  });
+
+  it('send + ackMany + send + query does not duplicate messages', async () => {
+    // Same regression shape, with an ackMany (which rewrites the file)
+    // in the middle. Previously the sequence produced 15 messages
+    // (5 from the initial sends + 5 re-parsed from the post-ack
+    // incremental read + 5 from the post-ack sends + 5 re-parsed
+    // again). After the fix, the cache size/mtime advances under
+    // the lock on every write, so the incremental path never fires
+    // against an already-cached range.
+    const sent: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const m = await send({ subject: `m${i}` });
+      sent.push(m.id);
+    }
+    await mb.ackMany({ acks: [{ messageId: sent[0]!, readerId: 'b' }] });
+    for (let i = 5; i < 10; i++) {
+      const m = await send({ subject: `m${i}` });
+      sent.push(m.id);
+    }
+    const all = await mb.query({ limit: 100 });
+    expect(all.length).toBe(10);
+    const ids = new Set(all.map((m) => m.id));
+    expect(ids.size).toBe(10);
+    for (const id of sent) expect(ids.has(id)).toBe(true);
+    // The first message must reflect the ack we issued.
+    const acked = all.find((m) => m.id === sent[0]);
+    expect(acked?.readBy?.b).toBeTruthy();
+  });
+
+  it('send + clearAll + send + query does not duplicate messages', async () => {
+    // Same regression shape, with clearAll (which truncates the file
+    // to empty) in the middle. The pre-fix code left _messageCacheSize
+    // at the pre-clear value, so the post-clear send+query would
+    // re-parse the cleared bytes.
+    await send({ subject: 'will-be-cleared' });
+    await send({ subject: 'will-be-cleared' });
+    await mb.clearAll();
+    await send({ subject: 'fresh-1' });
+    await send({ subject: 'fresh-2' });
+    const all = await mb.query({ limit: 100 });
+    expect(all.length).toBe(2);
+    const subjects = new Set(all.map((m) => m.subject));
+    expect(subjects.has('fresh-1')).toBe(true);
+    expect(subjects.has('fresh-2')).toBe(true);
+    expect(subjects.has('will-be-cleared')).toBe(false);
+  });
+
+  it('send + purgeStale + send + query does not duplicate messages', async () => {
+    // Same regression shape, with purgeStale in the middle. The pre-fix
+    // code left _messageCacheSize at the pre-purge value, so the
+    // post-purge send+query would re-parse the purged bytes.
+    const oldTs = new Date(Date.now() - 10 * 86_400_000).toISOString();
+    const stale = {
+      id: 'stale-1', from: 'a', to: 'b', type: 'info',
+      subject: 'stale', body: '', priority: 'normal', readBy: {},
+      completed: false, timestamp: oldTs,
+    };
+    const recent = {
+      id: 'recent-1', from: 'a', to: 'b', type: 'info',
+      subject: 'recent', body: '', priority: 'normal', readBy: {},
+      completed: false, timestamp: new Date().toISOString(),
+    };
+    await fs.writeFile(
+      mb.mailboxPath,
+      `${[stale, recent].map((m) => JSON.stringify(m)).join('\n')}\n`,
+    );
+    await mb.purgeStale();
+    await send({ subject: 'after-purge' });
+    const all = await mb.query({ limit: 100 });
+    const ids = new Set(all.map((m) => m.id));
+    expect(ids.has('stale-1')).toBe(false);
+    expect(ids.has('recent-1')).toBe(true);
+    expect(ids.size).toBe(2);
+    const afterPurge = all.find((m) => m.subject === 'after-purge');
+    expect(afterPurge).toBeTruthy();
+  });
 });
 
 describe('DefaultMailbox _readAll', () => {

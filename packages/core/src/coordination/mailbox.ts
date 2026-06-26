@@ -79,9 +79,20 @@ export class DefaultMailbox implements Mailbox {
     // The append must hold the same lock ack() rewrites under: an unlocked
     // append racing ack's read→rewrite gets silently erased when the rewrite
     // lands (it was serialized from a snapshot taken before the append).
+    //
+    // We also stat the file under the same lock and advance the cache
+    // metadata to the new size/mtime. This keeps the cache in lock-step
+    // with the file: the next _readAllCached() hits the fast path and
+    // returns the just-appended message, instead of taking the incremental
+    // "file only grew" branch and re-parsing the same bytes that
+    // _pushToCache() already added to the cache (which would duplicate
+    // the message).
     await withFileLock(this.filePath, async () => {
       await fsp.appendFile(this.filePath, line, 'utf8');
       this._pushToCache(msg);
+      const { mtime, size } = await this._statUnderLockOrAbsent();
+      this._messageCacheMtime = mtime;
+      this._messageCacheSize = size;
     });
     return msg;
   }
@@ -182,7 +193,14 @@ export class DefaultMailbox implements Mailbox {
           all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
         await fsp.writeFile(this.filePath, serialized, 'utf8');
       }
-      this._setMessageCache(all);
+      // Stat synchronously under the same file lock that protected the
+      // write above. The cache metadata must reflect the file we just
+      // produced (or the existing file if nothing changed), and the
+      // lock prevents any concurrent appender/ack from racing us.
+      // Returns the (-1, -1) sentinel if the file doesn't exist yet
+      // (e.g. ack on a session that has never sent a message).
+      const { mtime, size } = await this._statUnderLockOrAbsent();
+      this._setMessageCache(all, mtime, size);
     });
     return updated;
   }
@@ -258,7 +276,11 @@ export class DefaultMailbox implements Mailbox {
     // append/ack so a concurrent send can't be half-erased.
     await withFileLock(this.filePath, async () => {
       await fsp.writeFile(this.filePath, '', 'utf8');
-      this._setMessageCache([]);
+      // Stat under the same lock so the cache metadata reflects exactly
+      // the truncated file. mtime is the post-truncate timestamp; size
+      // is 0 (or 1 on some platforms that leave a trailing newline).
+      const { mtime, size } = await this._statUnderLockOrAbsent();
+      this._setMessageCache([], mtime, size);
     });
   }
 
@@ -299,7 +321,12 @@ export class DefaultMailbox implements Mailbox {
         const content = kept.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
         await fsp.writeFile(this.filePath, content, 'utf8');
       }
-      this._setMessageCache(kept);
+      // Stat under the same file lock that protected the (possible)
+      // write above. The cache metadata must reflect the file's current
+      // state so subsequent _readAllCached() calls take the right branch
+      // (fast path / incremental / full re-read).
+      const { mtime, size } = await this._statUnderLockOrAbsent();
+      this._setMessageCache(kept, mtime, size);
     });
 
     return {
@@ -397,6 +424,24 @@ export class DefaultMailbox implements Mailbox {
     return messages;
   }
 
+  /**
+   * Stat the mailbox file under the assumption that we are holding the
+   * file lock, and that a write to the file has just completed. Returns
+   * the (mtimeMs, size) pair, or (-1, -1) if the file does not exist
+   * (e.g. ackMany/purgeStale on a session that has never sent a message).
+   */
+  private async _statUnderLockOrAbsent(): Promise<{ mtime: number; size: number }> {
+    try {
+      const st = await fsp.stat(this.filePath);
+      return { mtime: st.mtimeMs, size: st.size };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { mtime: -1, size: -1 };
+      }
+      throw err;
+    }
+  }
+
   private async _readAllCached(): Promise<MailboxMessage[]> {
     try {
       const st = await fsp.stat(this.filePath);
@@ -440,7 +485,7 @@ export class DefaultMailbox implements Mailbox {
     }
   }
 
-  private _setMessageCache(messages: MailboxMessage[], mtime?: number, size?: number): void {
+  private _setMessageCache(messages: MailboxMessage[], mtime: number, size: number): void {
     if (messages.length > MESSAGE_CACHE_MAX_ENTRIES) {
       this._messageCache = null;
       this._messageCacheMtime = -1;
@@ -451,20 +496,16 @@ export class DefaultMailbox implements Mailbox {
     }
     this._messageCache = messages;
     this._buildIndexes(messages);
-    if (mtime !== undefined && size !== undefined) {
-      this._messageCacheMtime = mtime;
-      this._messageCacheSize = size;
-      return;
-    }
-    void fsp
-      .stat(this.filePath)
-      .then((st) => {
-        this._messageCacheMtime = st.mtimeMs;
-        this._messageCacheSize = st.size;
-      })
-      .catch(() => {
-        /* best-effort cache metadata refresh */
-      });
+    // Set mtime/size synchronously in the same critical section as the
+    // file write that produced them. The previous implementation fired
+    // a fire-and-forget fsp.stat() here when callers did not pass values,
+    // which could race with a later rewrite: a stale stat result from
+    // the older call would clobber the freshly-computed mtime/size set
+    // by the later call, leading _readAllCached() to take the wrong
+    // "file only grew" branch on the next read and append the rewritten
+    // contents onto the existing cache (duplicated / stale messages).
+    this._messageCacheMtime = mtime;
+    this._messageCacheSize = size;
   }
 
   private _pushToCache(msg: MailboxMessage): void {
