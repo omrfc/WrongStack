@@ -68,6 +68,7 @@ import {
   THINKING_WORD_FIELD,
   getSettingsFieldValue,
   formatAllSettingsSummary,
+  resetSettingsFieldValue,
   resolveSettingsFieldValue,
   settingsPickerJumpByName,
   settingsPickerJumpField,
@@ -2990,7 +2991,8 @@ export function App({
         'Open the settings editor.\n\n' +
         '  /settings              Open on the last-visited row\n' +
         '  /settings <chord>      Open on that row\n' +
-        '  /settings <chord> <v>  Set <chord> to <v> without opening the picker\n\n' +
+        '  /settings <chord> <v>  Set <chord> to <v> without opening the picker\n' +
+        '  /settings reset <chord> Reset <chord> to its factory default\n\n' +
         'Examples:\n' +
         '  /settings yolo on      Enable YOLO mode\n' +
         '  /settings multi-diff 8  Set multi-diff threshold to 8\n' +
@@ -3002,6 +3004,45 @@ export function App({
         if (query === '') {
           openSettings();
           return { message: undefined };
+        }
+
+        // `/settings reset <chord>` — reset a field to its factory default.
+        if (query === 'reset' || query.startsWith('reset ')) {
+          const subArg = query.slice('reset'.length).trim();
+          if (subArg === '') {
+            return {
+              message: 'Usage: /settings reset <chord>\nAvailable: ' + settingsPickerJumpNames().join(', '),
+            };
+          }
+          const field = settingsPickerJumpByName(subArg);
+          if (field === undefined) {
+            return {
+              message:
+                `Unknown settings row "${subArg}".\n` +
+                `Available chords:\n  ${settingsPickerJumpNames().join('\n  ')}`,
+            };
+          }
+          const result = resetSettingsFieldValue(field);
+          if (!result.ok) {
+            return { message: result.error };
+          }
+          dispatch({ type: 'settingsValueSet', patch: result.patch });
+          const cur = getSettings ? getSettings() : undefined;
+          if (cur && saveSettings) {
+            const { tokenSavingTier, ...rest } = result.patch;
+            Promise.resolve(
+              saveSettings({
+                ...cur,
+                ...rest,
+                ...(tokenSavingTier !== undefined
+                  ? { featureTokenSaving: tokenSavingTier }
+                  : {}),
+              }),
+            ).then((err: string | null) => {
+              if (err) dispatch({ type: 'settingsHint', text: err });
+            });
+          }
+          return { message: `↺ ${result.label} reset to ${result.displayValue}` };
         }
 
         // Check for `<chord> <value>` syntax — a space separates the

@@ -775,6 +775,95 @@ export function formatAllSettingsSummary(values: SettingsPickerValues): string {
   return lines.join('\n');
 }
 
+/**
+ * Default values for all 36 configurable settings fields, in the same
+ * shape as {@link SettingsPickerValues}. Extracted from the reducer's
+ * initial state so there is a single source of truth for "factory
+ * defaults". Used by {@link resetSettingsFieldValue}.
+ */
+export const SETTINGS_DEFAULTS: Readonly<SettingsPickerValues> = Object.freeze({
+  mode: 'off',
+  delayMs: 0,
+  titleAnimation: true,
+  yolo: false,
+  streamFleet: true,
+  chime: false,
+  confirmExit: true,
+  nextPrediction: false,
+  featureMcp: true,
+  featurePlugins: true,
+  featureMemory: true,
+  featureSkills: true,
+  featureModelsRegistry: true,
+  tokenSavingTier: 'off',
+  allowOutsideProjectRoot: true,
+  contextAutoCompact: true,
+  contextStrategy: 'hybrid',
+  contextMode: 'balanced',
+  maxConcurrent: 10,
+  logLevel: 'info',
+  auditLevel: 'standard',
+  indexOnStart: true,
+  multiDiffSummaryThreshold: 5,
+  maxIterations: 500,
+  autoProceedMaxIterations: 50,
+  enhanceDelayMs: 60_000,
+  enhanceEnabled: true,
+  enhanceLanguage: 'original',
+  debugStream: false,
+  statuslineMode: 'detailed',
+  reasoningMode: 'auto',
+  reasoningEffort: 'high',
+  reasoningPreserve: false,
+  thinkingWord: 'thinking',
+  cacheTtl: 'default',
+  configScope: 'global',
+} as const);
+
+/**
+ * Reset a single settings field to its factory default. Returns the
+ * same shape as {@link resolveSettingsFieldValue} so the command
+ * handler can use the same dispatch + persist logic.
+ *
+ * Used by the `/settings reset <chord>` slash command.
+ */
+export function resetSettingsFieldValue(
+  field: number,
+): { ok: true; patch: SettingsPickerPatch; label: string; displayValue: string } | { ok: false; error: string } {
+  const result = getSettingsFieldValue(SETTINGS_DEFAULTS, field);
+  if (!result.ok) return result;
+
+  const patch = buildResetPatch(field);
+  if (!patch) return { ok: false, error: `Unknown settings field ${field}.` };
+  return { ok: true, patch, label: result.label, displayValue: result.displayValue };
+}
+
+/**
+ * Map a field index to its state key and extract the default value.
+ * This is the inverse of the field→key tables in resolveSettingsFieldValue.
+ */
+function buildResetPatch(field: number): SettingsPickerPatch | null {
+  const KEY_MAP: ReadonlyArray<readonly [number, keyof SettingsPickerValues]> = [
+    [0, 'mode'], [1, 'delayMs'], [2, 'titleAnimation'], [3, 'yolo'],
+    [4, 'streamFleet'], [5, 'chime'], [6, 'confirmExit'], [7, 'nextPrediction'],
+    [8, 'featureMcp'], [9, 'featurePlugins'], [10, 'featureMemory'], [11, 'featureSkills'],
+    [12, 'featureModelsRegistry'], [13, 'tokenSavingTier'], [14, 'allowOutsideProjectRoot'],
+    [15, 'maxIterations'], [16, 'autoProceedMaxIterations'], [17, 'enhanceDelayMs'],
+    [18, 'enhanceEnabled'], [19, 'enhanceLanguage'], [20, 'indexOnStart'],
+    [21, 'multiDiffSummaryThreshold'], [22, 'thinkingWord'], [23, 'reasoningMode'],
+    [24, 'reasoningEffort'], [25, 'reasoningPreserve'], [26, 'cacheTtl'],
+    [27, 'contextAutoCompact'], [28, 'contextStrategy'], [29, 'contextMode'],
+    [30, 'maxConcurrent'], [31, 'logLevel'], [32, 'auditLevel'], [33, 'debugStream'],
+    [34, 'statuslineMode'], [35, 'configScope'],
+  ];
+  for (const [f, key] of KEY_MAP) {
+    if (f === field) {
+      return { [key]: SETTINGS_DEFAULTS[key] } as SettingsPickerPatch;
+    }
+  }
+  return null;
+}
+
 export function SettingsPicker({
   field,
   filter,

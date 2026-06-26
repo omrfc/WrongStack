@@ -468,3 +468,63 @@ describe('formatAllSettingsSummary', () => {
     expect(out).toMatch(/Max iterations\s+unlimited/);
   });
 });
+
+// ── resetSettingsFieldValue ───────────────────────────────────────
+
+import { resetSettingsFieldValue, SETTINGS_DEFAULTS } from '../src/components/settings-picker.js';
+
+describe('resetSettingsFieldValue', () => {
+  it('returns the default value for a boolean field', () => {
+    const r = resetSettingsFieldValue(3); // yolo default = false
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.label).toBe('YOLO mode');
+      expect(r.displayValue).toBe('off');
+      expect(r.patch.yolo).toBe(false);
+    }
+  });
+
+  it('returns the default value for an enum field', () => {
+    const r = resetSettingsFieldValue(31); // logLevel default = 'info'
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.displayValue).toBe('info');
+      expect(r.patch.logLevel).toBe('info');
+    }
+  });
+
+  it('returns the default value for a preset field', () => {
+    const r = resetSettingsFieldValue(15); // maxIterations default = 500
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.displayValue).toBe('500');
+      expect(r.patch.maxIterations).toBe(500);
+    }
+  });
+
+  it('returns the default value for the thinking word', () => {
+    const r = resetSettingsFieldValue(22);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.displayValue).toBe('thinking');
+      expect(r.patch.thinkingWord).toBe('thinking');
+    }
+  });
+
+  it('returns error for out-of-range field', () => {
+    const r = resetSettingsFieldValue(99);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('99');
+  });
+
+  it('SETTINGS_DEFAULTS has all 36 keys', () => {
+    expect(Object.keys(SETTINGS_DEFAULTS)).toHaveLength(36);
+  });
+
+  it('every field 0-35 can be reset', () => {
+    for (let f = 0; f < 36; f++) {
+      const r = resetSettingsFieldValue(f);
+      expect(r.ok).toBe(true);
+    }
+  });
+});
