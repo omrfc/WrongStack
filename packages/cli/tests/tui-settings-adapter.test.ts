@@ -205,6 +205,86 @@ describe('TUI settings adapter', () => {
     expect(settings['cacheTtl']).toBe('5m');
   });
 
+  it('restrictFsToRoot=true alone keeps both fs-access keys consistent', async () => {
+    // Regression: the previous implementation wrote `tools.restrictToProjectRoot`
+    // and `features.allowOutsideProjectRoot` from three separate sites and
+    // could leave them out of sync. Saving only restrictFsToRoot=true must
+    // set features.allowOutsideProjectRoot=false (the inverse) and the live
+    // config store must reflect both.
+    const { adapter, configStore, globalConfig } = makeAdapter();
+
+    const err = await adapter.saveSettings({ restrictFsToRoot: true });
+
+    expect(err).toBeNull();
+    const written = JSON.parse(readFileSync(globalConfig, 'utf8'));
+    expect(written.tools.restrictToProjectRoot).toBe(true);
+    expect(written.features.allowOutsideProjectRoot).toBe(false);
+    const live = configStore.get();
+    expect(live.tools?.restrictToProjectRoot).toBe(true);
+    expect(live.features?.allowOutsideProjectRoot).toBe(false);
+  });
+
+  it('restrictFsToRoot=false alone keeps both fs-access keys consistent', async () => {
+    const { adapter, configStore, globalConfig } = makeAdapter(
+      baseConfig({ tools: { restrictToProjectRoot: true, maxIterations: 100, iterationTimeoutMs: 300_000, sessionTimeoutMs: 1_800_000, perIterationOutputCapBytes: 100_000, descriptionMode: {}, autoExtendLimit: true, defaultExecutionStrategy: 'smart' } }),
+    );
+
+    const err = await adapter.saveSettings({ restrictFsToRoot: false });
+
+    expect(err).toBeNull();
+    const written = JSON.parse(readFileSync(globalConfig, 'utf8'));
+    expect(written.tools.restrictToProjectRoot).toBe(false);
+    expect(written.features.allowOutsideProjectRoot).toBe(true);
+    const live = configStore.get();
+    expect(live.tools?.restrictToProjectRoot).toBe(false);
+    expect(live.features?.allowOutsideProjectRoot).toBe(true);
+  });
+
+  it('contradictory allowOutsideProjectRoot and restrictFsToRoot: allow wins', async () => {
+    // The picker should not produce this state, but if a defensive code path
+    // sets both with conflicting polarities, the contract is:
+    // allowOutsideProjectRoot is the source of truth, restrictToProjectRoot
+    // is its inverse. Both must agree on disk after the save.
+    const { adapter, globalConfig } = makeAdapter();
+
+    // allowOutsideProjectRoot=false implies restrictToProjectRoot=true;
+    // restrictFsToRoot=false contradicts that. allow wins, so the file
+    // must have features.allowOutsideProjectRoot=false AND
+    // tools.restrictToProjectRoot=true (not the user's restrictFsToRoot).
+    const err = await adapter.saveSettings({
+      allowOutsideProjectRoot: false,
+      restrictFsToRoot: false,
+    });
+
+    expect(err).toBeNull();
+    const written = JSON.parse(readFileSync(globalConfig, 'utf8'));
+    expect(written.features.allowOutsideProjectRoot).toBe(false);
+    expect(written.tools.restrictToProjectRoot).toBe(true);
+  });
+
+  it('round-trip: getSettings() returns consistent allowOutsideProjectRoot and restrictFsToRoot after a save', async () => {
+    // Regression: after toggling either knob, the picker's two readings
+    // must agree (allowOutsideProjectRoot === !restrictFsToRoot). A drift
+    // here meant the picker could "snap back" or display contradictory
+    // values for the same underlying setting.
+    const { adapter } = makeAdapter();
+
+    await adapter.saveSettings({ allowOutsideProjectRoot: false });
+    let s = adapter.getSettings();
+    expect(s['allowOutsideProjectRoot']).toBe(false);
+    expect(s['restrictFsToRoot']).toBe(true);
+
+    await adapter.saveSettings({ allowOutsideProjectRoot: true });
+    s = adapter.getSettings();
+    expect(s['allowOutsideProjectRoot']).toBe(true);
+    expect(s['restrictFsToRoot']).toBe(false);
+
+    await adapter.saveSettings({ restrictFsToRoot: true });
+    s = adapter.getSettings();
+    expect(s['restrictFsToRoot']).toBe(true);
+    expect(s['allowOutsideProjectRoot']).toBe(false);
+  });
+
   it('creates the project config when config scope changes to project', async () => {
     const { adapter, configStore, inProjectConfig } = makeAdapter();
 

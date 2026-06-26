@@ -48,6 +48,33 @@ export interface SettingsAdapter {
 export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdapter {
   const { configStore, wpaths, fleetStreamController, applyLiveSettings } = ctx;
 
+  /**
+   * Derive the filesystem-access pair (`features.allowOutsideProjectRoot`
+   * and `tools.restrictToProjectRoot`) from a save input. The two are
+   * inverses of each other and the codebase intentionally keeps both
+   * in sync for backward compatibility with older readers that only
+   * know about `tools.restrictToProjectRoot`.
+   *
+   * Single source of truth: `s.allowOutsideProjectRoot`. If the caller
+   * only sets `s.restrictFsToRoot`, that is converted to its inverse.
+   * If both are set (which the picker should not do, but defensive
+   * code paths may), `s.allowOutsideProjectRoot` wins. Returns
+   * `undefined` if neither is set, so the caller can skip the write.
+   */
+  function deriveFsAccess(s: LiveSettingsInput):
+    | { allowOutsideProjectRoot: boolean; restrictToProjectRoot: boolean }
+    | undefined {
+    if (s.allowOutsideProjectRoot !== undefined) {
+      const allow = s.allowOutsideProjectRoot;
+      return { allowOutsideProjectRoot: allow, restrictToProjectRoot: !allow };
+    }
+    if (s.restrictFsToRoot !== undefined) {
+      const restrict = s.restrictFsToRoot;
+      return { allowOutsideProjectRoot: !restrict, restrictToProjectRoot: restrict };
+    }
+    return undefined;
+  }
+
   function getSettings(): Record<string, unknown> {
     const cfg = configStore.get();
     const autonomy = cfg.autonomy as Record<string, unknown> | undefined;
@@ -218,6 +245,12 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
 
         if (s.nextPrediction !== undefined) decrypted.nextPrediction = s.nextPrediction;
         if (s.yolo !== undefined) decrypted.yolo = s.yolo;
+        // Derive the filesystem-access pair ONCE here, so both the
+        // `features.allowOutsideProjectRoot` and `tools.restrictToProjectRoot`
+        // writes below stay consistent. The previous implementation had three
+        // separate write sites that could disagree when both picker knobs
+        // were set in the same save.
+        const fsAccess = deriveFsAccess(s);
         if (
           s.featureMcp !== undefined ||
           s.featurePlugins !== undefined ||
@@ -225,7 +258,7 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
           s.featureSkills !== undefined ||
           s.featureModelsRegistry !== undefined ||
           s.featureTokenSaving !== undefined ||
-          s.allowOutsideProjectRoot !== undefined
+          fsAccess !== undefined
         ) {
           const feats = (decrypted.features as Record<string, unknown>) ?? {};
           if (s.featureMcp !== undefined) feats.mcp = s.featureMcp;
@@ -234,7 +267,7 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
           if (s.featureSkills !== undefined) feats.skills = s.featureSkills;
           if (s.featureModelsRegistry !== undefined) feats.modelsRegistry = s.featureModelsRegistry;
           if (s.featureTokenSaving !== undefined) feats.tokenSavingMode = s.featureTokenSaving;
-          if (s.allowOutsideProjectRoot !== undefined) feats.allowOutsideProjectRoot = s.allowOutsideProjectRoot;
+          if (fsAccess !== undefined) feats.allowOutsideProjectRoot = fsAccess.allowOutsideProjectRoot;
           decrypted.features = feats;
         }
         if (
@@ -266,20 +299,13 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
         }
         if (
           s.maxIterations !== undefined ||
-          s.restrictFsToRoot !== undefined ||
-          s.allowOutsideProjectRoot !== undefined
+          fsAccess !== undefined
         ) {
           const tools = (decrypted.tools as Record<string, unknown>) ?? {};
           if (s.maxIterations !== undefined) tools.maxIterations = s.maxIterations;
-          if (s.restrictFsToRoot !== undefined) tools.restrictToProjectRoot = s.restrictFsToRoot;
-          if (s.allowOutsideProjectRoot !== undefined)
-            tools.restrictToProjectRoot = !s.allowOutsideProjectRoot;
+          // Single source of truth for the inverse: deriveFsAccess above.
+          if (fsAccess !== undefined) tools.restrictToProjectRoot = fsAccess.restrictToProjectRoot;
           decrypted.tools = tools;
-        }
-        if (s.restrictFsToRoot !== undefined) {
-          const features = (decrypted.features as Record<string, unknown>) ?? {};
-          features.allowOutsideProjectRoot = !s.restrictFsToRoot;
-          decrypted.features = features;
         }
         if (s.debugStream !== undefined) {
           decrypted.debugStream = s.debugStream;
@@ -342,7 +368,7 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
           s.featureSkills !== undefined ||
           s.featureModelsRegistry !== undefined ||
           s.featureTokenSaving !== undefined ||
-          s.allowOutsideProjectRoot !== undefined
+          fsAccess !== undefined
             ? {
                 features: {
                   ...currentConfig.features,
@@ -386,8 +412,7 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
               }
             : {}),
           ...(s.maxIterations !== undefined ||
-          s.restrictFsToRoot !== undefined ||
-          s.allowOutsideProjectRoot !== undefined
+          fsAccess !== undefined
             ? {
                 tools: {
                   ...currentConfig.tools,
