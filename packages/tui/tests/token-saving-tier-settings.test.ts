@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { reducer } from '../src/app.js';
-import { TOKEN_SAVING_TIERS } from '../src/components/settings-picker.js';
+import { reducer } from '../src/app-reducer.js';
+import {
+  DELAY_PRESETS_MS,
+  ENHANCE_DELAY_PRESETS,
+  TOKEN_SAVING_TIERS,
+} from '../src/components/settings-picker.js';
 
 // Minimal settingsPicker with all required fields for the token-saving tier tests.
 // The reducer only reads/writes tokenSavingTier for field-13 operations, so
@@ -166,5 +170,34 @@ describe('token-saving tier in settings picker', () => {
     expect(s.settingsPicker.featureModelsRegistry).toBe(true);
     // tokenSavingTier should have changed
     expect(s.settingsPicker.tokenSavingTier).not.toBe('off');
+  });
+
+  it('auto-proceed delay presets include 15 seconds', () => {
+    expect(DELAY_PRESETS_MS).toContain(15_000);
+  });
+
+  it('refine delay presets include 15 seconds and wrap after 120 seconds', () => {
+    expect(ENHANCE_DELAY_PRESETS[0]).toBe(15_000);
+
+    const s = reducer(
+      {
+        ...settingsBase({ field: 17, enhanceDelayMs: 120_000 }),
+      } as never as Parameters<typeof reducer>[0],
+      { type: 'settingsValueChange', delta: 1 },
+    );
+
+    expect(s.settingsPicker.enhanceDelayMs).toBe(15_000);
+  });
+
+  it('max concurrent shows a next-session hint when cycled to default', () => {
+    const s = reducer(
+      {
+        ...settingsBase({ field: 29, maxConcurrent: 50, hint: undefined }),
+      } as never as Parameters<typeof reducer>[0],
+      { type: 'settingsValueChange', delta: 1 },
+    );
+
+    expect(s.settingsPicker.maxConcurrent).toBe(0);
+    expect(s.settingsPicker.hint).toBe('↻ Takes effect next session');
   });
 });

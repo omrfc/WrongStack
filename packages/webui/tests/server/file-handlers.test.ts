@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { WebSocket } from 'ws';
 import * as fsSync from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import {
@@ -218,4 +219,164 @@ describe('file handlers integration', () => {
       expect(response.payload.error).toBe('Forbidden');
     });
   });
+
+  // ── Symlink-escape regression tests (PATH-ESCAPE fix) ────────────
+  // These guard against the WS-01 path-escape vulnerability: a handler
+  // that does only a string-prefix check on a path.resolve() result
+  // will follow an in-project symlink to an external target.
+  describe('symlink-escape protection', () => {
+    let projectDir: string;
+    let outsideDir: string;
+
+    beforeEach(async () => {
+      projectDir = path.join(tempDir, 'project');
+      outsideDir = path.join(tempDir, 'outside');
+      await fsPromises.mkdir(projectDir, { recursive: true });
+      await fsPromises.mkdir(outsideDir, { recursive: true });
+    });
+
+    // Create a symlink at <linkPath> in `projectDir` that points at
+    // `outsideDir`. Skips the test on platforms that disallow symlinks.
+    async function makeEscapeLink(name: string): Promise<string | null> {
+      const linkPath = path.join(projectDir, name);
+      try {
+        await fsPromises.symlink(outsideDir, linkPath, 'dir');
+        return linkPath;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EPERM' || (err as NodeJS.ErrnoException).code === 'ENOSYS') {
+          return null;
+        }
+        throw err;
+      }
+    }
+
+    it('handleFilesRead refuses to read through an in-project symlink to outside', async () => {
+      const link = await makeEscapeLink('outside-link');
+      if (!link) return;
+      // Place a real file at outsideDir/secret.txt that we must NOT be
+      // able to read via the in-project symlink.
+      const secret = path.join(outsideDir, 'secret.txt');
+      await fsPromises.writeFile(secret, 'TOP SECRET');
+      const ws = createMockWs();
+
+      await handleFilesRead(
+        ws,
+        { type: 'files.read', payload: { filePath: 'outside-link/secret.txt' } },
+        projectDir,
+      );
+
+      expect(ws.sent).toHaveLength(1);
+      const response = ws.sent[0] as { payload: { content?: string; error?: string } };
+      // The handler must reject with 'Forbidden', not return the secret.
+      expect(response.payload.error).toBe('Forbidden');
+      expect(response.payload.content).toBe('');
+      // And the secret must not have been leaked via any other code path.
+      expect(JSON.stringify(ws.sent)).not.toContain('TOP SECRET');
+    });
+
+    it('handleFilesWrite refuses to write through an in-project symlink to outside', async () => {
+      const link = await makeEscapeLink('outside-link');
+      if (!link) return;
+      const ws = createMockWs();
+
+      await handleFilesWrite(
+        ws,
+        { type: 'files.write', payload: { filePath: 'outside-link/pwned.txt', content: 'overwritten' } },
+        projectDir,
+      );
+
+      expect(ws.sent).toHaveLength(1);
+      const response = ws.sent[0] as { payload: { success: boolean; error?: string } };
+      expect(response.payload.success).toBe(false);
+      expect(response.payload.error).toBe('Forbidden');
+      // The file must NOT have been created outside the project root.
+      await expect(fsPromises.stat(path.join(outsideDir, 'pwned.txt'))).rejects.toThrow();
+    });
+
+    it('handleFilesTree skips in-project symlinked directories that escape the project', async () => {
+      const link = await makeEscapeLink('outside-link');
+      if (!link) return;
+      // Drop a real file under outsideDir that must NOT appear in the tree.
+      await fsPromises.writeFile(path.join(outsideDir, 'leaked.txt'), 'leaked');
+      const ws = createMockWs();
+
+      await handleFilesTree(
+        ws,
+        { type: 'files.tree', payload: {} },
+        projectDir,
+      );
+
+      expect(ws.sent).toHaveLength(1);
+      const response = ws.sent[0] as { payload: { tree: { name: string; children?: { name: string }[] }[] } };
+      const names = collectNames(response.payload.tree);
+      expect(names).not.toContain('outside-link');
+      expect(names).not.toContain('leaked.txt');
+    });
+
+    it('handleFilesTree refuses a tree root that is itself a symlink to outside', async () => {
+      // The user-supplied tree root is an in-project symlink to outside.
+      // This must be rejected at the entry check, not silently followed.
+      const link = await makeEscapeLink('outside-link');
+      if (!link) return;
+      const ws = createMockWs();
+
+      await handleFilesTree(
+        ws,
+        { type: 'files.tree', payload: { path: 'outside-link' } },
+        projectDir,
+      );
+
+      expect(ws.sent).toHaveLength(1);
+      const response = ws.sent[0] as { payload: { error?: string; tree: unknown[] } };
+      expect(response.payload.error).toBe('Path outside project root');
+      expect(response.payload.tree).toEqual([]);
+    });
+
+    it('handleFilesList skips in-project symlinked directories that escape the project', async () => {
+      const link = await makeEscapeLink('outside-link');
+      if (!link) return;
+      await fsPromises.writeFile(path.join(outsideDir, 'leaked.txt'), 'leaked');
+      const ws = createMockWs();
+
+      await handleFilesList(
+        ws,
+        { type: 'files.list', payload: {} },
+        projectDir,
+      );
+
+      expect(ws.sent).toHaveLength(1);
+      const response = ws.sent[0] as { payload: { files: string[] } };
+      expect(response.payload.files).not.toContain('outside-link/leaked.txt');
+    });
+
+    it('handleFilesList refuses a list root that is itself a symlink to outside', async () => {
+      const link = await makeEscapeLink('outside-link');
+      if (!link) return;
+      const ws = createMockWs();
+
+      await handleFilesList(
+        ws,
+        { type: 'files.list', payload: { path: 'outside-link' } },
+        projectDir,
+      );
+
+      expect(ws.sent).toHaveLength(1);
+      const response = ws.sent[0] as { payload: { files: unknown[] } };
+      expect(response.payload.files).toEqual([]);
+    });
+  });
 });
+
+// Recursively collect the `name` field from a tree returned by
+// handleFilesTree. Used by the symlink-escape regression tests to
+// assert that no leaked filenames surface in the response.
+function collectNames(
+  tree: { name: string; children?: { name: string; children?: { name: string }[] }[] }[],
+): string[] {
+  const names: string[] = [];
+  for (const node of tree) {
+    names.push(node.name);
+    if (node.children) names.push(...collectNames(node.children));
+  }
+  return names;
+}

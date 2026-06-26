@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ModelsRegistry } from '@wrongstack/core';
 import {
   buildAuthorizeUrl,
   exchangeAuthorizationCode,
@@ -8,6 +9,7 @@ import {
   generatePkce,
   parseAuthorizationInput,
   refreshCodexToken,
+  resolveCodexModels,
 } from '../src/auth-menu/openai-codex-oauth.js';
 
 function b64url(s: string): string {
@@ -151,10 +153,7 @@ describe('fetchCodexModels', () => {
       'fetch',
       vi.fn(async () =>
         Response.json({
-          models: [
-            { id: 'gpt-5.3-codex-spark' },
-            { id: 'gpt-5.2' },
-          ],
+          models: [{ id: 'gpt-5.3-codex-spark' }, { id: 'gpt-5.2' }],
         }),
       ),
     );
@@ -222,17 +221,87 @@ describe('fetchCodexModels', () => {
       'fetch',
       vi.fn(async () =>
         Response.json({
-          data: [
-            { id: 'gpt-5.5' },
-            { id: null },
-            { id: '' },
-            { notId: 'gpt-5.4' },
-          ],
+          data: [{ id: 'gpt-5.5' }, { id: null }, { id: '' }, { notId: 'gpt-5.4' }],
         }),
       ),
     );
     const ids = await fetchCodexModels('test-token');
     expect(ids).toEqual(['gpt-5.5']);
+  });
+});
+
+describe('resolveCodexModels', () => {
+  it('filters live discovery to current Codex models before saving', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          data: [
+            { id: 'gpt-5.2' },
+            { id: 'gpt-5.4-mini' },
+            { id: 'gpt-5.3-codex' },
+            { id: 'gpt-5.5' },
+          ],
+        }),
+      ),
+    );
+    const registry = {
+      getProvider: vi.fn(async () => {
+        throw new Error('catalog should not be used');
+      }),
+    } as never as ModelsRegistry;
+
+    await expect(resolveCodexModels(registry, 'test-token')).resolves.toEqual([
+      'gpt-5.5',
+      'gpt-5.4-mini',
+    ]);
+  });
+
+  it('uses Codex-family models from the catalog when live discovery is unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('Forbidden', { status: 403 })),
+    );
+    const registry = {
+      getProvider: vi.fn(async (id: string) =>
+        id === 'openai'
+          ? {
+              models: [
+                { id: 'gpt-5.5', family: 'gpt-codex' },
+                { id: 'gpt-5.4', family: 'gpt-codex' },
+                { id: 'gpt-5.4-mini', family: 'gpt-codex' },
+                { id: 'gpt-5.3-codex-spark', family: 'gpt-codex-spark' },
+                { id: 'gpt-5.3-codex', family: 'gpt-codex' },
+                { id: 'gpt-4o', family: 'gpt-4o' },
+              ],
+            }
+          : undefined,
+      ),
+    } as never as ModelsRegistry;
+
+    await expect(resolveCodexModels(registry, 'test-token')).resolves.toEqual([
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex-spark',
+    ]);
+  });
+
+  it('falls back to the seeded Codex model list when live discovery and catalog miss', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('Forbidden', { status: 403 })),
+    );
+    const registry = {
+      getProvider: vi.fn(async () => undefined),
+    } as never as ModelsRegistry;
+
+    await expect(resolveCodexModels(registry, 'test-token')).resolves.toEqual([
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex-spark',
+    ]);
   });
 });
 

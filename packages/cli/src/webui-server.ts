@@ -555,7 +555,9 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
             });
         },
       });
-      const mailbox = new GlobalMailbox(projectDir, opts.events, () => webuiHqConnection?.getPublisher());
+      const mailbox = new GlobalMailbox(projectDir, opts.events, () =>
+        webuiHqConnection?.getPublisher(),
+      );
       webuiClientId = `webui@${crypto.randomUUID().slice(0, 8)}`;
       const projectName = opts.projectRoot ? path.basename(opts.projectRoot) : 'unknown';
       await mailbox.registerClient({
@@ -1562,7 +1564,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     broadcast,
     log: (m) => console.log(m),
   };
-  return new Promise<void>((resolve) => {
+  const stopped = new Promise<void>((resolve) => {
     wss.on('listening', () => {
       console.log(`[WebUI] WebSocket server running on ws://${host}:${port}`);
       setupEvents();
@@ -1819,12 +1821,18 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
 
   const wsRoutes: Record<string, WsRouteHandler> = {
     // ── Core connection ──
-    'user_message': (msg, ws) =>
-      handleUserMessage(connectionCtx, ws, (msg as { payload: { content: string } }).payload.content),
-    'abort': (_msg, ws) => handleAbort(connectionCtx, ws),
-    'ping': (_msg, ws) => handlePing(connectionCtx, ws),
+    user_message: (msg, ws) =>
+      handleUserMessage(
+        connectionCtx,
+        ws,
+        (msg as { payload: { content: string } }).payload.content,
+      ),
+    abort: (_msg, ws) => handleAbort(connectionCtx, ws),
+    ping: (_msg, ws) => handlePing(connectionCtx, ws),
     'tool.confirm_result': (msg, _ws) => {
-      const { id, decision } = (msg as { payload: { id: string; decision: 'yes' | 'no' | 'always' | 'deny' } }).payload;
+      const { id, decision } = (
+        msg as { payload: { id: string; decision: 'yes' | 'no' | 'always' | 'deny' } }
+      ).payload;
       handleToolConfirmResult(connectionCtx, id, decision);
     },
     'webui.shutdown': () => {
@@ -1835,7 +1843,11 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // ── Providers / keys ──
     'providers.list': (_msg, ws) => handleProvidersList(wsHandlerCtx, ws),
     'provider.models': (msg, ws) =>
-      handleProviderModels(wsHandlerCtx, ws, (msg as { payload: { providerId: string } }).payload.providerId),
+      handleProviderModels(
+        wsHandlerCtx,
+        ws,
+        (msg as { payload: { providerId: string } }).payload.providerId,
+      ),
     'providers.saved': (_msg, ws) => handleProvidersSaved(wsHandlerCtx, ws),
     'key.add': (msg, ws) => {
       const m = msg as { payload: { providerId: string; label: string; apiKey: string } };
@@ -1854,17 +1866,44 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       handleKeySetActive(wsHandlerCtx, ws, m.payload.providerId, m.payload.label);
     },
     'provider.add': (msg, ws) =>
-      handleProviderAdd(wsHandlerCtx, ws, (msg as { payload: { id: string; family: string; baseUrl?: string; apiKey?: string } }).payload),
+      handleProviderAdd(
+        wsHandlerCtx,
+        ws,
+        (msg as { payload: { id: string; family: string; baseUrl?: string; apiKey?: string } })
+          .payload,
+      ),
     'provider.remove': (msg, ws) =>
-      handleProviderRemove(wsHandlerCtx, ws, (msg as { payload: { providerId: string } }).payload.providerId),
+      handleProviderRemove(
+        wsHandlerCtx,
+        ws,
+        (msg as { payload: { providerId: string } }).payload.providerId,
+      ),
     'provider.clear_models': (msg, ws) =>
-      handleProviderClearModels(wsHandlerCtx, ws, (msg as { payload: { providerId: string } }).payload.providerId),
+      handleProviderClearModels(
+        wsHandlerCtx,
+        ws,
+        (msg as { payload: { providerId: string } }).payload.providerId,
+      ),
     'provider.undo_clear': (msg, ws) => {
       const m = msg as { payload: { providerId: string; previousModels: string[] } };
       handleProviderUndoClear(wsHandlerCtx, ws, m.payload.providerId, m.payload.previousModels);
     },
     'provider.update': (msg, ws) =>
-      handleProviderUpdate(wsHandlerCtx, ws, (msg as { payload: { id: string; family?: string; baseUrl?: string; envVars?: string[]; models?: string[] } }).payload),
+      handleProviderUpdate(
+        wsHandlerCtx,
+        ws,
+        (
+          msg as {
+            payload: {
+              id: string;
+              family?: string;
+              baseUrl?: string;
+              envVars?: string[];
+              models?: string[];
+            };
+          }
+        ).payload,
+      ),
     'provider.probe': (msg, ws) => {
       const m = msg as { payload: { providerId: string; timeoutMs?: number } };
       handleProviderProbe(wsHandlerCtx, ws, m.payload.providerId, m.payload.timeoutMs);
@@ -1874,22 +1913,49 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     'todos.get': (_msg, ws) => handleTodosGet(worklistCtx, ws),
     'todos.clear': (_msg, ws) => handleTodosClear(worklistCtx, ws),
     'todos.remove': (msg, ws) =>
-      handleTodosRemove(worklistCtx, ws, msg.payload as { id?: string; index?: number } | undefined),
+      handleTodosRemove(
+        worklistCtx,
+        ws,
+        msg.payload as { id?: string; index?: number } | undefined,
+      ),
     'todo.update': (msg, ws) =>
-      handleTodoUpdate(worklistCtx, ws, msg.payload as { id: string; status?: TodoItem['status']; activeForm?: string }),
+      handleTodoUpdate(
+        worklistCtx,
+        ws,
+        msg.payload as { id: string; status?: TodoItem['status']; activeForm?: string },
+      ),
     'goal.get': (_msg, ws) => handleGoalGet(sessionsCtx, ws),
     'plan.get': (_msg, ws) => handlePlanGet(worklistCtx, ws),
     'plan.template_use': (msg, ws) =>
-      handlePlanTemplateUse(worklistCtx, ws, (msg as { payload: { template: string } }).payload.template),
+      handlePlanTemplateUse(
+        worklistCtx,
+        ws,
+        (msg as { payload: { template: string } }).payload.template,
+      ),
     'plan.item.update': (msg, ws) =>
-      handlePlanItemUpdate(worklistCtx, ws, msg.payload as { target: string; status: 'open' | 'in_progress' | 'done' }),
+      handlePlanItemUpdate(
+        worklistCtx,
+        ws,
+        msg.payload as { target: string; status: 'open' | 'in_progress' | 'done' },
+      ),
     'tasks.get': (_msg, ws) => handleTasksGet(worklistCtx, ws),
     'task.update': (msg, ws) =>
-      handleTaskUpdate(worklistCtx, ws, msg.payload as { id: string; status: 'pending' | 'in_progress' | 'blocked' | 'failed' | 'review' | 'completed' }),
+      handleTaskUpdate(
+        worklistCtx,
+        ws,
+        msg.payload as {
+          id: string;
+          status: 'pending' | 'in_progress' | 'blocked' | 'failed' | 'review' | 'completed';
+        },
+      ),
 
     // ── Sessions ──
     'sessions.list': (msg, ws) =>
-      handleSessionsList(sessionsCtx, ws, (msg as { payload?: { limit?: number } }).payload?.limit ?? 50),
+      handleSessionsList(
+        sessionsCtx,
+        ws,
+        (msg as { payload?: { limit?: number } }).payload?.limit ?? 50,
+      ),
     'session.new': (_msg, ws) => handleSessionNew(sessionsCtx, ws),
     'session.delete': (msg, ws) =>
       handleSessionDelete(sessionsCtx, ws, (msg as { payload: { id: string } }).payload.id),
@@ -1898,37 +1964,87 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       handleSessionResume(sessionsCtx, ws, (msg as { payload: { id: string } }).payload.id),
     'session.checkpoints': (_msg, ws) => handleSessionCheckpoints(sessionsCtx, ws),
     'session.rewind': (msg, ws) =>
-      handleSessionRewind(sessionsCtx, ws, (msg as { payload: { checkpointIndex: number } }).payload.checkpointIndex),
+      handleSessionRewind(
+        sessionsCtx,
+        ws,
+        (msg as { payload: { checkpointIndex: number } }).payload.checkpointIndex,
+      ),
 
     // ── Context ──
     'context.clear': (_msg, ws) => handleContextClear(contextHandlerCtx, ws),
     'context.debug': (_msg, ws) => handleContextDebug(contextHandlerCtx, ws),
     'context.compact': (msg, ws) =>
-      handleContextCompact(contextHandlerCtx, ws, !!(msg as { payload?: { aggressive?: boolean } }).payload?.aggressive),
+      handleContextCompact(
+        contextHandlerCtx,
+        ws,
+        !!(msg as { payload?: { aggressive?: boolean } }).payload?.aggressive,
+      ),
     'context.repair': (_msg, ws) => handleContextRepair(contextHandlerCtx, ws),
     'context.modes.list': (_msg, ws) => handleContextModesList(contextHandlerCtx, ws),
     'context.mode.switch': (msg, ws) =>
-      handleContextModeSwitch(contextHandlerCtx, ws, (msg as { payload: { id: string } }).payload.id),
+      handleContextModeSwitch(
+        contextHandlerCtx,
+        ws,
+        (msg as { payload: { id: string } }).payload.id,
+      ),
     'context.mode.create': (msg, ws) =>
-      handleContextModeCreate(contextHandlerCtx, ws, (msg as {
-        payload: { id: string; name: string; description: string; thresholds: { warn: number; soft: number; hard: number }; preserveK: number; eliseThreshold: number };
-      }).payload),
+      handleContextModeCreate(
+        contextHandlerCtx,
+        ws,
+        (
+          msg as {
+            payload: {
+              id: string;
+              name: string;
+              description: string;
+              thresholds: { warn: number; soft: number; hard: number };
+              preserveK: number;
+              eliseThreshold: number;
+            };
+          }
+        ).payload,
+      ),
     'context.mode.update': (msg, ws) =>
-      handleContextModeUpdate(contextHandlerCtx, ws, (msg as {
-        payload: { id: string; name?: string; description?: string; thresholds?: { warn?: number; soft?: number; hard?: number }; preserveK?: number; eliseThreshold?: number };
-      }).payload),
+      handleContextModeUpdate(
+        contextHandlerCtx,
+        ws,
+        (
+          msg as {
+            payload: {
+              id: string;
+              name?: string;
+              description?: string;
+              thresholds?: { warn?: number; soft?: number; hard?: number };
+              preserveK?: number;
+              eliseThreshold?: number;
+            };
+          }
+        ).payload,
+      ),
     'context.mode.delete': (msg, ws) =>
-      handleContextModeDelete(contextHandlerCtx, ws, (msg as { payload: { id: string } }).payload.id),
+      handleContextModeDelete(
+        contextHandlerCtx,
+        ws,
+        (msg as { payload: { id: string } }).payload.id,
+      ),
 
     // ── Agent config: modes / models ──
     'modes.list': (_msg, ws) => handleModesList(agentConfigCtx, ws),
-    'mode.switch': (msg, ws) => handleModeSwitch(agentConfigCtx, ws, (msg as { payload: { id: string } }).payload.id),
-    'model.switch': (msg, ws) => handleModelSwitch(agentConfigCtx, ws, (msg as { payload: { provider: string; model: string } }).payload),
-    'model.refine': (msg, ws) => handleModelRefine(agentConfigCtx, ws, (msg as { payload: { text: string } }).payload.text),
+    'mode.switch': (msg, ws) =>
+      handleModeSwitch(agentConfigCtx, ws, (msg as { payload: { id: string } }).payload.id),
+    'model.switch': (msg, ws) =>
+      handleModelSwitch(
+        agentConfigCtx,
+        ws,
+        (msg as { payload: { provider: string; model: string } }).payload,
+      ),
+    'model.refine': (msg, ws) =>
+      handleModelRefine(agentConfigCtx, ws, (msg as { payload: { text: string } }).payload.text),
 
     // ── Process management ──
     'process.list': (_msg, ws) => handleProcessList(wsCommon, ws),
-    'process.kill': (msg, ws) => handleProcessKill(wsCommon, ws, (msg as { payload: { pid: number } }).payload.pid),
+    'process.kill': (msg, ws) =>
+      handleProcessKill(wsCommon, ws, (msg as { payload: { pid: number } }).payload.pid),
     'process.killAll': (_msg, ws) => handleProcessKillAll(wsCommon, ws),
 
     // ── Diagnostics / introspection ──
@@ -1937,16 +2053,20 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     'tools.list': (_msg, ws) => handleToolsList(introspectionCtx, ws),
 
     // ── Autonomy ──
-    'autonomy.switch': (msg, ws) => handleAutonomySwitch(prefsCtx, ws, (msg as { payload: { mode: string } }).payload.mode),
+    'autonomy.switch': (msg, ws) =>
+      handleAutonomySwitch(prefsCtx, ws, (msg as { payload: { mode: string } }).payload.mode),
 
     // ── Brain ──
     'brain.status': (_msg, ws) => handleBrainStatus(brainCtx, ws),
-    'brain.risk': (msg, ws) => handleBrainRisk(brainCtx, ws, (msg as { payload?: { level?: string } }).payload?.level ?? ''),
-    'brain.ask': (msg, ws) => handleBrainAsk(brainCtx, ws, (msg as { payload?: { question?: string } }).payload?.question),
+    'brain.risk': (msg, ws) =>
+      handleBrainRisk(brainCtx, ws, (msg as { payload?: { level?: string } }).payload?.level ?? ''),
+    'brain.ask': (msg, ws) =>
+      handleBrainAsk(brainCtx, ws, (msg as { payload?: { question?: string } }).payload?.question),
 
     // ── Preferences ──
     'prefs.get': (_msg, ws) => handlePrefsGet(prefsCtx, ws),
-    'prefs.update': (msg, ws) => handlePrefsUpdate(prefsCtx, ws, (msg as { payload: Record<string, unknown> }).payload),
+    'prefs.update': (msg, ws) =>
+      handlePrefsUpdate(prefsCtx, ws, (msg as { payload: Record<string, unknown> }).payload),
 
     // ── File operations (delegated to shared file-handlers.ts) ──
     'files.list': (msg, ws) => handleFilesList(ws, msg, projectRootFor()),
@@ -1958,9 +2078,10 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         projectRoot: projectRootFor(),
         provider: opts.agent.ctx.provider,
         model: opts.agent.ctx.model,
-        indexDir: typeof opts.agent.ctx.meta['codebaseIndexDir'] === 'string'
-          ? opts.agent.ctx.meta['codebaseIndexDir']
-          : undefined,
+        indexDir:
+          typeof opts.agent.ctx.meta['codebaseIndexDir'] === 'string'
+            ? opts.agent.ctx.meta['codebaseIndexDir']
+            : undefined,
         lspCompletion: createToolLspCompletionSource(
           opts.agent.ctx.tools.find((tool) => tool.name === 'lsp_completion'),
           opts.agent.ctx,
@@ -1970,7 +2091,10 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // ── Memory (guarded — opts.memoryStore may be undefined) ──
     'memory.list': (_msg, ws) => {
       if (!opts.memoryStore) {
-        send(ws, { type: 'memory.list', payload: { text: '', error: 'Memory store not available' } });
+        send(ws, {
+          type: 'memory.list',
+          payload: { text: '', error: 'Memory store not available' },
+        });
         return;
       }
       return handleMemoryList(ws, opts.memoryStore);
@@ -1993,14 +2117,21 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // ── MCP operations (shared handlers from @wrongstack/webui/server) ──
     'mcp.list': (msg, ws) => handleMcpList(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
     'mcp.add': (msg, ws) => handleMcpAdd(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
-    'mcp.remove': (msg, ws) => handleMcpRemove(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
-    'mcp.update': (msg, ws) => handleMcpUpdate(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
+    'mcp.remove': (msg, ws) =>
+      handleMcpRemove(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
+    'mcp.update': (msg, ws) =>
+      handleMcpUpdate(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
     'mcp.wake': (msg, ws) => handleMcpWake(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
-    'mcp.sleep': (msg, ws) => handleMcpSleep(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
-    'mcp.discover': (msg, ws) => handleMcpDiscover(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
-    'mcp.enable': (msg, ws) => handleMcpEnable(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
-    'mcp.disable': (msg, ws) => handleMcpDisable(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
-    'mcp.restart': (msg, ws) => handleMcpRestart(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
+    'mcp.sleep': (msg, ws) =>
+      handleMcpSleep(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
+    'mcp.discover': (msg, ws) =>
+      handleMcpDiscover(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
+    'mcp.enable': (msg, ws) =>
+      handleMcpEnable(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
+    'mcp.disable': (msg, ws) =>
+      handleMcpDisable(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
+    'mcp.restart': (msg, ws) =>
+      handleMcpRestart(ws, msg, opts.globalConfigPath ?? '', opts.mcpRegistry),
 
     // ── Skills ──
     'skills.list': (_msg, ws) => handleSkillsList(introspectionCtx, ws),
@@ -2015,21 +2146,36 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // ── Projects / working dir ──
     'projects.list': (_msg, ws) => handleProjectsList(projectsCtx, ws),
     'projects.select': (msg, ws) =>
-      handleProjectsSelect(projectsCtx, ws, (msg as { payload: { root: string; name?: string } }).payload),
+      handleProjectsSelect(
+        projectsCtx,
+        ws,
+        (msg as { payload: { root: string; name?: string } }).payload,
+      ),
     'projects.add': (msg, ws) =>
-      handleProjectsAdd(projectsCtx, ws, (msg as { payload: { root: string; name?: string } }).payload),
+      handleProjectsAdd(
+        projectsCtx,
+        ws,
+        (msg as { payload: { root: string; name?: string } }).payload,
+      ),
     'working_dir.set': (msg, ws) =>
       handleWorkingDirSet(projectsCtx, ws, (msg as { payload: { path: string } }).payload.path),
 
     // ── Git ──
     'git.changes': (_msg, ws) => handleGitChanges(ws, projectRootFor()),
     'git.diff': (msg, ws) =>
-      handleGitDiff(ws, projectRootFor(), (msg as { payload?: { path?: string } }).payload?.path ?? ''),
+      handleGitDiff(
+        ws,
+        projectRootFor(),
+        (msg as { payload?: { path?: string } }).payload?.path ?? '',
+      ),
     'git.info': (_msg, ws) => handleGitInfo(ws, projectRootFor()),
 
     // ── Shell ──
     'shell.open': async (msg, ws) => {
-      const result = await handleShellOpen(msg.payload as Parameters<typeof handleShellOpen>[0], consoleLogger);
+      const result = await handleShellOpen(
+        msg.payload as Parameters<typeof handleShellOpen>[0],
+        consoleLogger,
+      );
       sendResult(ws, result.success, result.message);
     },
 
@@ -2070,13 +2216,19 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // ── Prefix-based fallback for delegated handlers ──
     const msgType = (msg as { type: string }).type;
     if (msgType.startsWith('autophase.')) {
-      await autoPhaseHandler.handleMessage(msg as { type: string; payload?: Record<string, unknown> });
+      await autoPhaseHandler.handleMessage(
+        msg as { type: string; payload?: Record<string, unknown> },
+      );
     } else if (msgType.startsWith('specs.')) {
       await specsHandler.handleMessage(msg as { type: string; payload?: Record<string, unknown> });
     } else if (msgType.startsWith('sdd.board.')) {
-      await sddBoardHandler.handleMessage(msg as { type: string; payload?: Record<string, unknown> });
+      await sddBoardHandler.handleMessage(
+        msg as { type: string; payload?: Record<string, unknown> },
+      );
     } else if (msgType.startsWith('sdd.spec.') || msgType.startsWith('sdd.run.')) {
-      await sddWizardHandler?.handleMessage(msg as { type: string; payload?: Record<string, unknown> });
+      await sddWizardHandler?.handleMessage(
+        msg as { type: string; payload?: Record<string, unknown> },
+      );
     } else {
       console.debug(`[WebUI] Unhandled message type: ${msgType}`);
     }
@@ -2116,4 +2268,6 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   function sendResult(ws: WebSocket, success: boolean, message: string): void {
     send(ws, { type: 'key.operation_result', payload: { success, message } });
   }
+
+  return stopped;
 } // end of runWebUI

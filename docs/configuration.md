@@ -9,10 +9,11 @@ WrongStack uses a layered configuration system. Settings are merged from multipl
 | Layer | Path | Purpose |
 |---|---|---|
 | Global | `~/.wrongstack/config.json` | Developer-level defaults (provider, keys, features) |
-| Project-local | `<project>/.wrongstack/config.local.json` | Project overrides (not committed) |
+| Project-private | `~/.wrongstack/projects/<slug>/config.local.json` | Project overrides outside the repo (not committed) |
+| In-project | `<project>/.wrongstack/config.json` | Repo-local safe preferences only; unsafe fields are stripped before merge |
 | CLI flags | `--provider`, `--model`, `--yolo`, etc. | Session-scoped overrides |
 
-**Precedence** (highest wins): CLI flags → project-local → global → built-in defaults.
+**Precedence** (highest wins): CLI flags → extra config sources → env vars → in-project → project-private → global → built-in defaults.
 
 ---
 

@@ -123,6 +123,68 @@ describe('setupProvider', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
+  it('seeds openai-codex with the current Codex fallback models when no saved list exists', async () => {
+    const out = await setupProvider({
+      config: fakeConfig({
+        provider: 'openai-codex',
+        model: 'gpt-5.5',
+        providers: {
+          'openai-codex': {
+            type: 'openai-codex',
+            family: 'openai-codex',
+            apiKeys: [{ label: 'oauth-default', apiKey: 'tok', createdAt: '2026-01-01' }],
+            activeKey: 'oauth-default',
+          } as never,
+        },
+      }),
+      modelsRegistry: fakeModelsRegistry(),
+      logger: fakeLogger(),
+    });
+
+    expect(out.resolvedProvider?.models.map((m) => m.id)).toEqual([
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex-spark',
+    ]);
+  });
+
+  it('filters openai-codex catalog seeding to current Codex models', async () => {
+    const getProvider = vi.fn(async (id: string) => {
+      if (id === 'openai') {
+        return {
+          id: 'openai',
+          name: 'OpenAI',
+          family: 'openai',
+          envVars: [],
+          models: [
+            { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', family: 'gpt-codex' },
+            { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', family: 'gpt-codex' },
+            { id: 'gpt-5.5', name: 'GPT-5.5', family: 'gpt-codex' },
+          ],
+        } as ResolvedProvider;
+      }
+      return undefined;
+    });
+
+    const out = await setupProvider({
+      config: fakeConfig({
+        provider: 'openai-codex',
+        model: 'gpt-5.5',
+        providers: {
+          'openai-codex': {
+            type: 'openai-codex',
+            family: 'openai-codex',
+          } as never,
+        },
+      }),
+      modelsRegistry: fakeModelsRegistry({ getProvider }),
+      logger: fakeLogger(),
+    });
+
+    expect(out.resolvedProvider?.models.map((m) => m.id)).toEqual(['gpt-5.5', 'gpt-5.4-mini']);
+  });
+
   it('throws UNSUPPORTED_PROVIDER when family is unsupported and no override', async () => {
     const resolved = { family: 'unsupported', npm: 'weird-sdk' } as ResolvedProvider;
     const modelsRegistry = fakeModelsRegistry({

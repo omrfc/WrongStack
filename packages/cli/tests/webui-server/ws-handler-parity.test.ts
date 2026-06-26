@@ -46,7 +46,7 @@ const standalonePaths = [
 /** Extract the set of dispatched message-type labels from one or more source
  * files. Supports two formats:
  *  - `case '<label>':` — a switch statement
- *  - `'<label>':` — a route-map object literal (key inside a `wsRoutes = { }` block)
+ *  - `'<label>':` / `<label>:` — a route-map object literal key inside `wsRoutes`
  */
 function caseLabels(files: string | readonly string[]): Set<string> {
   const labels = new Set<string>();
@@ -67,12 +67,23 @@ function caseLabels(files: string | readonly string[]): Set<string> {
           if (src[i] === '{') depth++;
           else if (src[i] === '}') {
             depth--;
-            if (depth === 0) { endIdx = i; break; }
+            if (depth === 0) {
+              endIdx = i;
+              break;
+            }
           }
         }
-        const block = src.slice(braceStart, endIdx);
-        for (const m of block.matchAll(/^\s+'([a-z][a-zA-Z0-9_.]*)'\s*:/gm)) {
-          labels.add(m[1] as string);
+        const block = src.slice(braceStart + 1, endIdx);
+        let routeDepth = 1;
+        for (const line of block.split(/\r?\n/)) {
+          if (routeDepth === 1) {
+            const m = line.match(/^\s*(?:'([a-z][a-zA-Z0-9_.]*)'|([a-z][a-zA-Z0-9_.]*))\s*:/);
+            if (m) labels.add((m[1] ?? m[2]) as string);
+          }
+          for (const ch of line) {
+            if (ch === '{') routeDepth++;
+            else if (ch === '}') routeDepth--;
+          }
         }
       }
     }

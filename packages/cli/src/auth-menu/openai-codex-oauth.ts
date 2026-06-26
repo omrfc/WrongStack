@@ -27,13 +27,23 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { color, type ModelsRegistry, type ProviderApiKey, type ProviderConfig } from '@wrongstack/core';
+import {
+  color,
+  type ModelsRegistry,
+  type ProviderApiKey,
+  type ProviderConfig,
+} from '@wrongstack/core';
 import {
   mutateConfigProviders,
   normalizeKeys,
   nowIso,
   writeKeysBack,
 } from '../provider-config-utils.js';
+import {
+  fallbackCodexModelIds,
+  filterCurrentCodexModelIds,
+  isCodexCatalogModel,
+} from '../openai-codex-models.js';
 import type { AuthMenuDeps } from './types.js';
 
 // ── Codex OAuth constants (verified against the real Codex CLI) ─────────────
@@ -67,12 +77,6 @@ export const CODEX_BASE_URL = 'https://chatgpt.com/backend-api';
  *  2. models.dev catalog (`family: gpt-codex*` under `openai` provider)
  *  3. This inline fallback
  */
-const FALLBACK_MODELS: readonly string[] = [
-  'gpt-5.5',
-  'gpt-5.4',
-  'gpt-5.4-mini',
-];
-
 // ── Token shapes ────────────────────────────────────────────────────────────
 
 export interface CodexTokens {
@@ -158,22 +162,19 @@ export function extractAccountId(token: string): string | null {
 
 // ── Model discovery ──────────────────────────────────────────────────────────
 
-/** Families in the models.dev catalog that indicate Codex / Responses API compatibility. */
-const CODEX_CATALOG_FAMILIES = new Set(['gpt-codex', 'gpt-codex-spark']);
-
 /**
  * Resolve the list of available Codex models using a 3-tier fallback chain:
  *
- *  1. **Live backend** — `fetchCodexModels()` hits `GET <baseUrl>/models`.
+ *  1. **Live backend** — `fetchCodexModels()` hits `GET <baseUrl>/models`
+ *     and keeps only current Codex model ids.
  *  2. **models.dev catalog** — queries the `openai` provider in the cached
  *     models.dev registry and picks models whose `family` is `gpt-codex` or
- *     `gpt-codex-spark` (i.e. models designed for the Responses API wire format).
+ *     `gpt-codex-spark` and whose ids are current for ChatGPT sign-in.
  *  3. **Inline fallback** — a minimal list of documented mainstream models
- *     (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`).
+ *     (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`).
  *
- * This keeps the model list in sync with the catalog: when OpenAI adds a new
- * `gpt-codex` model to models.dev, it appears in the picker automatically
- * without touching any source code.
+ * The live/catalog tiers gate account availability, while the shared current
+ * model list filters out deprecated ChatGPT sign-in ids before config is saved.
  */
 export async function resolveCodexModels(
   modelsRegistry: ModelsRegistry,
@@ -183,7 +184,7 @@ export async function resolveCodexModels(
 ): Promise<string[]> {
   // Tier 1 — live backend
   const token = typeof accessToken === 'string' ? accessToken : await accessToken;
-  const live = await fetchCodexModels(token, baseUrl, signal);
+  const live = filterCurrentCodexModelIds(await fetchCodexModels(token, baseUrl, signal));
   if (live.length > 0) return live;
 
   // Tier 2 — models.dev catalog
@@ -191,17 +192,18 @@ export async function resolveCodexModels(
     const openaiProvider = await modelsRegistry.getProvider('openai');
     if (openaiProvider) {
       const catalog = openaiProvider.models
-        .filter((m) => m.family && CODEX_CATALOG_FAMILIES.has(m.family))
+        .filter(isCodexCatalogModel)
         .map((m) => m.id)
         .filter((id): id is string => typeof id === 'string' && id.length > 0);
-      if (catalog.length > 0) return catalog;
+      const currentCatalog = filterCurrentCodexModelIds(catalog);
+      if (currentCatalog.length > 0) return currentCatalog;
     }
   } catch {
     // catalog unavailable — fall through to tier 3
   }
 
   // Tier 3 — inline fallback
-  return [...FALLBACK_MODELS];
+  return fallbackCodexModelIds();
 }
 
 /**
@@ -236,7 +238,7 @@ export async function fetchCodexModels(
       | null;
     if (!json) return [];
     // Standard OpenAI-compatible: { data: [{ id: "gpt-...", ... }] }
-    let rawList: unknown[] =
+    const rawList: unknown[] =
       'data' in json && Array.isArray(json.data)
         ? (json.data as unknown[])
         : 'models' in json && Array.isArray(json.models)

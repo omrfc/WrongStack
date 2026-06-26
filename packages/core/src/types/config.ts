@@ -482,8 +482,34 @@ export interface FeaturesConfig {
 }
 
 export interface AutonomyConfig {
+  /** Default autonomy mode at startup. Default: "off". */
+  defaultMode?: 'off' | 'suggest' | 'auto' | undefined;
   /** ms to wait before auto-proceeding in 'auto' mode. Default: 45000. */
   autoProceedDelayMs?: number | undefined;
+  /** Maximum consecutive auto-proceed turns before pausing. 0 = unlimited. Default: 50. */
+  autoProceedMaxIterations?: number | undefined;
+  /** Template used for YOLO+auto suggestions. Must include {{suggestion}}. */
+  autonomyNextPrompt?: string | undefined;
+  /** Animate the terminal/window title while the agent is active. Default: true. */
+  terminalTitleAnimation?: boolean | undefined;
+  /** Persisted YOLO preference mirrored into top-level config.yolo at runtime. Default: false. */
+  yolo?: boolean | undefined;
+  /** Stream fleet/subagent output into the main TUI chat. Default: true. */
+  streamFleet?: boolean | undefined;
+  /** Ring terminal bell when an agent run completes. Default: false. */
+  chime?: boolean | undefined;
+  /** Ask for confirmation before interrupt/exit. Default: true. */
+  confirmExit?: boolean | undefined;
+  /** Terminal mouse tracking preference. Default: false. */
+  mouseMode?: boolean | undefined;
+  /** Enable prompt refinement before sending. Default: true. */
+  enhance?: boolean | undefined;
+  /** Prompt-refinement preview countdown in ms. Default: 60000. */
+  enhanceDelayMs?: number | undefined;
+  /** Prompt-refinement language mode. Default: "original". */
+  enhanceLanguage?: 'original' | 'english' | undefined;
+  /** TUI statusline density. Default: "detailed". */
+  statuslineMode?: 'minimum' | 'detailed' | undefined;
   /** Single short word shown in the TUI rainbow working-state chip. Default: "thinking". */
   thinkingWord?: string | undefined;
 }
@@ -659,8 +685,8 @@ export interface Config {
   debugStream?: boolean | undefined;
   /**
    * Where settings are persisted. 'global' → ~/.wrongstack/config.json
-   * (default). 'project' → ~/.wrongstack/projects/<slug>/config.local.json.
-   * When 'project', provider/model/autonomy/ux settings are saved per-project.
+   * (default). 'project' → <project>/.wrongstack/config.json.
+   * When 'project', safe settings are saved per-project.
    */
   configScope?: 'global' | 'project' | undefined;
   /** Automatic codebase symbol-index maintenance (session-start + live updates). */

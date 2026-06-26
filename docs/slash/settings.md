@@ -13,10 +13,23 @@ command is argument-driven so it works in both the plain REPL and the Ink TUI.
 | `/settings mode off` | Persist default autonomy mode as off |
 | `/settings mode suggest` | Persist default autonomy mode as suggest |
 | `/settings mode auto` | Persist default autonomy mode as auto |
+| `/settings config-scope global\|project` | Save settings globally or in `<project>/.wrongstack/config.json` |
+| `/settings refine on\|off` | Enable or disable prompt refinement |
+| `/settings refine-delay <seconds>` | Set prompt refinement preview countdown |
+| `/settings context-mode balanced\|frugal\|deep\|archival` | Set context window policy |
+| `/settings context-strategy hybrid\|intelligent\|selective` | Set compactor strategy |
+| `/settings context-auto-compact on\|off` | Enable or disable automatic compaction |
+| `/settings token-saving off\|minimal\|light\|medium\|aggressive` | Set token-saving mode |
+| `/settings max-concurrent <n>` | Set max concurrent subagents; `0` means runtime default |
+| `/settings reasoning auto\|on\|off` | Set reasoning mode |
+| `/settings reasoning-effort none\|minimal\|low\|medium\|high\|xhigh\|max` | Set reasoning effort |
+| `/settings reasoning-preserve on\|off` | Preserve thinking across turns |
+| `/settings cache-ttl 5m\|1h` | Set prompt cache TTL |
 | `/settings semver-part patch\|minor\|major\|auto` | Default part used by `/semver` and the `semver_bump` tool when no explicit part is given |
 | `/settings defaults` | Show built-in defaults |
 
-Settings are persisted to `~/.wrongstack/config.json`.
+Settings are persisted to the active config scope: global
+`~/.wrongstack/config.json`, or project `<project>/.wrongstack/config.json`.
 
 `semver-part` is stored under `extensions["semver-bump"].defaultPart` (the
 semver-bump plugin's config key) and always goes to the **global** config —
@@ -24,11 +37,11 @@ semver-bump plugin's config key) and always goes to the **global** config —
 
 ## Token-Saving Tier
 
-Token-saving tier is set via the **TUI `/settings` picker** (not this slash command).
-Navigate to the **Token Saving** row and press `←`/`→` to cycle through:
-`off → minimal → light → medium → aggressive → off`. The change takes effect on the **next session**.
+Token-saving tier can be set with `/settings token-saving ...`, or from the
+TUI picker by navigating to **Token Saving** and pressing `←`/`→` to cycle:
+`off → minimal → light → medium → aggressive → off`.
 
-From the CLI, use `--token-saving-tier` instead:
+At process launch, the CLI flags are still available:
 
 ```bash
 wrongstack --token-saving-tier minimal
@@ -52,6 +65,9 @@ Or set it in the config file:
 | Iteration timeout | `5 min` |
 | Session timeout | `30 min` |
 | Max iterations | `100` |
+| Max concurrent subagents | `4` |
+| Prompt refinement preview countdown | `60s` |
+| Config scope | `global` |
 | Semver default part | `patch` |
 
 ## Code Reference

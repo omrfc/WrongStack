@@ -98,6 +98,7 @@ import { MOUSE_CLICK_ON, MOUSE_OFF } from './mouse.js';
 import { feedPaste } from './paste-accumulator.js';
 import { createPsSlashCommand } from './ps-slash.js';
 import { createQueueSlashCommand } from './queue-slash.js';
+import { buildSlashCommandMatches } from './slash-command-search.js';
 import { buildSteeringPreamble } from './steering-preamble.js';
 
 // Types imported from app-reducer.ts (single source of truth for reducer + State types)
@@ -2133,30 +2134,7 @@ export function App({
       return;
     }
     const query = trimmed.slice(1).toLowerCase();
-    const allCommands = slashRegistry.listWithOwner();
-    const CATEGORY_ORDER = ['Run', 'Session', 'Inspect', 'Agent', 'Config', 'App'] as const;
-    const matches: SlashCommandMatch[] = allCommands
-      .filter(({ cmd }) => {
-        // Hidden commands only appear when the user types a matching prefix.
-        // When the picker is open with no query (user typed `/` alone),
-        // hidden commands are excluded from the list.
-        if (query === '' && cmd.hidden) return false;
-        const name = cmd.name.toLowerCase();
-        const aliases = cmd.aliases ?? [];
-        return name.includes(query) || aliases.some((a) => a.toLowerCase().includes(query));
-      })
-      .map(({ cmd, owner }) => ({
-        name: cmd.name,
-        description: cmd.description,
-        argsHint: cmd.argsHint,
-        isBuiltin: owner === 'core',
-        category: cmd.category ?? 'App',
-      }))
-      .sort((a, b) => {
-        const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
-        if (catDiff !== 0) return catDiff;
-        return a.name.localeCompare(b.name);
-      });
+    const matches = buildSlashCommandMatches(slashRegistry.listWithOwner(), query);
 
     if (!state.slashPicker.open) {
       dispatch({ type: 'slashPickerOpen', query, matches });

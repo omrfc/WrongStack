@@ -22,7 +22,7 @@ import {
   noOpVault,
   normalizeTokenSavingTier,
 } from '@wrongstack/core';
-import { persistAutonomySetting, filterSafeForProject } from '../settings-menu.js';
+import { filterSafeForProject } from '../settings-menu.js';
 import { normalizeTuiThinkingWord } from '../tui-thinking-word.js';
 import type { LiveSettingsInput } from '../execution.js';
 
@@ -55,6 +55,11 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
     const mode: 'off' | 'suggest' | 'auto' =
       rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
     const modelRuntime = (cfg as { modelRuntime?: { reasoning?: { mode?: string; effort?: string; preserve?: boolean }; cache?: { ttl?: string } } }).modelRuntime;
+    const contextModeRaw = cfg.context?.mode;
+    const contextMode =
+      contextModeRaw === 'frugal' || contextModeRaw === 'deep' || contextModeRaw === 'archival'
+        ? contextModeRaw
+        : 'balanced';
     const reasoningEffortRaw = modelRuntime?.reasoning?.effort;
     const reasoningEffort =
       reasoningEffortRaw === 'none' ||
@@ -70,7 +75,7 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
       mode,
       delayMs: (autonomy?.autoProceedDelayMs as number) ?? 45_000,
       titleAnimation: autonomy?.terminalTitleAnimation !== false,
-      yolo: (autonomy?.yolo as boolean) ?? false,
+      yolo: cfg.yolo ?? ((autonomy?.yolo as boolean | undefined) ?? false),
       streamFleet: autonomy?.streamFleet !== false,
       chime: (autonomy?.chime as boolean) ?? false,
       confirmExit: autonomy?.confirmExit !== false,
@@ -84,7 +89,8 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
       allowOutsideProjectRoot: cfg.features?.allowOutsideProjectRoot ?? true,
       contextAutoCompact: cfg.context?.autoCompact !== false,
       contextStrategy: cfg.context?.strategy ?? 'hybrid',
-      maxConcurrent: cfg.maxConcurrent ?? 0,
+      contextMode,
+      maxConcurrent: cfg.maxConcurrent ?? 4,
       logLevel: cfg.log?.level ?? 'info',
       auditLevel: cfg.session?.auditLevel ?? 'standard',
       indexOnStart: cfg.indexing?.onSessionStart !== false,
@@ -127,36 +133,18 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
 
   async function saveSettings(s: LiveSettingsInput): Promise<string | null> {
     try {
-      // Persist autonomy section (existing behaviour).
-      await persistAutonomySetting(
-        {
-          configStore,
-          globalConfigPath: wpaths.globalConfig,
-          inProjectConfigPath: wpaths.inProjectConfig,
-          vault: noOpVault,
-        },
-        (autonomy) => {
-          autonomy.defaultMode = s.mode;
-          autonomy.autoProceedDelayMs = s.delayMs;
-          const a = autonomy as Record<string, unknown>;
-          a['terminalTitleAnimation'] = s.titleAnimation ?? true;
-          a['yolo'] = s.yolo ?? false;
-          a['streamFleet'] = s.streamFleet ?? true;
-          a['chime'] = s.chime ?? false;
-          a['confirmExit'] = s.confirmExit ?? true;
-          if (s.mouseMode !== undefined) a['mouseMode'] = s.mouseMode;
-          if (s.enhanceEnabled !== undefined) a['enhance'] = s.enhanceEnabled;
-          if (s.enhanceLanguage !== undefined) a['enhanceLanguage'] = s.enhanceLanguage;
-          if (s.statuslineMode !== undefined) a['statuslineMode'] = s.statuslineMode;
-          if (s.thinkingWord !== undefined) a['thinkingWord'] = normalizeTuiThinkingWord(s.thinkingWord);
-          if (s.autonomyNextPrompt !== undefined) a['autonomyNextPrompt'] = s.autonomyNextPrompt;
-          if (s.autoProceedMaxIterations !== undefined)
-            a['autoProceedMaxIterations'] = s.autoProceedMaxIterations;
-        },
-      );
-
-      // Persist other config sections that the SettingsPicker now exposes.
+      // Persist the full TUI settings snapshot to one target file. This keeps
+      // global/project scope switches coherent: autonomy, UX, refine, and the
+      // other settings all land in the newly selected scope together.
       if (
+        s.mode !== undefined ||
+        s.delayMs !== undefined ||
+        s.titleAnimation !== undefined ||
+        s.yolo !== undefined ||
+        s.streamFleet !== undefined ||
+        s.chime !== undefined ||
+        s.confirmExit !== undefined ||
+        s.mouseMode !== undefined ||
         s.featureMcp !== undefined ||
         s.featurePlugins !== undefined ||
         s.featureMemory !== undefined ||
@@ -166,6 +154,8 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
         s.allowOutsideProjectRoot !== undefined ||
         s.contextAutoCompact !== undefined ||
         s.contextStrategy !== undefined ||
+        s.contextMode !== undefined ||
+        s.maxConcurrent !== undefined ||
         s.logLevel !== undefined ||
         s.auditLevel !== undefined ||
         s.indexOnStart !== undefined ||
@@ -174,7 +164,17 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
         s.nextPrediction !== undefined ||
         s.debugStream !== undefined ||
         s.configScope !== undefined ||
-        s.enhanceDelayMs !== undefined
+        s.enhanceDelayMs !== undefined ||
+        s.enhanceEnabled !== undefined ||
+        s.enhanceLanguage !== undefined ||
+        s.statuslineMode !== undefined ||
+        s.thinkingWord !== undefined ||
+        s.autonomyNextPrompt !== undefined ||
+        s.autoProceedMaxIterations !== undefined ||
+        s.reasoningMode !== undefined ||
+        s.reasoningEffort !== undefined ||
+        s.reasoningPreserve !== undefined ||
+        s.cacheTtl !== undefined
       ) {
         const configScope = s.configScope ?? configStore.get().configScope ?? 'global';
         const targetPath =
@@ -185,15 +185,39 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
         try {
           raw = await fs.readFile(targetPath, 'utf8');
         } catch (err) {
-          throw new Error(
-            `Failed to read config at ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
-            { cause: err },
-          );
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            throw new Error(
+              `Failed to read config at ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
+              { cause: err },
+            );
+          }
+          raw = '{}';
         }
         const parsed = JSON.parse(raw) as Record<string, unknown>;
         const decrypted = decryptConfigSecrets(parsed, noOpVault) as Record<string, unknown>;
 
+        const autonomy = (decrypted.autonomy as Record<string, unknown>) ?? {};
+        if (s.mode !== undefined) autonomy.defaultMode = s.mode;
+        if (s.delayMs !== undefined) autonomy.autoProceedDelayMs = s.delayMs;
+        if (s.titleAnimation !== undefined) autonomy.terminalTitleAnimation = s.titleAnimation;
+        if (s.yolo !== undefined) autonomy.yolo = s.yolo;
+        if (s.streamFleet !== undefined) autonomy.streamFleet = s.streamFleet;
+        if (s.chime !== undefined) autonomy.chime = s.chime;
+        if (s.confirmExit !== undefined) autonomy.confirmExit = s.confirmExit;
+        if (s.mouseMode !== undefined) autonomy.mouseMode = s.mouseMode;
+        if (s.enhanceDelayMs !== undefined) autonomy.enhanceDelayMs = s.enhanceDelayMs;
+        if (s.enhanceEnabled !== undefined) autonomy.enhance = s.enhanceEnabled;
+        if (s.enhanceLanguage !== undefined) autonomy.enhanceLanguage = s.enhanceLanguage;
+        if (s.statuslineMode !== undefined) autonomy.statuslineMode = s.statuslineMode;
+        if (s.thinkingWord !== undefined)
+          autonomy.thinkingWord = normalizeTuiThinkingWord(s.thinkingWord);
+        if (s.autonomyNextPrompt !== undefined) autonomy.autonomyNextPrompt = s.autonomyNextPrompt;
+        if (s.autoProceedMaxIterations !== undefined)
+          autonomy.autoProceedMaxIterations = s.autoProceedMaxIterations;
+        decrypted.autonomy = autonomy;
+
         if (s.nextPrediction !== undefined) decrypted.nextPrediction = s.nextPrediction;
+        if (s.yolo !== undefined) decrypted.yolo = s.yolo;
         if (
           s.featureMcp !== undefined ||
           s.featurePlugins !== undefined ||
@@ -213,12 +237,18 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
           if (s.allowOutsideProjectRoot !== undefined) feats.allowOutsideProjectRoot = s.allowOutsideProjectRoot;
           decrypted.features = feats;
         }
-        if (s.contextAutoCompact !== undefined || s.contextStrategy !== undefined) {
+        if (
+          s.contextAutoCompact !== undefined ||
+          s.contextStrategy !== undefined ||
+          s.contextMode !== undefined
+        ) {
           const c = (decrypted.context as Record<string, unknown>) ?? {};
           if (s.contextAutoCompact !== undefined) c.autoCompact = s.contextAutoCompact;
           if (s.contextStrategy !== undefined) c.strategy = s.contextStrategy;
+          if (s.contextMode !== undefined) c.mode = s.contextMode;
           decrypted.context = c;
         }
+        if (s.maxConcurrent !== undefined) decrypted.maxConcurrent = s.maxConcurrent;
         if (s.logLevel !== undefined) {
           const log = (decrypted.log as Record<string, unknown>) ?? {};
           log.level = s.logLevel;
@@ -234,10 +264,16 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
           idx.onSessionStart = s.indexOnStart;
           decrypted.indexing = idx;
         }
-        if (s.maxIterations !== undefined || s.restrictFsToRoot !== undefined) {
+        if (
+          s.maxIterations !== undefined ||
+          s.restrictFsToRoot !== undefined ||
+          s.allowOutsideProjectRoot !== undefined
+        ) {
           const tools = (decrypted.tools as Record<string, unknown>) ?? {};
           if (s.maxIterations !== undefined) tools.maxIterations = s.maxIterations;
           if (s.restrictFsToRoot !== undefined) tools.restrictToProjectRoot = s.restrictFsToRoot;
+          if (s.allowOutsideProjectRoot !== undefined)
+            tools.restrictToProjectRoot = !s.allowOutsideProjectRoot;
           decrypted.tools = tools;
         }
         if (s.restrictFsToRoot !== undefined) {
@@ -251,15 +287,35 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
           setDebugStreamEnabled(s.debugStream);
         }
         if (s.configScope !== undefined) decrypted.configScope = s.configScope;
-        if (s.enhanceDelayMs !== undefined) {
-          const autonomy = (decrypted.autonomy as Record<string, unknown>) ?? {};
-          autonomy.enhanceDelayMs = s.enhanceDelayMs;
-          decrypted.autonomy = autonomy;
-        }
-        if (s.autoProceedMaxIterations !== undefined) {
-          const autonomy = (decrypted.autonomy as Record<string, unknown>) ?? {};
-          autonomy.autoProceedMaxIterations = s.autoProceedMaxIterations;
-          decrypted.autonomy = autonomy;
+        if (
+          s.reasoningMode !== undefined ||
+          s.reasoningEffort !== undefined ||
+          s.reasoningPreserve !== undefined ||
+          s.cacheTtl !== undefined
+        ) {
+          const modelRuntime = (decrypted.modelRuntime as Record<string, unknown>) ?? {};
+          if (
+            s.reasoningMode !== undefined ||
+            s.reasoningEffort !== undefined ||
+            s.reasoningPreserve !== undefined
+          ) {
+            const reasoning = (modelRuntime.reasoning as Record<string, unknown>) ?? {};
+            if (s.reasoningMode !== undefined) reasoning.mode = s.reasoningMode;
+            if (s.reasoningEffort !== undefined) reasoning.effort = s.reasoningEffort;
+            if (s.reasoningPreserve !== undefined) reasoning.preserve = s.reasoningPreserve;
+            modelRuntime.reasoning = reasoning;
+          }
+          if (s.cacheTtl !== undefined) {
+            const cache = (modelRuntime.cache as Record<string, unknown>) ?? {};
+            if (s.cacheTtl === 'default') {
+              delete cache.ttl;
+            } else {
+              cache.ttl = s.cacheTtl;
+            }
+            if (Object.keys(cache).length > 0) modelRuntime.cache = cache;
+            else delete modelRuntime.cache;
+          }
+          decrypted.modelRuntime = modelRuntime;
         }
         const toWrite = targetPath === wpaths.globalConfig ? decrypted : filterSafeForProject(decrypted);
         const encrypted = encryptConfigSecrets(toWrite, noOpVault);
@@ -268,34 +324,90 @@ export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdap
         }
         await atomicWrite(targetPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
 
+        const currentConfig = configStore.get();
+        const nextModelRuntime = {
+          ...currentConfig.modelRuntime,
+          ...((decrypted.modelRuntime as Record<string, unknown> | undefined) ?? {}),
+        } as Record<string, unknown>;
+        if (s.cacheTtl === 'default') {
+          delete nextModelRuntime.cache;
+        }
+
         configStore.update({
           ...(s.nextPrediction !== undefined ? { nextPrediction: s.nextPrediction } : {}),
+          ...(s.yolo !== undefined ? { yolo: s.yolo } : {}),
           ...(s.featureMcp !== undefined ||
           s.featurePlugins !== undefined ||
           s.featureMemory !== undefined ||
           s.featureSkills !== undefined ||
-          s.featureModelsRegistry !== undefined
-            ? { features: decrypted.features as Config['features'] }
+          s.featureModelsRegistry !== undefined ||
+          s.featureTokenSaving !== undefined ||
+          s.allowOutsideProjectRoot !== undefined
+            ? {
+                features: {
+                  ...currentConfig.features,
+                  ...((decrypted.features as Record<string, unknown> | undefined) ?? {}),
+                } as Config['features'],
+              }
             : {}),
-          ...(s.contextAutoCompact !== undefined || s.contextStrategy !== undefined
-            ? { context: decrypted.context as Config['context'] }
+          ...(s.contextAutoCompact !== undefined ||
+          s.contextStrategy !== undefined ||
+          s.contextMode !== undefined
+            ? {
+                context: {
+                  ...currentConfig.context,
+                  ...((decrypted.context as Record<string, unknown> | undefined) ?? {}),
+                } as Config['context'],
+              }
             : {}),
-          ...(s.logLevel !== undefined ? { log: decrypted.log as Config['log'] } : {}),
-          ...(s.auditLevel !== undefined ? { session: decrypted.session as Config['session'] } : {}),
-          ...(s.indexOnStart !== undefined ? { indexing: decrypted.indexing as Config['indexing'] } : {}),
-          ...(s.maxIterations !== undefined || s.restrictFsToRoot !== undefined
-            ? { tools: decrypted.tools as Config['tools'] }
+          ...(s.maxConcurrent !== undefined ? { maxConcurrent: s.maxConcurrent } : {}),
+          ...(s.logLevel !== undefined
+            ? {
+                log: {
+                  ...currentConfig.log,
+                  ...((decrypted.log as Record<string, unknown> | undefined) ?? {}),
+                } as Config['log'],
+              }
+            : {}),
+          ...(s.auditLevel !== undefined
+            ? {
+                session: {
+                  ...currentConfig.session,
+                  ...((decrypted.session as Record<string, unknown> | undefined) ?? {}),
+                } as Config['session'],
+              }
+            : {}),
+          ...(s.indexOnStart !== undefined
+            ? {
+                indexing: {
+                  ...currentConfig.indexing,
+                  ...((decrypted.indexing as Record<string, unknown> | undefined) ?? {}),
+                } as Config['indexing'],
+              }
+            : {}),
+          ...(s.maxIterations !== undefined ||
+          s.restrictFsToRoot !== undefined ||
+          s.allowOutsideProjectRoot !== undefined
+            ? {
+                tools: {
+                  ...currentConfig.tools,
+                  ...((decrypted.tools as Record<string, unknown> | undefined) ?? {}),
+                } as Config['tools'],
+              }
             : {}),
           ...(s.debugStream !== undefined ? { debugStream: s.debugStream } : {}),
           ...(s.configScope !== undefined ? { configScope: s.configScope as 'global' | 'project' } : {}),
-          ...(s.enhanceDelayMs !== undefined
-            ? { autonomy: { ...((configStore.get().autonomy as Record<string, unknown>) ?? {}), enhanceDelayMs: s.enhanceDelayMs } as Config['autonomy'] }
-            : {}),
-          ...(s.enhanceEnabled !== undefined
-            ? { autonomy: { ...((configStore.get().autonomy as Record<string, unknown>) ?? {}), enhance: s.enhanceEnabled } as Config['autonomy'] }
-            : {}),
-          ...(s.enhanceLanguage !== undefined
-            ? { autonomy: { ...((configStore.get().autonomy as Record<string, unknown>) ?? {}), enhanceLanguage: s.enhanceLanguage } as Config['autonomy'] }
+          autonomy: {
+            ...currentConfig.autonomy,
+            ...((decrypted.autonomy as Record<string, unknown> | undefined) ?? {}),
+          } as Config['autonomy'],
+          ...(s.reasoningMode !== undefined ||
+          s.reasoningEffort !== undefined ||
+          s.reasoningPreserve !== undefined ||
+          s.cacheTtl !== undefined
+            ? {
+                modelRuntime: nextModelRuntime as Config['modelRuntime'],
+              }
             : {}),
         });
       }

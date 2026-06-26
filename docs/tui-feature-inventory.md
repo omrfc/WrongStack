@@ -4,7 +4,7 @@ Exhaustive list of all user-facing features in the TUI (`@wrongstack/tui`).
 This document serves as the specification for WebUI feature parity.
 
 Generated: 2026-06-09
-Last updated: 2026-06-12
+Last updated: 2026-06-26
 
 > **WebUI parity status (as of 2026-06-12):** Most TUI features are now implemented in the WebUI.
 > The remaining gaps are: status bar depth (TUI has 3 lines, WebUI has 1), and the Unicode sub-cell
@@ -134,7 +134,9 @@ Last updated: 2026-06-12
 - **Full mode**: description per option
 
 ### Settings Picker (Ctrl+S)
-- **Fields**: mode, autoProceedDelayMs, titleAnimation, yolo, streamFleet, chime, confirmExit, nextPrediction, feature toggles (Mcp, Plugins, Memory, Skills, ModelsRegistry), context settings (autoCompact, strategy), logLevel, auditLevel, indexOnStart, maxIterations, autoProceedMaxIterations, enhanceDelayMs, debugStream, configScope
+- **Fields**: mode, autoProceedDelayMs, titleAnimation, yolo, streamFleet, chime, confirmExit, nextPrediction, feature toggles (MCP, Plugins, Memory, Skills, ModelsRegistry, Token Saving, filesystem access), tools (maxIterations, autoProceedMaxIterations, refine countdown, refine toggle/language, indexOnStart, thinkingWord display), model runtime (reasoning mode/effort/preserve, cache TTL), context (autoCompact, strategy, mode), fleet maxConcurrent, logLevel, auditLevel, debugStream, statuslineMode, configScope
+- **Persistence**: global `~/.wrongstack/config.json` or project `<project>/.wrongstack/config.json`, matching the visible config-scope row.
+- **Keyboard**: ↑/↓ changes the selected row; ←/→ changes only the selected row and autosaves.
 
 ### Checkpoint Timeline (rewind)
 - **Checkpoint list**: index, iteration, timestamp, label, message count, tokens

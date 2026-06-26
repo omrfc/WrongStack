@@ -35,7 +35,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     '  /settings context-strategy hybrid|intelligent|selective   Compactor strategy',
     '  /settings context-auto-compact on|off   Auto-compact context when thresholds crossed',
     '  /settings token-saving off|minimal|light|medium|aggressive   Token-saving mode',
-    '  /settings max-concurrent <n>   Max concurrent subagents (0 = unlimited)',
+    '  /settings max-concurrent <n>   Max concurrent subagents (0 = default)',
     '  /settings title-animation on|off   Terminal title animation',
     '  /settings reasoning auto|on|off   Reasoning mode (auto = provider default)',
     '  /settings reasoning-effort none|minimal|low|medium|high|xhigh|max   Reasoning effort',
@@ -47,7 +47,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     '  /settings hq-raw on|off       Send raw content previews to HQ',
     '  /settings defaults            Show built-in default values',
     '',
-    'Settings are persisted to ~/.wrongstack/config.json.',
+    'Settings are persisted to the active config scope: global (~/.wrongstack/config.json) or project (<project>/.wrongstack/config.json).',
   ].join('\n');
 
   function currentView(): string {
@@ -83,7 +83,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     const contextAutoCompact = context?.autoCompact !== false; // default true
     const features = opts.configStore.get().features as never as Record<string, unknown> | undefined;
     const tokenSavingTier = (features?.tokenSavingMode as string) ?? 'off';
-    const maxConcurrent = opts.configStore.get().maxConcurrent ?? 0;
+    const maxConcurrent = opts.configStore.get().maxConcurrent ?? 4;
     const modelRuntime = opts.configStore.get().modelRuntime as
       | { reasoning?: { mode?: string; effort?: string; preserve?: boolean }; cache?: { ttl?: string } }
       | undefined;
@@ -97,6 +97,10 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     const hqEnabled = hq?.enabled === true;
     const hqUrl = hq?.url ?? '(auto/local)';
     const hqToken = hq?.token ? `${hq.token.slice(0, 6)}…${hq.token.slice(-4)} (${hq.token.length} chars)` : '(auto/local)';
+    const persistedTo =
+      configScope === 'project'
+        ? '<project>/.wrongstack/config.json'
+        : '~/.wrongstack/config.json';
     return [
       `${color.bold('WrongStack')} ${color.dim('— Settings')}`,
       '',
@@ -115,7 +119,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       `  context strategy:    ${color.cyan(contextStrategy)}   ${color.dim('change: /settings context-strategy hybrid|intelligent|selective')}`,
       `  context auto-compact: ${contextAutoCompact ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings context-auto-compact on|off')}`,
       `  token-saving:       ${color.cyan(tokenSavingTier)}   ${color.dim('change: /settings token-saving off|minimal|light|medium|aggressive')}`,
-      `  max-concurrent:     ${color.cyan(maxConcurrent === 0 ? 'unlimited' : String(maxConcurrent))}   ${color.dim('change: /settings max-concurrent <n>')}`,
+      `  max-concurrent:     ${color.cyan(maxConcurrent === 0 ? 'default' : String(maxConcurrent))}   ${color.dim('change: /settings max-concurrent <n>')}`,
       `  reasoning mode:     ${color.cyan(reasoningMode)}   ${color.dim('change: /settings reasoning auto|on|off')}`,
       `  reasoning effort:   ${color.cyan(reasoningEffort)}   ${color.dim('change: /settings reasoning-effort <level>')}`,
       `  reasoning preserve: ${reasoningPreserve ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings reasoning-preserve on|off')}`,
@@ -125,7 +129,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       `  HQ token:          ${color.cyan(hqToken)}   ${color.dim('change: /settings hq-token <token>')}`,
       `  HQ raw content:    ${hq?.rawContent === true ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings hq-raw on|off')}`,
       '',
-      color.dim('  Persisted to ~/.wrongstack/config.json · /settings help for more'),
+      color.dim(`  Persisted to ${persistedTo} · /settings help for more`),
     ].join('\n');
   }
 
@@ -163,6 +167,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
             `  iteration timeout:     ${color.cyan('5 min')}`,
             `  session timeout:       ${color.cyan('30 min')}`,
             `  max iterations:        ${color.cyan('100')}`,
+            `  max concurrent:        ${color.cyan('4')}`,
             `  semver default part:   ${color.cyan('patch')}`,
           ].join('\n'),
         };
@@ -524,20 +529,20 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
           const raw = rest[0];
           if (raw === undefined) {
             return {
-              message: `${color.amber('Usage:')} /settings max-concurrent <n>   ${color.dim('(0 = unlimited)')}`,
+              message: `${color.amber('Usage:')} /settings max-concurrent <n>   ${color.dim('(0 = default)')}`,
             };
           }
           const n = Number.parseInt(raw, 10);
           if (Number.isNaN(n) || n < 0) {
             return {
-              message: `${color.red('Invalid number')}: "${raw}". Enter a non-negative integer (0 = unlimited)`,
+              message: `${color.red('Invalid number')}: "${raw}". Enter a non-negative integer (0 = default)`,
             };
           }
           await persistConfigSetting(persistDeps, (cfg) => {
             cfg.maxConcurrent = n;
           });
           return {
-            message: `${color.green('✓')} max-concurrent → ${color.cyan(n === 0 ? 'unlimited' : String(n))}   ${color.dim('max concurrent subagents')}`,
+            message: `${color.green('✓')} max-concurrent → ${color.cyan(n === 0 ? 'default' : String(n))}   ${color.dim('max concurrent subagents')}`,
           };
         }
 

@@ -25,12 +25,7 @@ import {
   STATUSLINE_MODES,
   TOKEN_SAVING_TIERS,
 } from './components/settings-picker.js';
-import type {
-  Action,
-  FleetEntry,
-  QueueItem,
-  State,
-} from './app-state.js';
+import type { Action, FleetEntry, QueueItem, State } from './app-state.js';
 import type { ProjectPickerItem } from './components/project-picker.js';
 
 type PanelResetState = Pick<
@@ -195,8 +190,12 @@ export function reducer(state: State, action: Action): State {
       // chat and desync the scrollback.
       const e = action.entry;
       if (
-        (e.kind === 'user' || e.kind === 'assistant' || e.kind === 'info' ||
-         e.kind === 'warn' || e.kind === 'error' || e.kind === 'turn-summary') &&
+        (e.kind === 'user' ||
+          e.kind === 'assistant' ||
+          e.kind === 'info' ||
+          e.kind === 'warn' ||
+          e.kind === 'error' ||
+          e.kind === 'turn-summary') &&
         !(e as { text?: string | undefined }).text?.trim()
       ) {
         return state;
@@ -560,12 +559,26 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         ...closePanels(state),
-        resumePicker: { open: true, sessions: action.sessions, selected: 0, busy: false, hint: undefined, error: undefined },
+        resumePicker: {
+          open: true,
+          sessions: action.sessions,
+          selected: 0,
+          busy: false,
+          hint: undefined,
+          error: undefined,
+        },
       };
     case 'resumePickerClose':
       return {
         ...state,
-        resumePicker: { open: false, sessions: [], selected: 0, busy: false, hint: undefined, error: undefined },
+        resumePicker: {
+          open: false,
+          sessions: [],
+          selected: 0,
+          busy: false,
+          hint: undefined,
+          error: undefined,
+        },
       };
     case 'resumePickerMove': {
       const nr = state.resumePicker.sessions.length;
@@ -591,7 +604,12 @@ export function reducer(state: State, action: Action): State {
       // Bump the generation so <Static> remounts — without this, Ink's
       // already-written index exceeds the new array and the replayed
       // entries never print (or print from a random offset).
-      return { ...state, entries: [...banners, ...shifted], nextId, historyGen: state.historyGen + 1 };
+      return {
+        ...state,
+        entries: [...banners, ...shifted],
+        nextId,
+        historyGen: state.historyGen + 1,
+      };
     }
     case 'settingsOpen':
       return {
@@ -644,15 +662,15 @@ export function reducer(state: State, action: Action): State {
         settingsPicker: { ...state.settingsPicker, open: false, hint: undefined },
       };
     case 'settingsFieldMove': {
-      const next = (state.settingsPicker.field + action.delta + SETTINGS_FIELD_COUNT) % SETTINGS_FIELD_COUNT;
+      const next =
+        (state.settingsPicker.field + action.delta + SETTINGS_FIELD_COUNT) % SETTINGS_FIELD_COUNT;
       return {
         ...state,
         settingsPicker: { ...state.settingsPicker, field: next, hint: undefined },
       };
     }
     case 'settingsFieldSet': {
-      const field =
-        action.field >= 0 && action.field < SETTINGS_FIELD_COUNT ? action.field : 0;
+      const field = action.field >= 0 && action.field < SETTINGS_FIELD_COUNT ? action.field : 0;
       return { ...state, settingsPicker: { ...state.settingsPicker, field, hint: undefined } };
     }
     case 'settingsValueChange': {
@@ -669,70 +687,175 @@ export function reducer(state: State, action: Action): State {
         const i = SETTINGS_MODES.indexOf(sp.mode);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + SETTINGS_MODES.length) % SETTINGS_MODES.length;
-        return { ...state, settingsPicker: { ...sp, mode: expectDefined(SETTINGS_MODES[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: { ...sp, mode: expectDefined(SETTINGS_MODES[next]), hint: undefined },
+        };
       }
       // Field 1: delay presets
       if (f === 1) {
         const j = DELAY_PRESETS_MS.indexOf(sp.delayMs);
         const base = j < 0 ? 0 : j;
         const next = (base + action.delta + DELAY_PRESETS_MS.length) % DELAY_PRESETS_MS.length;
-        return { ...state, settingsPicker: { ...sp, delayMs: expectDefined(DELAY_PRESETS_MS[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            delayMs: expectDefined(DELAY_PRESETS_MS[next]),
+            hint: undefined,
+          },
+        };
       }
       // Field 2–7: UX boolean toggles
-      if (f === 2) return { ...state, settingsPicker: { ...sp, titleAnimation: !sp.titleAnimation, hint: undefined } };
+      if (f === 2)
+        return {
+          ...state,
+          settingsPicker: { ...sp, titleAnimation: !sp.titleAnimation, hint: undefined },
+        };
       if (f === 3) return { ...state, settingsPicker: { ...sp, yolo: !sp.yolo, hint: undefined } };
-      if (f === 4) return { ...state, settingsPicker: { ...sp, streamFleet: !sp.streamFleet, hint: undefined } };
-      if (f === 5) return { ...state, settingsPicker: { ...sp, chime: !sp.chime, hint: undefined } };
-      if (f === 6) return { ...state, settingsPicker: { ...sp, confirmExit: !sp.confirmExit, hint: undefined } };
-      if (f === 7) return { ...state, settingsPicker: { ...sp, nextPrediction: !sp.nextPrediction, hint: undefined } };
+      if (f === 4)
+        return {
+          ...state,
+          settingsPicker: { ...sp, streamFleet: !sp.streamFleet, hint: undefined },
+        };
+      if (f === 5)
+        return { ...state, settingsPicker: { ...sp, chime: !sp.chime, hint: undefined } };
+      if (f === 6)
+        return {
+          ...state,
+          settingsPicker: { ...sp, confirmExit: !sp.confirmExit, hint: undefined },
+        };
+      if (f === 7)
+        return {
+          ...state,
+          settingsPicker: { ...sp, nextPrediction: !sp.nextPrediction, hint: undefined },
+        };
       // Field 8–12: Features boolean toggles
-      if (f === 8) return { ...state, settingsPicker: { ...sp, featureMcp: !sp.featureMcp, hint: bootHint } };
-      if (f === 9) return { ...state, settingsPicker: { ...sp, featurePlugins: !sp.featurePlugins, hint: bootHint } };
-      if (f === 10) return { ...state, settingsPicker: { ...sp, featureMemory: !sp.featureMemory, hint: bootHint } };
-      if (f === 11) return { ...state, settingsPicker: { ...sp, featureSkills: !sp.featureSkills, hint: bootHint } };
-      if (f === 12) return { ...state, settingsPicker: { ...sp, featureModelsRegistry: !sp.featureModelsRegistry, hint: bootHint } };
+      if (f === 8)
+        return { ...state, settingsPicker: { ...sp, featureMcp: !sp.featureMcp, hint: bootHint } };
+      if (f === 9)
+        return {
+          ...state,
+          settingsPicker: { ...sp, featurePlugins: !sp.featurePlugins, hint: bootHint },
+        };
+      if (f === 10)
+        return {
+          ...state,
+          settingsPicker: { ...sp, featureMemory: !sp.featureMemory, hint: bootHint },
+        };
+      if (f === 11)
+        return {
+          ...state,
+          settingsPicker: { ...sp, featureSkills: !sp.featureSkills, hint: bootHint },
+        };
+      if (f === 12)
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            featureModelsRegistry: !sp.featureModelsRegistry,
+            hint: bootHint,
+          },
+        };
       // Field 13: Token-saving tier (cycle)
       if (f === 13) {
-        const i = TOKEN_SAVING_TIERS.indexOf(sp.tokenSavingTier as (typeof TOKEN_SAVING_TIERS)[number]);
+        const i = TOKEN_SAVING_TIERS.indexOf(
+          sp.tokenSavingTier as (typeof TOKEN_SAVING_TIERS)[number],
+        );
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + TOKEN_SAVING_TIERS.length) % TOKEN_SAVING_TIERS.length;
-        return { ...state, settingsPicker: { ...sp, tokenSavingTier: TOKEN_SAVING_TIERS[next] ?? 'off', hint: bootHint } };
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            tokenSavingTier: TOKEN_SAVING_TIERS[next] ?? 'off',
+            hint: bootHint,
+          },
+        };
       }
       // Field 14: allow outside project root (boolean)
-      if (f === 14) return { ...state, settingsPicker: { ...sp, allowOutsideProjectRoot: !sp.allowOutsideProjectRoot, hint: undefined } };
+      if (f === 14)
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            allowOutsideProjectRoot: !sp.allowOutsideProjectRoot,
+            hint: undefined,
+          },
+        };
       // ── Tools ──────────────────────────────────────────────────────────────
       // Field 15: max iterations (cycle presets)
       if (f === 15) {
         const j = MAX_ITERATIONS_PRESETS.indexOf(sp.maxIterations);
         const base = j < 0 ? 0 : j;
-        const next = (base + action.delta + MAX_ITERATIONS_PRESETS.length) % MAX_ITERATIONS_PRESETS.length;
-        return { ...state, settingsPicker: { ...sp, maxIterations: expectDefined(MAX_ITERATIONS_PRESETS[next]), hint: undefined } };
+        const next =
+          (base + action.delta + MAX_ITERATIONS_PRESETS.length) % MAX_ITERATIONS_PRESETS.length;
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            maxIterations: expectDefined(MAX_ITERATIONS_PRESETS[next]),
+            hint: undefined,
+          },
+        };
       }
       // Field 16: auto-proceed max iterations (cycle presets)
       if (f === 16) {
         const aj = AUTO_PROCEED_MAX_PRESETS.indexOf(sp.autoProceedMaxIterations);
         const abase = aj < 0 ? 0 : aj;
-        const anext = (abase + action.delta + AUTO_PROCEED_MAX_PRESETS.length) % AUTO_PROCEED_MAX_PRESETS.length;
-        return { ...state, settingsPicker: { ...sp, autoProceedMaxIterations: expectDefined(AUTO_PROCEED_MAX_PRESETS[anext]), hint: undefined } };
+        const anext =
+          (abase + action.delta + AUTO_PROCEED_MAX_PRESETS.length) %
+          AUTO_PROCEED_MAX_PRESETS.length;
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            autoProceedMaxIterations: expectDefined(AUTO_PROCEED_MAX_PRESETS[anext]),
+            hint: undefined,
+          },
+        };
       }
       // Field 17: enhance delay (cycle presets)
       if (f === 17) {
         const ej = ENHANCE_DELAY_PRESETS.indexOf(sp.enhanceDelayMs);
         const ebase = ej < 0 ? 0 : ej;
-        const enext = (ebase + action.delta + ENHANCE_DELAY_PRESETS.length) % ENHANCE_DELAY_PRESETS.length;
-        return { ...state, settingsPicker: { ...sp, enhanceDelayMs: expectDefined(ENHANCE_DELAY_PRESETS[enext]), hint: undefined } };
+        const enext =
+          (ebase + action.delta + ENHANCE_DELAY_PRESETS.length) % ENHANCE_DELAY_PRESETS.length;
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            enhanceDelayMs: expectDefined(ENHANCE_DELAY_PRESETS[enext]),
+            hint: undefined,
+          },
+        };
       }
       // Field 18: enhance enabled (boolean)
-      if (f === 18) return { ...state, settingsPicker: { ...sp, enhanceEnabled: !sp.enhanceEnabled, hint: undefined } };
+      if (f === 18)
+        return {
+          ...state,
+          settingsPicker: { ...sp, enhanceEnabled: !sp.enhanceEnabled, hint: undefined },
+        };
       // Field 19: enhance language (cycle original/english)
       if (f === 19) {
         const i = ENHANCE_LANGUAGES.indexOf(sp.enhanceLanguage);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + ENHANCE_LANGUAGES.length) % ENHANCE_LANGUAGES.length;
-        return { ...state, settingsPicker: { ...sp, enhanceLanguage: expectDefined(ENHANCE_LANGUAGES[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            enhanceLanguage: expectDefined(ENHANCE_LANGUAGES[next]),
+            hint: undefined,
+          },
+        };
       }
       // Field 20: index on start (boolean)
-      if (f === 20) return { ...state, settingsPicker: { ...sp, indexOnStart: !sp.indexOnStart, hint: bootHint } };
+      if (f === 20)
+        return {
+          ...state,
+          settingsPicker: { ...sp, indexOnStart: !sp.indexOnStart, hint: bootHint },
+        };
       // Field 21: thinking word (display-only, change via /thinking command)
       if (f === 21) return state;
       // ── Reasoning ───────────────────────────────────────────────────────────
@@ -741,48 +864,99 @@ export function reducer(state: State, action: Action): State {
         const i = REASONING_MODES.indexOf(sp.reasoningMode as (typeof REASONING_MODES)[number]);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + REASONING_MODES.length) % REASONING_MODES.length;
-        return { ...state, settingsPicker: { ...sp, reasoningMode: expectDefined(REASONING_MODES[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            reasoningMode: expectDefined(REASONING_MODES[next]),
+            hint: undefined,
+          },
+        };
       }
       // Field 23: reasoning effort (cycle)
       if (f === 23) {
-        const i = REASONING_EFFORTS.indexOf(sp.reasoningEffort as (typeof REASONING_EFFORTS)[number]);
+        const i = REASONING_EFFORTS.indexOf(
+          sp.reasoningEffort as (typeof REASONING_EFFORTS)[number],
+        );
         const base = i < 0 ? REASONING_EFFORTS.indexOf('high') : i;
         const next = (base + action.delta + REASONING_EFFORTS.length) % REASONING_EFFORTS.length;
-        return { ...state, settingsPicker: { ...sp, reasoningEffort: expectDefined(REASONING_EFFORTS[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            reasoningEffort: expectDefined(REASONING_EFFORTS[next]),
+            hint: undefined,
+          },
+        };
       }
       // Field 24: reasoning preserve (boolean toggle)
-      if (f === 24) return { ...state, settingsPicker: { ...sp, reasoningPreserve: !sp.reasoningPreserve, hint: undefined } };
+      if (f === 24)
+        return {
+          ...state,
+          settingsPicker: { ...sp, reasoningPreserve: !sp.reasoningPreserve, hint: undefined },
+        };
       // Field 25: cache TTL (cycle default/5m/1h)
       if (f === 25) {
         const i = CACHE_TTLS.indexOf(sp.cacheTtl as (typeof CACHE_TTLS)[number]);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + CACHE_TTLS.length) % CACHE_TTLS.length;
-        return { ...state, settingsPicker: { ...sp, cacheTtl: expectDefined(CACHE_TTLS[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: { ...sp, cacheTtl: expectDefined(CACHE_TTLS[next]), hint: undefined },
+        };
       }
       // ── Context ────────────────────────────────────────────────────────────
       // Field 26: context auto-compact (boolean)
-      if (f === 26) return { ...state, settingsPicker: { ...sp, contextAutoCompact: !sp.contextAutoCompact, hint: undefined } };
+      if (f === 26)
+        return {
+          ...state,
+          settingsPicker: { ...sp, contextAutoCompact: !sp.contextAutoCompact, hint: undefined },
+        };
       // Field 27: compactor strategy (cycle)
       if (f === 27) {
         const i = COMPACTOR_STRATEGIES.indexOf(sp.contextStrategy);
         const base = i < 0 ? 0 : i;
-        const next = (base + action.delta + COMPACTOR_STRATEGIES.length) % COMPACTOR_STRATEGIES.length;
-        return { ...state, settingsPicker: { ...sp, contextStrategy: expectDefined(COMPACTOR_STRATEGIES[next]), hint: bootHint } };
+        const next =
+          (base + action.delta + COMPACTOR_STRATEGIES.length) % COMPACTOR_STRATEGIES.length;
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            contextStrategy: expectDefined(COMPACTOR_STRATEGIES[next]),
+            hint: bootHint,
+          },
+        };
       }
       // Field 28: context mode (cycle)
       if (f === 28) {
         const i = CONTEXT_MODES.indexOf(sp.contextMode);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + CONTEXT_MODES.length) % CONTEXT_MODES.length;
-        return { ...state, settingsPicker: { ...sp, contextMode: expectDefined(CONTEXT_MODES[next]), hint: bootHint } };
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            contextMode: expectDefined(CONTEXT_MODES[next]),
+            hint: bootHint,
+          },
+        };
       }
       // ── Fleet ──────────────────────────────────────────────────────────────
       // Field 29: max concurrent (cycle presets)
       if (f === 29) {
         const j = MAX_CONCURRENT_PRESETS.indexOf(sp.maxConcurrent);
         const base = j < 0 ? 0 : j;
-        const next = (base + action.delta + MAX_CONCURRENT_PRESETS.length) % MAX_CONCURRENT_PRESETS.length;
-        return { ...state, settingsPicker: { ...sp, maxConcurrent: expectDefined(MAX_CONCURRENT_PRESETS[next]), hint: undefined } };
+        const next =
+          (base + action.delta + MAX_CONCURRENT_PRESETS.length) % MAX_CONCURRENT_PRESETS.length;
+        const maxConcurrent = expectDefined(MAX_CONCURRENT_PRESETS[next]);
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            maxConcurrent,
+            hint: maxConcurrent === 0 ? bootHint : undefined,
+          },
+        };
       }
       // ── Logging ────────────────────────────────────────────────────────────
       // Field 30: log level (cycle)
@@ -790,31 +964,55 @@ export function reducer(state: State, action: Action): State {
         const i = LOG_LEVELS.indexOf(sp.logLevel);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + LOG_LEVELS.length) % LOG_LEVELS.length;
-        return { ...state, settingsPicker: { ...sp, logLevel: expectDefined(LOG_LEVELS[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: { ...sp, logLevel: expectDefined(LOG_LEVELS[next]), hint: undefined },
+        };
       }
       // Field 31: audit level (cycle)
       if (f === 31) {
         const i = AUDIT_LEVELS.indexOf(sp.auditLevel);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + AUDIT_LEVELS.length) % AUDIT_LEVELS.length;
-        return { ...state, settingsPicker: { ...sp, auditLevel: expectDefined(AUDIT_LEVELS[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: { ...sp, auditLevel: expectDefined(AUDIT_LEVELS[next]), hint: undefined },
+        };
       }
       // ── Debug ──────────────────────────────────────────────────────────────
       // Field 32: debug stream (boolean toggle)
-      if (f === 32) return { ...state, settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined } };
+      if (f === 32)
+        return {
+          ...state,
+          settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined },
+        };
       // Field 33: statusline mode (cycle minimum/detailed)
       if (f === 33) {
         const i = STATUSLINE_MODES.indexOf(sp.statuslineMode);
         const base = i < 0 ? STATUSLINE_MODES.indexOf('detailed') : i;
         const next = (base + action.delta + STATUSLINE_MODES.length) % STATUSLINE_MODES.length;
-        return { ...state, settingsPicker: { ...sp, statuslineMode: expectDefined(STATUSLINE_MODES[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            statuslineMode: expectDefined(STATUSLINE_MODES[next]),
+            hint: undefined,
+          },
+        };
       }
       // Field 34: config scope (cycle global/project)
       if (f === 34) {
         const i = CONFIG_SCOPES.indexOf(sp.configScope);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + CONFIG_SCOPES.length) % CONFIG_SCOPES.length;
-        return { ...state, settingsPicker: { ...sp, configScope: expectDefined(CONFIG_SCOPES[next]), hint: undefined } };
+        return {
+          ...state,
+          settingsPicker: {
+            ...sp,
+            configScope: expectDefined(CONFIG_SCOPES[next]),
+            hint: undefined,
+          },
+        };
       }
       return state;
     }
@@ -825,14 +1023,26 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         ...closePanels(state),
-        statuslinePicker: { open: true, field: 0, hiddenItems: action.hiddenItems, visibleChips: state.statuslinePicker.visibleChips, hint: undefined },
+        statuslinePicker: {
+          open: true,
+          field: 0,
+          hiddenItems: action.hiddenItems,
+          visibleChips: state.statuslinePicker.visibleChips,
+          hint: undefined,
+        },
       };
     case 'statuslineClose':
-      return { ...state, statuslinePicker: { ...state.statuslinePicker, open: false, hint: undefined } };
+      return {
+        ...state,
+        statuslinePicker: { ...state.statuslinePicker, open: false, hint: undefined },
+      };
     case 'statuslineFieldMove': {
       const totalFields = 13; // 9 base chips + 4 stream chips
       const next = (state.statuslinePicker.field + action.delta + totalFields) % totalFields;
-      return { ...state, statuslinePicker: { ...state.statuslinePicker, field: next, hint: undefined } };
+      return {
+        ...state,
+        statuslinePicker: { ...state.statuslinePicker, field: next, hint: undefined },
+      };
     }
     case 'statuslineFieldSet': {
       const totalFields = 13; // 9 base chips + 4 stream chips
@@ -847,7 +1057,10 @@ export function reducer(state: State, action: Action): State {
       } else {
         hiddenSet.add(action.item);
       }
-      return { ...state, statuslinePicker: { ...cur, hiddenItems: [...hiddenSet] as typeof cur.hiddenItems } };
+      return {
+        ...state,
+        statuslinePicker: { ...cur, hiddenItems: [...hiddenSet] as typeof cur.hiddenItems },
+      };
     }
     case 'statuslineHint':
       return { ...state, statuslinePicker: { ...state.statuslinePicker, hint: action.text } };
@@ -856,9 +1069,10 @@ export function reducer(state: State, action: Action): State {
       const existing = cur.visibleChips.findIndex((c) => c.key === action.key);
       // Only include expiresIn if it is explicitly set — with exactOptionalPropertyTypes,
       // assigning undefined to an optional property is a type error.
-      const meta: ChipMeta = action.expiresIn != null
-        ? { key: action.key, shownAt: Date.now(), expiresIn: action.expiresIn }
-        : { key: action.key, shownAt: Date.now() };
+      const meta: ChipMeta =
+        action.expiresIn != null
+          ? { key: action.key, shownAt: Date.now(), expiresIn: action.expiresIn }
+          : { key: action.key, shownAt: Date.now() };
       if (existing >= 0) {
         // Reset shownAt if already visible
         const updated = [...cur.visibleChips];
@@ -898,7 +1112,14 @@ export function reducer(state: State, action: Action): State {
     case 'projectPickerClose':
       return {
         ...state,
-        projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '', hint: undefined },
+        projectPicker: {
+          open: false,
+          allItems: [],
+          items: [],
+          selected: 0,
+          filter: '',
+          hint: undefined,
+        },
       };
     case 'projectPickerMove': {
       const cur = state.projectPicker;
@@ -1301,7 +1522,9 @@ export function reducer(state: State, action: Action): State {
     }
     case 'toggleMonitor': {
       const opening = !state.monitorOpen;
-      return opening ? { ...state, ...closePanels(state), monitorOpen: true } : { ...state, monitorOpen: false };
+      return opening
+        ? { ...state, ...closePanels(state), monitorOpen: true }
+        : { ...state, monitorOpen: false };
     }
     case 'toggleAgentsMonitor': {
       const opening = !state.agentsMonitorOpen;
@@ -1311,7 +1534,9 @@ export function reducer(state: State, action: Action): State {
     }
     case 'toggleHelp': {
       const opening = !state.helpOpen;
-      return opening ? { ...state, ...closePanels(state), helpOpen: true } : { ...state, helpOpen: false };
+      return opening
+        ? { ...state, ...closePanels(state), helpOpen: true }
+        : { ...state, helpOpen: false };
     }
     case 'toggleTodosMonitor': {
       const opening = !state.todosMonitorOpen;
@@ -1471,7 +1696,9 @@ export function reducer(state: State, action: Action): State {
       const monitorOpen = state.sddBoard?.monitorOpen ?? false;
       const prevFocus = state.sddBoard?.focusColumn;
       const focusColumn =
-        typeof prevFocus === 'number' && prevFocus >= 0 && prevFocus < action.snapshot.columns.length
+        typeof prevFocus === 'number' &&
+        prevFocus >= 0 &&
+        prevFocus < action.snapshot.columns.length
           ? prevFocus
           : undefined;
       return { ...state, sddBoard: { snapshot: action.snapshot, monitorOpen, focusColumn } };
@@ -1488,11 +1715,12 @@ export function reducer(state: State, action: Action): State {
           }
         : {
             ...state,
-            sddBoard: { ...state.sddBoard, monitorOpen: false },
+            sddBoard: { ...state.sddBoard, monitorOpen: false, focusColumn: undefined },
           };
     }
     case 'sddBoardFocusNext': {
       if (!state.sddBoard) return state;
+      if (!state.sddBoard.monitorOpen) return state;
       const max = state.sddBoard.snapshot.columns.length - 1;
       if (max < 0) return state;
       const current = state.sddBoard.focusColumn;
@@ -1501,6 +1729,7 @@ export function reducer(state: State, action: Action): State {
     }
     case 'sddBoardFocusPrev': {
       if (!state.sddBoard) return state;
+      if (!state.sddBoard.monitorOpen) return state;
       const current = state.sddBoard.focusColumn;
       if (typeof current !== 'number') return state;
       const next = current <= 0 ? undefined : current - 1;
@@ -1793,15 +2022,42 @@ export function reducer(state: State, action: Action): State {
       let kind: State['coordinator']['timeline'][0]['kind'];
       let icon: string;
       switch (event.type) {
-        case 'goal:added':        kind = 'goal';      icon = '🎯'; break;
-        case 'goal:completed':     kind = 'goal';      icon = '✅'; break;
-        case 'goal:failed':       kind = 'goal';      icon = '❌'; break;
-        case 'task:ready':        kind = 'task';      icon = '⚡'; break;
-        case 'task:completed':     kind = 'task';      icon = '✓';  break;
-        case 'knowledge:added':    kind = 'knowledge'; icon = '💡'; break;
-        case 'consensus:reached': kind = 'consensus'; icon = '🤝'; break;
-        case 'deadlock:detected': kind = 'deadlock';  icon = '⚠️'; break;
-        default:                   kind = 'goal';      icon = '•';  break;
+        case 'goal:added':
+          kind = 'goal';
+          icon = '🎯';
+          break;
+        case 'goal:completed':
+          kind = 'goal';
+          icon = '✅';
+          break;
+        case 'goal:failed':
+          kind = 'goal';
+          icon = '❌';
+          break;
+        case 'task:ready':
+          kind = 'task';
+          icon = '⚡';
+          break;
+        case 'task:completed':
+          kind = 'task';
+          icon = '✓';
+          break;
+        case 'knowledge:added':
+          kind = 'knowledge';
+          icon = '💡';
+          break;
+        case 'consensus:reached':
+          kind = 'consensus';
+          icon = '🤝';
+          break;
+        case 'deadlock:detected':
+          kind = 'deadlock';
+          icon = '⚠️';
+          break;
+        default:
+          kind = 'goal';
+          icon = '•';
+          break;
       }
       const timelineEntry = {
         at: now,

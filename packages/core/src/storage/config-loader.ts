@@ -1,14 +1,19 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { decryptConfigSecrets } from '../security/secret-vault.js';
-import { atomicWrite } from '../utils/atomic-write.js';
+import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 import { toErrorMessage } from '../utils/error.js';
 import {
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   isContextWindowModeId,
   listContextWindowModes,
 } from '../types/context-window.js';
-import type { Config, ConfigLoader, SyncConfig } from '../types/config.js';
+import {
+  DEFAULT_TUI_THINKING_WORD,
+  type Config,
+  type ConfigLoader,
+  type SyncConfig,
+} from '../types/config.js';
 import type { SecretVault } from '../types/secret-vault.js';
 import { ConfigError, ERROR_CODES } from '../types/errors.js';
 import { safeParse } from '../utils/safe-json.js';
@@ -16,6 +21,7 @@ import { deepMerge as deepMergeCore, type DeepMergeOptions } from '../utils/deep
 import type { WstackPaths } from '../utils/wstack-paths.js';
 import {
   DEFAULT_AUTONOMY_CONFIG,
+  DEFAULT_CIRCUIT_BREAKER_CONFIG,
   DEFAULT_TOOLS_CONFIG,
   DEFAULT_CONTEXT_CONFIG,
   DEFAULT_SESSION_LOGGING_CONFIG,
@@ -53,6 +59,7 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
     autoCompact: true,
     preserveK: DEFAULT_CONTEXT_CONFIG.preserveK,
     eliseThreshold: DEFAULT_CONTEXT_CONFIG.eliseThreshold,
+    strategy: 'hybrid',
   },
   tools: {
     defaultExecutionStrategy: DEFAULT_TOOLS_CONFIG.defaultExecutionStrategy,
@@ -75,6 +82,13 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
     allowOutsideProjectRoot: true,
   },
   mcpServers: {},
+  fallbackAuto: true,
+  maxConcurrent: 4,
+  yolo: false,
+  nextPrediction: false,
+  hints: true,
+  debugStream: false,
+  configScope: 'global',
   indexing: {
     onSessionStart: true,
     onEdit: true,
@@ -82,8 +96,65 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
     debounceMs: 400,
   },
   session: { ...DEFAULT_SESSION_LOGGING_CONFIG },
-  autonomy: { autoProceedDelayMs: DEFAULT_AUTONOMY_CONFIG.autoProceedDelayMs },
+  autonomy: {
+    defaultMode: 'off',
+    autoProceedDelayMs: DEFAULT_AUTONOMY_CONFIG.autoProceedDelayMs,
+    autoProceedMaxIterations: 50,
+    autonomyNextPrompt: 'auto {{suggestion}}',
+    terminalTitleAnimation: true,
+    yolo: false,
+    streamFleet: true,
+    chime: false,
+    confirmExit: true,
+    mouseMode: false,
+    enhance: true,
+    enhanceDelayMs: 60_000,
+    enhanceLanguage: 'original',
+    statuslineMode: 'detailed',
+    thinkingWord: DEFAULT_TUI_THINKING_WORD,
+  },
+  circuitBreaker: { ...DEFAULT_CIRCUIT_BREAKER_CONFIG },
+  modelRuntime: {
+    reasoning: { mode: 'auto', effort: 'high', preserve: false },
+    cache: {},
+  },
 };
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cloneJsonValue<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function fillMissingDefaults(
+  target: Record<string, unknown>,
+  defaults: Record<string, unknown>,
+): { value: Record<string, unknown>; changed: boolean } {
+  const value = cloneJsonValue(target);
+  const changed = fillMissingDefaultsInPlace(value, defaults);
+  return { value, changed };
+}
+
+function fillMissingDefaultsInPlace(
+  target: Record<string, unknown>,
+  defaults: Record<string, unknown>,
+): boolean {
+  let changed = false;
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    if (!Object.prototype.hasOwnProperty.call(target, key)) {
+      target[key] = cloneJsonValue(defaultValue);
+      changed = true;
+      continue;
+    }
+    const current = target[key];
+    if (isPlainRecord(current) && isPlainRecord(defaultValue)) {
+      changed = fillMissingDefaultsInPlace(current, defaultValue) || changed;
+    }
+  }
+  return changed;
+}
 
 /** Parse a boolean-ish env var: "0"/"false"/"no"/"off" → false, anything else → true. */
 function envBool(v: string): boolean {
@@ -539,6 +610,11 @@ export class DefaultConfigLoader implements ConfigLoader {
   ): Promise<Config> {
     let cfg: PartialConfig = { ...BEHAVIOR_DEFAULTS } as PartialConfig;
 
+    // Materialize behavior/settings defaults into the trusted global config
+    // before env vars or CLI flags are applied, so first boot creates a real
+    // ~/.wrongstack/config.json without persisting ephemeral overrides.
+    await this.ensureGlobalDefaults();
+
     // Layer 2, 3 & 3b: global + project-local + in-project config — read in parallel.
     // inProjectConfig (<project>/.wrongstack/config.json) merges AFTER
     // projectLocalConfig so it takes priority (user-intended > auto-cached).
@@ -654,6 +730,85 @@ export class DefaultConfigLoader implements ConfigLoader {
     // caller (e.g. early-boot wizard) accepts a Partial and constructs the
     // provider later, so we deliberately return without the cast.
     return Object.freeze(cfg) as Config;
+  }
+
+  private async ensureGlobalDefaults(): Promise<void> {
+    const fp = this.paths.globalConfig;
+    const t0 = Date.now();
+    try {
+      await withFileLock(fp, async () => {
+        let parsed: Record<string, unknown>;
+        try {
+          const raw = await fs.readFile(fp, 'utf8');
+          const result = safeParse<unknown>(raw);
+          if (!result.ok || !isPlainRecord(result.value)) {
+            // readJson() below owns the user-visible parse warning. Do not
+            // overwrite a malformed config while trying to seed defaults.
+            return;
+          }
+          parsed = result.value;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            this.events?.emit('storage.error', {
+              sessionId: '~config~',
+              store: 'config',
+              filePath: fp,
+              operation: 'ensure_defaults',
+              outcome: 'failure',
+              error: storageErrorString(err),
+              recoverable: false,
+              durationMs: Date.now() - t0,
+              ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+            });
+            console.warn(JSON.stringify({
+              level: 'warn',
+              event: 'config.defaults_read_failed',
+              path: fp,
+              message: toErrorMessage(err),
+              timestamp: new Date().toISOString(),
+            }));
+            return;
+          }
+          parsed = {};
+        }
+
+        const { value, changed } = fillMissingDefaults(
+          parsed,
+          BEHAVIOR_DEFAULTS as Record<string, unknown>,
+        );
+        if (!changed) return;
+
+        await atomicWrite(fp, JSON.stringify(value, null, 2), { mode: 0o600 });
+        this.events?.emit('storage.write', {
+          sessionId: '~config~',
+          store: 'config',
+          filePath: fp,
+          operation: 'ensure_defaults',
+          outcome: 'success',
+          durationMs: Date.now() - t0,
+          ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+        });
+      });
+    } catch (err) {
+      this.events?.emit('storage.error', {
+        sessionId: '~config~',
+        store: 'config',
+        filePath: fp,
+        operation: 'ensure_defaults',
+        outcome: 'failure',
+        error: storageErrorString(err),
+        recoverable: false,
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'config.defaults_write_failed',
+        path: fp,
+        message: toErrorMessage(err),
+        timestamp: new Date().toISOString(),
+      }));
+    }
   }
 
   /**

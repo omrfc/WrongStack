@@ -230,7 +230,7 @@ async function ensureProjectDir(filePath: string): Promise<void> {
 }
 
 /**
- * Fields that are safe to persist in a per-project `config.local.json`.
+ * Fields that are safe to persist in a per-project `.wrongstack/config.json`.
  * Credential-bearing fields (apiKey, providers, sync) MUST NOT appear here —
  * they stay in the global config only. The global config always gets the
  * full unfiltered object.
@@ -258,11 +258,12 @@ const PROJECT_SAFE_FIELDS = new Set([
   'tools',
   'launch',
   'circuitBreaker',
+  'modelRuntime',
 ]);
 
 /**
  * Strip credential-bearing and machine-specific fields from a config object
- * so it is safe to write into a per-project `config.local.json` file.
+ * so it is safe to write into a per-project `.wrongstack/config.json` file.
  * Returns a new object — the original is not mutated.
  */
 export function filterSafeForProject(cfg: Record<string, unknown>): Record<string, unknown> {

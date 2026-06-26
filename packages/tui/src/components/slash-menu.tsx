@@ -66,6 +66,7 @@ export function SlashMenu({ query, matches, selected }: SlashMenuProps): React.R
             {i === selected ? '› ' : '  '}
             <Text bold>{m.name}</Text>
             {m.argsHint ? <Text dimColor> {m.argsHint}</Text> : null}
+            {m.matchedAlias ? <Text dimColor> alias /{m.matchedAlias}</Text> : null}
             <Text dimColor> — {m.description}</Text>
           </Text>
         );

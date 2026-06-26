@@ -62,6 +62,7 @@ const KNOWN_TOP_LEVEL_KEYS = [
   'tools',
   'mcpServers',
   'fallbackModels',
+  'fallbackAuto',
   'hooks',
   'plugins',
   'log',
@@ -74,8 +75,12 @@ const KNOWN_TOP_LEVEL_KEYS = [
   'debugStream',
   'configScope',
   'indexing',
+  'circuitBreaker',
+  'adaptiveConcurrency',
   'launch',
   'session',
+  'modelRuntime',
+  'hq',
   'sync',
   'extensions',
 ] as const;
@@ -202,17 +207,17 @@ export function diagnoseConfig(
       delete fixed['maxConcurrent'];
       findings.push({
         path: 'maxConcurrent',
-        problem: `expected a positive integer, got ${JSON.stringify(v)}`,
+        problem: `expected a non-negative integer, got ${JSON.stringify(v)}`,
         severity: 'error',
         fix: 'removed (built-in default applies)',
       });
     } else {
-      const clamped = Math.max(1, Math.floor(n));
+      const clamped = Math.max(0, Math.floor(n));
       if (clamped !== v) {
         fixed['maxConcurrent'] = clamped;
         findings.push({
           path: 'maxConcurrent',
-          problem: `expected a positive integer, got ${JSON.stringify(v)}`,
+          problem: `expected a non-negative integer, got ${JSON.stringify(v)}`,
           severity: 'error',
           fix: `set to ${clamped}`,
         });

@@ -104,6 +104,7 @@ export interface SlashCommandMatch {
   name: string;
   description: string;
   argsHint?: string | undefined;
+  matchedAlias?: string | undefined;
   isBuiltin: boolean;
   category: 'Run' | 'Session' | 'Inspect' | 'Agent' | 'Config' | 'App';
 }

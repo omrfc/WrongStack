@@ -56,7 +56,7 @@ describe('DefaultConfigLoader', () => {
   }
 
   it('returns behavior defaults with no files (no hardcoded provider/model)', async () => {
-    const { loader: l } = loader();
+    const { loader: l, paths } = loader();
     const cfg = await l.load();
     expect(cfg.provider).toBeUndefined();
     expect(cfg.model).toBeUndefined();
@@ -65,6 +65,78 @@ describe('DefaultConfigLoader', () => {
     expect(cfg.tools.maxIterations).toBe(100);
     expect(cfg.features.mcp).toBe(true);
     expect(cfg.mcpServers).toEqual({});
+
+    const written = JSON.parse(await fs.readFile(paths.globalConfig, 'utf8'));
+    expect(written.provider).toBeUndefined();
+    expect(written.model).toBeUndefined();
+    expect(written.version).toBe(1);
+    expect(written.configScope).toBe('global');
+    expect(written.maxConcurrent).toBe(4);
+    expect(written.context.mode).toBe('balanced');
+    expect(written.context.strategy).toBe('hybrid');
+    expect(written.autonomy.defaultMode).toBe('off');
+    expect(written.autonomy.autoProceedDelayMs).toBe(45_000);
+    expect(written.autonomy.enhanceDelayMs).toBe(60_000);
+    expect(written.autonomy.autoProceedMaxIterations).toBe(50);
+    expect(written.modelRuntime.reasoning).toEqual({
+      mode: 'auto',
+      effort: 'high',
+      preserve: false,
+    });
+  });
+
+  it('fills missing global defaults without overwriting user settings', async () => {
+    const { loader: l, paths } = loader();
+    await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
+    await fs.writeFile(
+      paths.globalConfig,
+      JSON.stringify({
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        maxConcurrent: 12,
+        autonomy: { defaultMode: 'auto' },
+        modelRuntime: { parameters: { user: 'kept' } },
+      }),
+    );
+
+    const cfg = await l.load();
+    expect(cfg.provider).toBe('anthropic');
+    expect(cfg.model).toBe('claude-sonnet-4-6');
+    expect(cfg.maxConcurrent).toBe(12);
+    expect(cfg.autonomy?.defaultMode).toBe('auto');
+    expect(cfg.autonomy?.autoProceedDelayMs).toBe(45_000);
+    expect(cfg.modelRuntime?.parameters?.user).toBe('kept');
+    expect(cfg.modelRuntime?.reasoning?.effort).toBe('high');
+
+    const written = JSON.parse(await fs.readFile(paths.globalConfig, 'utf8'));
+    expect(written.provider).toBe('anthropic');
+    expect(written.model).toBe('claude-sonnet-4-6');
+    expect(written.maxConcurrent).toBe(12);
+    expect(written.autonomy.defaultMode).toBe('auto');
+    expect(written.autonomy.autoProceedDelayMs).toBe(45_000);
+    expect(written.modelRuntime.parameters.user).toBe('kept');
+    expect(written.modelRuntime.reasoning.effort).toBe('high');
+  });
+
+  it('does not persist env or CLI identity overrides when seeding defaults', async () => {
+    process.env['WRONGSTACK_PROVIDER'] = 'openai';
+    process.env['WRONGSTACK_API_KEY'] = 'sk-env';
+    try {
+      const { loader: l, paths } = loader();
+      const cfg = await l.load({ cliFlags: { model: 'gpt-5' } });
+      expect(cfg.provider).toBe('openai');
+      expect(cfg.model).toBe('gpt-5');
+      expect(cfg.apiKey).toBe('sk-env');
+
+      const written = JSON.parse(await fs.readFile(paths.globalConfig, 'utf8'));
+      expect(written.provider).toBeUndefined();
+      expect(written.model).toBeUndefined();
+      expect(written.apiKey).toBeUndefined();
+      expect(written.autonomy.defaultMode).toBe('off');
+    } finally {
+      delete process.env['WRONGSTACK_PROVIDER'];
+      delete process.env['WRONGSTACK_API_KEY'];
+    }
   });
 
   it('user config controls Playwright MCP when explicitly configured', async () => {

@@ -1,6 +1,11 @@
 import type { ResolvedProvider } from '@wrongstack/core';
 import { type Config, type Logger, type ModelsRegistry, ProviderRegistry } from '@wrongstack/core';
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
+import {
+  fallbackCodexProviderModels,
+  filterCurrentCodexModelIds,
+  isCodexCatalogModel,
+} from '../openai-codex-models.js';
 
 export interface ProviderSetupResult {
   resolvedProvider: ResolvedProvider | undefined;
@@ -42,29 +47,23 @@ export async function setupProvider(params: {
         // Resolve from the models.dev catalog: pick all models with
         // family=gpt-codex* under the `openai` provider. When the
         // catalog is unavailable, fall back to the documented defaults.
-        const openaiProvider = await modelsRegistry
-          .getProvider('openai')
-          .catch(() => undefined);
-        const codexFamilies = new Set(['gpt-codex', 'gpt-codex-spark']);
+        const openaiProvider = await modelsRegistry.getProvider('openai').catch(() => undefined);
         if (openaiProvider) {
-          const catalogModels = openaiProvider.models
-            .filter((m) => m.family && codexFamilies.has(m.family))
-            .map((m) => ({ id: m.id, name: m.name }));
+          const catalogById = new Map(
+            openaiProvider.models
+              .filter(isCodexCatalogModel)
+              .map((m) => [m.id, { id: m.id, name: m.name }] as const),
+          );
+          const catalogModels = filterCurrentCodexModelIds(catalogById.keys())
+            .map((id) => catalogById.get(id))
+            .filter((m): m is { id: string; name: string } => Boolean(m));
           if (catalogModels.length > 0) {
             models = catalogModels;
           } else {
-            models = [
-              { id: 'gpt-5.5', name: 'gpt-5.5' },
-              { id: 'gpt-5.4', name: 'gpt-5.4' },
-              { id: 'gpt-5.4-mini', name: 'gpt-5.4-mini' },
-            ];
+            models = fallbackCodexProviderModels();
           }
         } else {
-          models = [
-            { id: 'gpt-5.5', name: 'gpt-5.5' },
-            { id: 'gpt-5.4', name: 'gpt-5.4' },
-            { id: 'gpt-5.4-mini', name: 'gpt-5.4-mini' },
-          ];
+          models = fallbackCodexProviderModels();
         }
       } else {
         models = [];

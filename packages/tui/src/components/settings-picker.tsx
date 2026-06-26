@@ -47,14 +47,14 @@ export const STATUSLINE_MODE_DESCS: Record<StatuslineMode, string> = {
 /** Presets for max iterations — cyclable via ←/→. 0 = unlimited. */
 export const MAX_ITERATIONS_PRESETS = [100, 200, 500, 1000, 0];
 
-/** Presets for max concurrent subagents. 0 = unlimited. */
-export const MAX_CONCURRENT_PRESETS = [1, 3, 5, 10, 25, 50, 0];
+/** Presets for max concurrent subagents. 0 = runtime default. */
+export const MAX_CONCURRENT_PRESETS = [1, 3, 4, 5, 10, 25, 50, 0];
 
 /** Presets for auto-proceed max iterations. 0 = unlimited, 50 default. */
 export const AUTO_PROCEED_MAX_PRESETS = [10, 25, 50, 100, 250, 0];
 
 /** Presets for prompt refinement preview countdown. */
-export const ENHANCE_DELAY_PRESETS = [30_000, 45_000, 60_000, 90_000, 120_000];
+export const ENHANCE_DELAY_PRESETS = [15_000, 30_000, 45_000, 60_000, 90_000, 120_000];
 
 /** Language options for prompt refinement. */
 export const ENHANCE_LANGUAGES = ['original', 'english'] as const;
@@ -305,7 +305,7 @@ export function SettingsPicker({
     {
       label: 'Refine preview countdown',
       value: formatEnhanceDelay(enhanceDelayMs),
-      detail: 'Timeout for prompt refinement preview (30s–120s)',
+      detail: 'Timeout for prompt refinement preview (15s–120s)',
     },
     {
       label: 'Refine',
@@ -370,8 +370,8 @@ export function SettingsPicker({
     { section: 'Fleet' },
     {
       label: 'Max concurrent',
-      value: maxConcurrent === 0 ? 'unlimited' : String(maxConcurrent),
-      detail: 'Max subagents (0 = unlimited)',
+      value: maxConcurrent === 0 ? 'default' : String(maxConcurrent),
+      detail: 'Max subagents (0 = default)',
     },
     // ── Logging ──
     { section: 'Logging' },
@@ -453,7 +453,7 @@ export function SettingsPicker({
       <Text color="cyan" bold>
         ━━ Settings ━━
       </Text>
-      <Text dimColor>↑/↓ field · ←/→ change (instant apply) · F5 to close</Text>
+      <Text dimColor>↑/↓ field · ←/→ change + autosave · F5 to close</Text>
       {hasAbove ? (
         <Text dimColor>{`  ↑ ${windowStart} field${windowStart === 1 ? '' : 's'} above`}</Text>
       ) : null}
@@ -486,7 +486,11 @@ export function SettingsPicker({
       {hasBelow ? (
         <Text dimColor>{`  ↓ ${totalFields - windowEnd} field${totalFields - windowEnd === 1 ? '' : 's'} below`}</Text>
       ) : null}
-      <Text dimColor>Persisted to ~/.wrongstack/config.json</Text>
+      <Text dimColor>
+        {configScope === 'project'
+          ? 'Persisted to <project>/.wrongstack/config.json'
+          : 'Persisted to ~/.wrongstack/config.json'}
+      </Text>
       {hint ? <Text color="yellow">{hint}</Text> : null}
     </Box>
   );

@@ -14,7 +14,87 @@ import * as path from 'node:path';
 import type { WebSocket } from 'ws';
 import { atomicWrite } from '@wrongstack/core';
 import { SKIP_DIRS, isHiddenEntry, rankFiles } from './file-picker.js';
+import { isPathInside, resolveWorkingDirInsideProject } from './path-containment.js';
 import { send, errMessage } from './ws-utils.js';
+
+/**
+ * Resolve a user-supplied file path against `projectRoot` and verify the
+ * canonical (real) path stays inside the canonical project root. This
+ * rejects:
+ *   - lexical escapes (`../../etc/passwd`)
+ *   - in-project symlinks that point outside the project root
+ *   - absolute paths outside the project root
+ *
+ * The target file does not need to exist; we `realpath` the parent
+ * directory and re-attach the basename. This matches the behavior of
+ * `realpath(3)` once the file is later created.
+ */
+async function resolveFileInsideProject(
+  projectRoot: string,
+  filePath: string,
+): Promise<string> {
+  // Lexical containment check first — cheap, and avoids calling realpath
+  // on a path we already know is bogus. This also blocks `..` segments.
+  const resolved = path.resolve(projectRoot, filePath);
+  if (!isPathInside(projectRoot, resolved)) {
+    throw new Error('Path outside project root');
+  }
+
+  // Canonical containment: walk the parent directory's real path and
+  // re-attach the basename. If the parent doesn't exist yet, walk up
+  // until we find an existing ancestor and verify the rest of the path
+  // is still inside the real project root.
+  const { parent, base } = splitParentAndBase(resolved);
+  const realProjectRoot = await fs.realpath(projectRoot);
+  const realParent = await realpathAllowMissing(parent);
+  const realFull = path.join(realParent, base);
+  if (!isPathInside(realProjectRoot, realFull)) {
+    throw new Error('Path outside project root');
+  }
+  return realFull;
+}
+
+function splitParentAndBase(p: string): { parent: string; base: string } {
+  const base = path.basename(p);
+  const parent = path.dirname(p);
+  return { parent, base };
+}
+
+/**
+ * `realpath` that does not throw when the path doesn't exist. Walks up
+ * until an existing ancestor is found, realpaths that ancestor, then
+ * re-attaches the missing tail. This is what we need for write targets
+ * that don't exist yet, and for read targets whose parent may have
+ * been deleted between check and use.
+ */
+async function realpathAllowMissing(p: string): Promise<string> {
+  // Existing path — normal realpath, canonicalizing any symlinks.
+  try {
+    return await fs.realpath(p);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  // Walk up to the first existing ancestor, realpath that, and reattach.
+  const segments: string[] = [];
+  let cursor = p;
+  while (true) {
+    const parent = path.dirname(cursor);
+    if (parent === cursor) {
+      // Hit a filesystem root and still nothing exists. The lexical
+      // check above already kept us inside projectRoot, so this should
+      // be unreachable; bail out conservatively.
+      throw new Error('Path outside project root');
+    }
+    segments.unshift(path.basename(cursor));
+    try {
+      const realParent = await fs.realpath(parent);
+      return path.join(realParent, ...segments);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      cursor = parent;
+    }
+  }
+}
 
 // ── Type helpers (inlined, no dependence on types.ts) ──
 
@@ -64,12 +144,21 @@ export async function handleFilesTree(
   // When absent, empty, or ".", fall back to projectRoot (backward compatible).
   const payload = (msg as { payload?: { path?: string | undefined } }).payload;
   const rawPath = payload?.path?.trim();
-  const treeRoot = rawPath && rawPath !== '.'
-    ? path.resolve(projectRoot, rawPath)
-    : projectRoot;
 
-  // Guard: treeRoot must stay inside projectRoot.
-  if (!treeRoot.startsWith(projectRoot + path.sep) && treeRoot !== projectRoot) {
+  // Guard: the requested tree root must be both lexically AND via
+  // realpath() inside the project root. A symlinked subdirectory that
+  // points outside the project would otherwise expose arbitrary
+  // directory structure to a connected client.
+  let treeRoot: string;
+  let realProjectRoot: string;
+  try {
+    if (rawPath && rawPath !== '.') {
+      treeRoot = await resolveWorkingDirInsideProject(projectRoot, rawPath);
+    } else {
+      treeRoot = projectRoot;
+    }
+    realProjectRoot = await fs.realpath(projectRoot);
+  } catch {
     send(ws, {
       type: 'files.tree',
       payload: { root: projectRoot, tree: [], error: 'Path outside project root' },
@@ -105,7 +194,19 @@ export async function handleFilesTree(
       const childPath = pathPrefix + childRel;
       if (e.isDirectory()) {
         if (SKIP_DIRS.has(e.name)) continue;
-        const children = await buildTree(childAbs, childRel, depth + 1);
+        // Reject symlinked directories whose real path escapes the
+        // real project root. A symlink to an in-project directory is
+        // fine and recursed into normally.
+        let realChild: string;
+        try {
+          realChild = await fs.realpath(childAbs);
+        } catch {
+          continue;
+        }
+        if (!isPathInside(realProjectRoot, realChild)) {
+          continue;
+        }
+        const children = await buildTree(realChild, childRel, depth + 1);
         nodes.push({ name: e.name, path: childPath, type: 'directory', children });
       } else if (e.isFile()) {
         nodes.push({ name: e.name, path: childPath, type: 'file' });
@@ -144,15 +245,20 @@ export async function handleFilesRead(
 ): Promise<void> {
   const { filePath } = (msg as { payload: FilesReadPayload }).payload;
 
-  // Path traversal guard: resolve and verify the file stays inside projectRoot.
-  const resolved = path.resolve(projectRoot, filePath);
-  if (!resolved.startsWith(projectRoot + path.sep) && resolved !== projectRoot) {
+  // Path traversal guard: resolve and verify both lexically AND via
+  // realpath() that the file stays inside the canonical project root.
+  // A string-prefix check is not enough — an in-project symlink to
+  // an external file would otherwise escape the project root.
+  let realResolved: string;
+  try {
+    realResolved = await resolveFileInsideProject(projectRoot, filePath);
+  } catch {
     send(ws, { type: 'files.read', payload: { filePath, content: '', error: 'Forbidden' } });
     return;
   }
 
   try {
-    const content = await fs.readFile(resolved, 'utf8');
+    const content = await fs.readFile(realResolved, 'utf8');
     send(ws, { type: 'files.read', payload: { filePath, content } });
   } catch (err) {
     send(ws, {
@@ -176,18 +282,24 @@ export async function handleFilesWrite(
 ): Promise<void> {
   const { filePath, content } = (msg as { payload: FilesWritePayload }).payload;
 
-  // Path traversal guard.
-  const resolved = path.resolve(projectRoot, filePath);
-  if (!resolved.startsWith(projectRoot + path.sep) && resolved !== projectRoot) {
+  // Path traversal guard: resolve and verify both lexically AND via
+  // realpath() that the parent directory stays inside the canonical
+  // project root. A string-prefix check is not enough — an in-project
+  // symlink to an external directory would let a write escape the
+  // project root and clobber files elsewhere on disk.
+  let realResolved: string;
+  try {
+    realResolved = await resolveFileInsideProject(projectRoot, filePath);
+  } catch {
     send(ws, { type: 'files.written', payload: { filePath, success: false, error: 'Forbidden' } });
     return;
   }
 
   try {
-    await atomicWrite(resolved, content);
+    await atomicWrite(realResolved, content);
     send(ws, { type: 'files.written', payload: { filePath, success: true } });
     if (opts.onWritten) {
-      void Promise.resolve(opts.onWritten(resolved)).catch(() => undefined);
+      void Promise.resolve(opts.onWritten(realResolved)).catch(() => undefined);
     }
   } catch (err) {
     send(ws, {
@@ -211,12 +323,21 @@ export async function handleFilesList(
 ): Promise<void> {
   const payload = (msg as { payload?: FilesListPayload }).payload ?? {};
   const limit = payload.limit ?? 50;
-  const listRoot = payload.path
-    ? path.resolve(projectRoot, payload.path)
-    : projectRoot;
 
-  // Guard: listRoot must stay inside projectRoot.
-  if (!listRoot.startsWith(projectRoot + path.sep) && listRoot !== projectRoot) {
+  // Guard: the requested list root must be both lexically AND via
+  // realpath() inside the project root. A symlinked subdirectory that
+  // points outside the project would otherwise expose arbitrary
+  // filenames to a connected client.
+  let listRoot: string;
+  let realProjectRoot: string;
+  try {
+    if (payload.path) {
+      listRoot = await resolveWorkingDirInsideProject(projectRoot, payload.path);
+    } else {
+      listRoot = projectRoot;
+    }
+    realProjectRoot = await fs.realpath(projectRoot);
+  } catch {
     send(ws, { type: 'files.list', payload: { files: [] } });
     return;
   }
@@ -237,7 +358,19 @@ export async function handleFilesList(
       const childRel = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
         if (SKIP_DIRS.has(e.name)) continue;
-        await walk(path.join(dir, e.name), childRel, depth + 1);
+        // Reject symlinked directories whose real path escapes the
+        // real project root. A symlink to an in-project directory is
+        // fine and recursed into normally.
+        let realChild: string;
+        try {
+          realChild = await fs.realpath(path.join(dir, e.name));
+        } catch {
+          continue;
+        }
+        if (!isPathInside(realProjectRoot, realChild)) {
+          continue;
+        }
+        await walk(realChild, childRel, depth + 1);
       } else if (e.isFile()) {
         results.push(childRel);
       }

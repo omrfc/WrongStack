@@ -87,7 +87,7 @@ import { registerBuiltinTools } from './boot/tool-registry.js';
 import { parseArgs } from './arg-parser.js';
 import { launchEternalFromFlag } from './cli-eternal-flag.js';
 import { promptRecovery } from './cli-recovery-prompt.js';
-import { applyNodeEnvDefault, runPreflight } from './preflight.js';
+import { applyNodeEnvDefault, applySessionShellDefault, runPreflight } from './preflight.js';
 import { wireContainer } from './boot/container-wiring.js';
 import { bindSystemPromptBuilder } from './boot/system-prompt-builder.js';
 import { handleHelpVersionShortCircuit } from './boot/short-circuit-flags.js';
@@ -139,6 +139,12 @@ export async function main(argv: string[]): Promise<number> {
   // `--help` / `--version` short-circuit below needs to fire
   // without paying for the 2-second update-notice network call.
   applyNodeEnvDefault();
+  // Pin one stable shell for the session on Windows (PowerShell by default)
+  // via WRONGSTACK_SHELL, so the bash tool and the system-prompt Environment
+  // block agree on a single target the model writes syntax for. No-op on POSIX
+  // / when the user already set WRONGSTACK_SHELL. Cheap (a couple of PATH
+  // probes); safe to run before the --help short-circuit.
+  applySessionShellDefault();
 
   // --help / --version short-circuit (PR 1 of Issue #29):
   //
@@ -2773,17 +2779,26 @@ export async function main(argv: string[]): Promise<number> {
         if (s.contextAutoCompact !== undefined) {
           autoCompactor?.setEnabled(s.contextAutoCompact);
         }
-        if (s.restrictFsToRoot !== undefined) {
+        if (s.maxConcurrent !== undefined && s.maxConcurrent > 0) {
+          multiAgentHost.setMaxConcurrent(s.maxConcurrent);
+          events.emit('concurrency.changed', { n: s.maxConcurrent });
+          config = patchConfig(config, { maxConcurrent: s.maxConcurrent });
+        }
+        if (s.restrictFsToRoot !== undefined || s.allowOutsideProjectRoot !== undefined) {
+          const allowOutsideProjectRoot =
+            s.allowOutsideProjectRoot ?? !Boolean(s.restrictFsToRoot);
+          const restrictToProjectRoot =
+            s.restrictFsToRoot ?? !allowOutsideProjectRoot;
           // Toggle the live filesystem-access scope on the leader context so
           // file tools immediately honor the new boundary. Subagents spawned
           // afterwards read the patched config below.
-          context.allowOutsideProjectRoot = !s.restrictFsToRoot;
+          context.allowOutsideProjectRoot = allowOutsideProjectRoot;
           // Dual-write both config keys in sync (inverses): the new canonical
           // features.allowOutsideProjectRoot plus the legacy
           // tools.restrictToProjectRoot, so older readers don't break.
           config = patchConfig(config, {
-            features: { ...config.features, allowOutsideProjectRoot: !s.restrictFsToRoot },
-            tools: { ...config.tools, restrictToProjectRoot: s.restrictFsToRoot },
+            features: { ...config.features, allowOutsideProjectRoot },
+            tools: { ...config.tools, restrictToProjectRoot },
           });
         }
       } catch {

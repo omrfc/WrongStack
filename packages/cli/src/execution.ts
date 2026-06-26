@@ -106,8 +106,8 @@ import { CLI_VERSION } from './version.js';
  * cycles with ←/→.
  */
 export interface LiveSettingsInput {
-  mode: 'off' | 'suggest' | 'auto';
-  delayMs: number;
+  mode?: 'off' | 'suggest' | 'auto' | undefined;
+  delayMs?: number | undefined;
   titleAnimation?: boolean | undefined;
   yolo?: boolean | undefined;
   streamFleet?: boolean | undefined;
@@ -123,6 +123,8 @@ export interface LiveSettingsInput {
   allowOutsideProjectRoot?: boolean | undefined;
   contextAutoCompact?: boolean | undefined;
   contextStrategy?: string | undefined;
+  contextMode?: string | undefined;
+  maxConcurrent?: number | undefined;
   logLevel?: string | undefined;
   auditLevel?: string | undefined;
   indexOnStart?: boolean | undefined;
@@ -145,6 +147,14 @@ export interface LiveSettingsInput {
   statuslineMode?: 'minimum' | 'detailed' | undefined;
   /** Single word shown in the TUI rainbow working-state chip. */
   thinkingWord?: string | undefined;
+  /** Provider-runtime reasoning mode. */
+  reasoningMode?: 'auto' | 'on' | 'off' | undefined;
+  /** Provider-runtime reasoning effort. */
+  reasoningEffort?: string | undefined;
+  /** Preserve thinking blocks across turns when supported. */
+  reasoningPreserve?: boolean | undefined;
+  /** Prompt-cache TTL, or default to clear the explicit override. */
+  cacheTtl?: 'default' | '5m' | '1h' | undefined;
 }
 
 export interface ExecutionDeps {

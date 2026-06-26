@@ -53,6 +53,21 @@ describe('bootConfig', () => {
     expect(result.vault).toBeDefined();
   });
 
+  it('creates ~/.wrongstack/config.json with default settings on first boot', async () => {
+    const projectDir = await mkTempDir('wstack-boot-default-config-');
+    const result = await bootConfig({ cwd: projectDir });
+    const raw = await fs.readFile(result.paths.wpaths.globalConfig, 'utf8');
+    const written = JSON.parse(raw);
+    expect(written.configScope).toBe('global');
+    expect(written.maxConcurrent).toBe(4);
+    expect(written.autonomy.defaultMode).toBe('off');
+    expect(written.autonomy.autoProceedDelayMs).toBe(45_000);
+    expect(written.autonomy.enhanceDelayMs).toBe(60_000);
+    expect(written.modelRuntime.reasoning.effort).toBe('high');
+    expect(written.provider).toBeUndefined();
+    expect(written.model).toBeUndefined();
+  });
+
   it('CLI provider/model flags override file defaults', async () => {
     const projectDir = await mkTempDir('wstack-boot-flags-');
     const result = await bootConfig({

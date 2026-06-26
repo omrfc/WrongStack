@@ -39,9 +39,9 @@ describe('diagnoseConfig', () => {
     expect(report.findings.every((f) => f.severity === 'error' && f.fix)).toBe(true);
   });
 
-  it('repairs maxConcurrent strings and clamps to a positive integer', () => {
+  it('repairs maxConcurrent strings and keeps zero as runtime default', () => {
     expect(diagnoseConfig({ maxConcurrent: '8' }).fixed['maxConcurrent']).toBe(8);
-    expect(diagnoseConfig({ maxConcurrent: 0 }).fixed['maxConcurrent']).toBe(1);
+    expect(diagnoseConfig({ maxConcurrent: 0 }).fixed['maxConcurrent']).toBe(0);
     expect('maxConcurrent' in diagnoseConfig({ maxConcurrent: 'lots' }).fixed).toBe(false);
   });
 

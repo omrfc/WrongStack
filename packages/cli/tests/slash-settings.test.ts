@@ -91,6 +91,15 @@ describe('/settings slash command', () => {
     expect(text).toContain('/settings fs-access unrestricted|project');
   });
 
+  it('bare /settings shows materialized defaults and the active persistence target', async () => {
+    const { ctx } = makeCtx({ configScope: 'project' });
+    const res = await buildSettingsCommand(ctx).run!('');
+    const text = stripAnsi(res!.message!);
+
+    expect(text).toContain('max-concurrent:     4');
+    expect(text).toContain('Persisted to <project>/.wrongstack/config.json');
+  });
+
   it('view reflects a configured project-only filesystem scope', async () => {
     const { ctx } = makeCtx({ tools: { restrictToProjectRoot: true } });
     const res = await buildSettingsCommand(ctx).run!('');
@@ -125,6 +134,15 @@ describe('/settings slash command', () => {
     const { ctx } = makeCtx();
     const cmd = buildSettingsCommand(ctx);
     expect(cmd.help).toContain('fs-access unrestricted|project');
+  });
+
+  it('token-saving persists features.tokenSavingMode', async () => {
+    const { ctx, globalConfig } = makeCtx();
+    const res = await buildSettingsCommand(ctx).run!('token-saving light');
+    expect(stripAnsi(res!.message!)).toContain('token-saving → light');
+
+    const written = JSON.parse(readFileSync(globalConfig, 'utf8'));
+    expect(written.features.tokenSavingMode).toBe('light');
   });
 
   it('bare /settings shows the circuit breaker (default: off)', async () => {
