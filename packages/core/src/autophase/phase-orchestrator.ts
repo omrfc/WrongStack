@@ -387,6 +387,25 @@ export class PhaseOrchestrator {
     await this.keepWorktreeForReview(phase);
   }
 
+  /**
+   * A phase whose tasks all succeeded was marked `completed` and queued for
+   * merge, but the merge back into the base branch failed. Its work is NOT
+   * integrated, so correct the graph: move the phase out of `completedPhaseIds`
+   * into `failedPhaseIds` and flip its status to `failed`. Without this the
+   * persisted graph (and the board) would claim the phase succeeded while a
+   * `phase.failed` event fired — an inconsistency that hides un-merged work.
+   * Idempotent: safe to call more than once for the same phase.
+   */
+  private markPhaseMergeFailed(phase: PhaseNode, error: string): void {
+    if (phase.status !== 'failed') {
+      this.graph.completedPhaseIds = this.graph.completedPhaseIds.filter((id) => id !== phase.id);
+      this.updatePhaseStatus(phase, 'failed');
+    }
+    if (!this.graph.failedPhaseIds.includes(phase.id)) this.graph.failedPhaseIds.push(phase.id);
+    this.emit('phase.failed', { phaseId: phase.id, name: phase.name, error });
+    this.ctx.onPhaseFail?.(phase, new Error(error));
+  }
+
   /** Trim long verifier output so it fits cleanly in an event/error message. */
   private truncate(text: string, max = 500): string {
     const t = text.trim();
@@ -421,8 +440,9 @@ export class PhaseOrchestrator {
       this.mergeQueue = this.mergeQueue
         .then(() => this.mergeOne(phase, handle))
         .catch((err) => {
-          // Log and keep the queue alive — a failed merge must not
-          // poison the chain and silently stop all subsequent merges.
+          // Defensive backstop: mergeOne handles its own errors, so this only
+          // fires if it throws unexpectedly. Keep the queue alive (a failed
+          // merge must not poison the chain) and correct the graph state.
           const msg = toErrorMessage(err);
           console.error(JSON.stringify({
             level: 'error',
@@ -431,7 +451,7 @@ export class PhaseOrchestrator {
             message: msg,
             timestamp: new Date().toISOString(),
           }));
-          this.emit('phase.failed', { phaseId: phase.id, name: phase.name, error: msg });
+          this.markPhaseMergeFailed(phase, msg);
         });
       await this.mergeQueue;
     })();
@@ -481,11 +501,9 @@ export class PhaseOrchestrator {
         worktreeDir: handle.dir,
         error: toErrorMessage(err),
       });
-      this.emit('phase.failed', {
-        phaseId: phase.id,
-        name: phase.name,
-        error: `worktree merge failed: ${toErrorMessage(err)}`,
-      });
+      // The merge failed → the phase's work never reached base. Reflect that in
+      // the graph, not just in metadata + a stray event (see markPhaseMergeFailed).
+      this.markPhaseMergeFailed(phase, `worktree merge failed: ${toErrorMessage(err)}`);
     }
   }
 

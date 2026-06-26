@@ -210,6 +210,24 @@ describe('PhaseOrchestrator — phase-level error + verify edge cases', () => {
     const phase = Array.from(graph.phases.values())[0]!;
     expect(phase.metadata?.integrationStatus).toBe('merge_failed');
   });
+
+  it('a failed merge corrects the graph: phase becomes failed, not falsely completed', async () => {
+    const graph = await singlePhase();
+    const failedPhases: string[] = [];
+    const orch = new PhaseOrchestrator({
+      graph,
+      ctx: { executeTask: async () => {}, onPhaseFail: (p) => failedPhases.push(p.id) },
+      worktrees: throwingMergeWorktrees(),
+      autonomous: false,
+    });
+    await orch.start();
+    const phase = Array.from(graph.phases.values())[0]!;
+    // The phase's work never reached base, so it must not read as completed.
+    expect(phase.status).toBe('failed');
+    expect(graph.failedPhaseIds).toContain(phase.id);
+    expect(graph.completedPhaseIds).not.toContain(phase.id);
+    expect(failedPhases).toContain(phase.id); // onPhaseFail fired (host persists on this)
+  });
 });
 
 describe('PhaseOrchestrator — accessors + noop event bus', () => {
