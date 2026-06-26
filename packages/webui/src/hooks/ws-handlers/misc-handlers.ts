@@ -25,6 +25,7 @@ export function handleAutoPhaseState(msg: WSServerMessage) {
     overallPercent: typeof p.overallPercent === 'number' ? p.overallPercent : undefined,
     autonomous: typeof p.autonomous === 'boolean' ? p.autonomous : undefined,
     title: typeof p.title === 'string' ? p.title : undefined,
+    goal: typeof p.goal === 'string' ? p.goal : undefined,
     status,
     lastError: status === 'failed' ? useAutoPhaseStore.getState().lastError : null,
   });

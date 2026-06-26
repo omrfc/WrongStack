@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { useAutoPhaseStore, useWorktreeStore } from '@/stores';
+import { useAutoPhaseStore, useChatStore, useWorktreeStore } from '@/stores';
 import { cn } from '@/lib/utils';
 import { BoardView } from './BoardView';
 import { WorktreeGraph } from './WorktreeGraph';
 import { WorktreeLanes } from './WorktreeLanes';
-import { Layers, Play, Rocket, X, Zap } from 'lucide-react';
+import { Layers, Loader2, Pause, Play, Rocket, Square, X, Zap } from 'lucide-react';
 import { Button } from './ui/button';
 
 /**
@@ -25,6 +25,7 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
   const overallPercent = useAutoPhaseStore((s) => s.overallPercent);
   const autonomous = useAutoPhaseStore((s) => s.autonomous);
   const title = useAutoPhaseStore((s) => s.title);
+  const goalText = useAutoPhaseStore((s) => s.goal);
   const status = useAutoPhaseStore((s) => s.status);
   const lastError = useAutoPhaseStore((s) => s.lastError);
   const graphs = useAutoPhaseStore((s) => s.graphs);
@@ -38,23 +39,56 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
   const baseBranch = useWorktreeStore((s) => s.baseBranch);
 
   const [goal, setGoal] = useState('');
-  const [starting, setStarting] = useState(false);
+  // The goal we submitted, kept until the first phase state arrives so the
+  // start screen can show a persistent "planning…" state instead of silently
+  // resetting the form (which read as "nothing happened").
+  const [planningGoal, setPlanningGoal] = useState<string | null>(null);
   const [showGraph, setShowGraph] = useState(false);
 
   const hasPhases = phases.length > 0;
+  const planning = planningGoal != null && !hasPhases;
 
-  const handleStart = useCallback(async () => {
+  // Phases arrived (or the run was cleared) → planning is over.
+  useEffect(() => {
+    if (hasPhases) setPlanningGoal(null);
+  }, [hasPhases]);
+
+  const handleStart = useCallback(() => {
     const g = goal.trim();
-    if (!g || starting) return;
-    setStarting(true);
-    await new Promise((r) => setTimeout(r, 100));
+    if (!g || planningGoal != null) return;
+    // Echo the goal into the chat transcript and acknowledge it, so the run is
+    // traceable in chat history and the submit gives clear feedback.
+    const chat = useChatStore.getState();
+    chat.addMessage({ role: 'user', content: g });
+    chat.addMessage({
+      role: 'assistant',
+      content: `🚀 **AutoPhase** — got it. Planning phases for your goal now…`,
+    });
+    setPlanningGoal(g);
+    setGoal('');
     client?.send?.({ type: 'autophase.start', payload: { title: g, autonomous: true } });
-    setStarting(false);
-  }, [goal, starting, client]);
+  }, [goal, planningGoal, client]);
+
+  const handleCancelPlanning = useCallback(() => {
+    client?.send?.({ type: 'autophase.stop', payload: {} });
+    setPlanningGoal(null);
+  }, [client]);
 
   const handleToggleAutonomous = useCallback(() => {
     client?.send?.({ type: 'autophase.toggleAutonomous', payload: {} });
   }, [client]);
+
+  const handlePauseResume = useCallback(() => {
+    client?.send?.(
+      status === 'paused' ? { type: 'autophase.resume', payload: {} } : { type: 'autophase.pause', payload: {} },
+    );
+  }, [client, status]);
+
+  const handleStop = useCallback(() => {
+    client?.send?.({ type: 'autophase.stop', payload: {} });
+  }, [client]);
+
+  const isLive = status === 'running' || status === 'paused';
 
   const handleSelectBoard = useCallback(
     (graphId: string) => {
@@ -130,13 +164,73 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
               <Zap className="h-3.5 w-3.5" /> {autonomous ? 'Autonomous' : 'Manual'}
             </button>
           )}
+          {isLive && (
+            <>
+              <button
+                type="button"
+                onClick={handlePauseResume}
+                title={status === 'paused' ? 'Resume the run' : 'Pause the run'}
+                className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {status === 'paused' ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+                {status === 'paused' ? 'Resume' : 'Pause'}
+              </button>
+              <button
+                type="button"
+                onClick={handleStop}
+                title="Stop the run — aborts in-flight agents immediately"
+                className="inline-flex items-center gap-1 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" /> Stop
+              </button>
+            </>
+          )}
           <Button variant="ghost" size="icon" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         </div>
       </header>
 
-      {!hasPhases ? (
+      {/* Goal block — the operator's full prompt, shown verbatim and separate
+          from the short title heading (not a dropdown / not a card tile). */}
+      {hasPhases && goalText && (
+        <div className="shrink-0 border-b border-border/60 bg-muted/20 px-4 py-2.5">
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <Rocket className="h-3 w-3" /> Goal
+          </div>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{goalText}</p>
+        </div>
+      )}
+
+      {hasPhases ? (
+        /* ── Interactive kanban board ── */
+        <div className="flex min-h-0 flex-1">
+          <BoardView />
+        </div>
+      ) : planning ? (
+        /* ── Planning state — goal accepted, phases not built yet ── */
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="max-w-lg w-full space-y-5 text-center">
+            <Loader2 className="h-10 w-10 mx-auto animate-spin text-primary/70" />
+            <div className="space-y-1">
+              <h2 className="text-xl font-semibold">Planning phases…</h2>
+              <p className="text-sm text-muted-foreground">
+                Your goal was received. WrongStack is breaking it into phases and tasks — the board
+                appears here the moment the plan is ready.
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-card px-4 py-3 text-left">
+              <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <Rocket className="h-3 w-3" /> Goal
+              </div>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{planningGoal}</p>
+            </div>
+            <Button variant="outline" onClick={handleCancelPlanning} className="gap-2">
+              <Square className="h-4 w-4 fill-current" /> Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
         /* ── Start screen ── */
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="max-w-lg w-full space-y-6">
@@ -164,9 +258,9 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
             />
 
             <div className="flex items-center gap-3">
-              <Button onClick={handleStart} disabled={!goal.trim() || starting} className="flex-1 gap-2">
+              <Button onClick={handleStart} disabled={!goal.trim()} className="flex-1 gap-2">
                 <Play className="h-4 w-4" />
-                {starting ? 'Starting…' : 'Start AutoPhase'}
+                Start AutoPhase
               </Button>
             </div>
 
@@ -174,11 +268,6 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
               Ctrl+Enter to start · phases run in isolated worktrees with agents picking up tasks
             </p>
           </div>
-        </div>
-      ) : (
-        /* ── Interactive kanban board ── */
-        <div className="flex min-h-0 flex-1">
-          <BoardView />
         </div>
       )}
 

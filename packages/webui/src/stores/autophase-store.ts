@@ -19,6 +19,8 @@ interface AutoPhaseState {
   overallPercent: number;
   autonomous: boolean;
   title: string | null;
+  /** Full operator prompt that started the run (title is only a short heading). */
+  goal: string | null;
   status: AutoPhaseStatus;
   lastEvent: string | null;
   lastError: string | null;
@@ -39,6 +41,7 @@ interface AutoPhaseState {
     overallPercent?: number | undefined;
     autonomous?: boolean | undefined;
     title?: string | null | undefined;
+    goal?: string | null | undefined;
     status?: AutoPhaseStatus | undefined;
     lastEvent?: string | null | undefined;
     lastError?: string | null | undefined;
@@ -54,6 +57,7 @@ export const useAutoPhaseStore = create<AutoPhaseState>()((set) => ({
   overallPercent: 0,
   autonomous: false,
   title: null,
+  goal: null,
   status: 'idle',
   lastEvent: null,
   lastError: null,
@@ -67,6 +71,7 @@ export const useAutoPhaseStore = create<AutoPhaseState>()((set) => ({
       overallPercent: patch.overallPercent ?? prev.overallPercent,
       autonomous: patch.autonomous ?? prev.autonomous,
       title: patch.title !== undefined ? patch.title : prev.title,
+      goal: patch.goal !== undefined ? patch.goal : prev.goal,
       status: patch.status ?? prev.status,
       lastEvent: patch.lastEvent !== undefined ? patch.lastEvent : prev.lastEvent,
       lastError: patch.lastError !== undefined ? patch.lastError : prev.lastError,
@@ -80,6 +85,7 @@ export const useAutoPhaseStore = create<AutoPhaseState>()((set) => ({
       overallPercent: 0,
       autonomous: false,
       title: null,
+      goal: null,
       status: 'idle',
       lastEvent: null,
       lastError: null,
