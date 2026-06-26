@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { EventBus } from '../../src/kernel/events.js';
 import { AutoPhaseRunner } from '../../src/autophase/auto-phase-runner.js';
 import type { PhaseTemplate } from '../../src/autophase/types.js';
 import type { WorktreeHandle, WorktreeManager } from '../../src/worktree/worktree-manager.js';
@@ -121,5 +122,22 @@ describe('AutoPhaseRunner', () => {
     expect(phase.status).toBe('completed');
     expect(verifies).toBe(2);
     expect(repairs).toBe(1);
+  });
+
+  it('subscribes to a real EventBus without losing `this` (regression)', async () => {
+    // Regression: the runner used `const onUntyped = events.on as never`, which
+    // detached the method — calling it then threw "Cannot read properties of
+    // undefined (reading 'listeners')" on a real EventBus (plain prototype
+    // methods). start() must register its graph.completed/failed listeners on
+    // the bus and run to completion without throwing.
+    const events = new EventBus();
+    const runner = new AutoPhaseRunner({
+      title: 'Runner events',
+      phases: phases(),
+      events,
+      executeTask: async () => {},
+    });
+    const graph = await runner.start();
+    expect(Array.from(graph.phases.values())[0]!.status).toBe('completed');
   });
 });

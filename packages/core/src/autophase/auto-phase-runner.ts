@@ -1,4 +1,3 @@
-import type { EventBus } from '../kernel/events.js';
 import { PhaseGraphBuilder } from './phase-graph-builder.js';
 import { PhaseOrchestrator } from './phase-orchestrator.js';
 import type {
@@ -163,13 +162,17 @@ export class AutoPhaseRunner {
     }
     this.maxRunTimer?.unref?.();
 
-    // Register event listeners using the untyped surface to handle custom events
+    // Register event listeners using the untyped surface to handle custom events.
+    // Call through the bus as the receiver — detaching the method (`const f =
+    // events.on`) loses `this`, and EventBus.on is a plain prototype method, so
+    // the detached call throws on `this.listeners`. The arrow wrapper keeps it
+    // bound to the bus.
     if (this.opts.events) {
-      const events = this.opts.events as EventBus;
-      const onUntyped = events.on as never as (
-        event: string,
-        handler: (payload: unknown) => void,
-      ) => () => void;
+      const bus = this.opts.events as unknown as {
+        on(event: string, handler: (payload: unknown) => void): () => void;
+      };
+      const onUntyped = (event: string, handler: (payload: unknown) => void): (() => void) =>
+        bus.on(event, handler);
       // Store the unsubscribe functions for proper cleanup
       this.unsubscribeCompleted = onUntyped('graph.completed', this.graphCompletedHandler);
       this.unsubscribeFailed = onUntyped('graph.failed', this.graphFailedHandler);

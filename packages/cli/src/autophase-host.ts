@@ -585,15 +585,19 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
         maxConcurrentTasks: resolveTaskConcurrency(),
       });
 
-      // Re-persist on terminal graph events.
-      const onUntyped = deps.events.on as never as (
-        event: string,
-        handler: (payload: unknown) => void,
-      ) => void;
-      const offUntyped = deps.events.off as never as (
-        event: string,
-        handler: (payload: unknown) => void,
-      ) => void;
+      // Re-persist on terminal graph events. NOTE: call through `deps.events`
+      // as the receiver — detaching the method (`const f = deps.events.on`)
+      // loses `this`, and EventBus.on/off are plain prototype methods, so the
+      // detached call throws "Cannot read properties of undefined (reading
+      // 'listeners')". The arrow wrappers keep `this` bound to the bus.
+      const busOn = deps.events as unknown as {
+        on(event: string, handler: (payload: unknown) => void): void;
+        off(event: string, handler: (payload: unknown) => void): void;
+      };
+      const onUntyped = (event: string, handler: (payload: unknown) => void): void =>
+        busOn.on(event, handler);
+      const offUntyped = (event: string, handler: (payload: unknown) => void): void =>
+        busOn.off(event, handler);
       const finalizeActiveRun = () => {
         if (active?.graph.id !== graph.id) return;
         active.unsubscribe();
