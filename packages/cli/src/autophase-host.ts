@@ -17,8 +17,18 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+/** Async `fs.access`-style existence check — never throws. */
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 import {
   assignNickname,
   AutoPhasePlanner,
@@ -214,20 +224,33 @@ function runCmd(
   });
 }
 
-/** Detect the project's package manager from lockfiles at the repo root. */
-function detectPackageManager(root: string): string {
-  if (existsSync(join(root, 'pnpm-lock.yaml'))) return 'pnpm';
-  if (existsSync(join(root, 'yarn.lock'))) return 'yarn';
-  if (existsSync(join(root, 'bun.lockb'))) return 'bun';
+/**
+ * Detect the project's package manager from lockfiles at the repo root.
+ * Async so the verify-step boot path doesn't block the event loop on `stat`
+ * for missing files in CWD or in monorepo setups where the lockfile lives
+ * several levels up.
+ */
+async function detectPackageManager(root: string): Promise<string> {
+  // Probe all three in parallel — every branch is a single stat each, and the
+  // failure mode for a missing file is identical (EACCES/ENOENT). The first
+  // hit wins; we don't care which one because only one lockfile is canonical
+  // per project.
+  const [pnpm, yarn, bun] = await Promise.all([
+    pathExists(join(root, 'pnpm-lock.yaml')),
+    pathExists(join(root, 'yarn.lock')),
+    pathExists(join(root, 'bun.lockb')),
+  ]);
+  if (pnpm) return 'pnpm';
+  if (yarn) return 'yarn';
+  if (bun) return 'bun';
   return 'npm';
 }
 
 /** Read package.json scripts for a directory (empty on any failure). */
-function readScripts(cwd: string): Record<string, string> {
+async function readScripts(cwd: string): Promise<Record<string, string>> {
   try {
-    const pkg = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) as {
-      scripts?: Record<string, string>;
-    };
+    const raw = await readFile(join(cwd, 'package.json'), 'utf8');
+    const pkg = JSON.parse(raw) as { scripts?: Record<string, string> };
     return pkg.scripts ?? {};
   } catch {
     return {};
@@ -398,8 +421,8 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
     // Script commands need resolvable node_modules. A nested git worktree resolves
     // upward to the repo-root node_modules, so accept either location.
     if (
-      !existsSync(join(cwd, 'node_modules')) &&
-      !existsSync(join(deps.projectRoot, 'node_modules'))
+      !(await pathExists(join(cwd, 'node_modules'))) &&
+      !(await pathExists(join(deps.projectRoot, 'node_modules')))
     ) {
       return { ok: true, output: 'verify skipped: node_modules not found' };
     }
@@ -412,8 +435,8 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
         : { ok: false, output: `[verify] exited ${res.code}\n${res.out}` };
     }
 
-    const pm = detectPackageManager(deps.projectRoot);
-    const scripts = readScripts(cwd);
+    const pm = await detectPackageManager(deps.projectRoot);
+    const scripts = await readScripts(cwd);
     const steps = (['typecheck', 'lint'] as const).filter((s) => typeof scripts[s] === 'string');
     if (steps.length === 0) return { ok: true, output: 'verify skipped: no typecheck/lint script' };
 
