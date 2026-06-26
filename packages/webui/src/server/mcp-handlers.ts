@@ -1,6 +1,6 @@
 /**
  * MCP management handlers for the WebUI server (both the standalone
- * `wrongstack webui` server and the CLI's embedded `--webui` server).
+ * `wstackui` server and the CLI's embedded `--webui` server).
  *
  * These are thin WebSocket translators over the shared, surface-agnostic
  * management core in `@wrongstack/mcp` (`manage.ts`) — the SAME core the REPL

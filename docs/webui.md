@@ -8,7 +8,7 @@ terminal REPL shares the browser's agent:
 
 | Launch | Terminal REPL | Browser UI | Agent |
 |---|---|---|---|
-| `webui` (standalone binary) | — | ✅ | boots its **own** agent for the cwd |
+| `wstackui` (standalone binary) | — | ✅ | boots its **own** agent for the cwd |
 | `wrongstack --webui` | ✅ | ✅ | **same** live agent/session as the terminal |
 
 Use the standalone binary for a pure browser experience; use `wrongstack --webui`
@@ -45,9 +45,9 @@ Both ports **auto-advance** to the next free port if the requested one is taken,
 you can start several instances without picking ports by hand:
 
 ```bash
-cd /path/A && webui            # → http 3456 / ws 3457
-cd /path/B && webui            # → http 3458 / ws 3459 (auto)
-cd /path/C && webui            # → http 3460 / ws 3461 (auto)
+cd /path/A && wstackui         # → http 3456 / ws 3457
+cd /path/B && wstackui         # → http 3458 / ws 3459 (auto)
+cd /path/C && wstackui         # → http 3460 / ws 3461 (auto)
 ```
 
 Each instance:
@@ -60,8 +60,8 @@ To pin ports instead (e.g. behind a reverse proxy), set them explicitly and disa
 auto-advance:
 
 ```bash
-webui --host 0.0.0.0 --port 8080 --ws-port 8081 --token "$WEBUI_TOKEN"
-WEBUI_STRICT_PORT=1 webui --port 8080 --ws-port 8081   # fail loudly if taken
+wstackui --host 0.0.0.0 --port 8080 --ws-port 8081 --token "$WEBUI_TOKEN"
+WEBUI_STRICT_PORT=1 wstackui --port 8080 --ws-port 8081   # fail loudly if taken
 ```
 
 ## Running-instance registry
@@ -83,7 +83,7 @@ can see which ports are open for which project:
 List them without booting a server:
 
 ```bash
-webui --list      # or: webui ls / webui -l
+wstackui --list      # or: wstackui ls / wstackui -l
 ```
 
 ```
@@ -106,16 +106,16 @@ the same registry as standalone ones.
 
 | Flag (CLI `--webui`) | Standalone equiv. | Effect |
 |---|---|---|
-| `--webui` | `webui` | start the server |
-| `--host <h>` / `--webui-host <h>` | `webui --host <h>` | bind host/interface (`0.0.0.0` for LAN/Tailscale) |
-| `--webui-port <n>` / `--http-port <n>` | `webui --port <n>` | HTTP frontend port |
-| `--ws-port <n>` / `--port <n>` | `webui --ws-port <n>` | WebSocket backend port (`--port` kept for CLI compatibility) |
-| `--webui-token <t>` | `webui --token <t>` | fixed access token/password instead of a random process token |
-| `--webui-public-url <url>` / `--public-url <url>` | `webui --public-url <url>` | browser-facing HTTP URL for tunnels/proxies |
-| `--webui-public-ws-url <url>` / `--public-ws-url <url>` | `webui --public-ws-url <url>` | browser-facing `ws://` or `wss://` URL for tunnels/proxies |
-| `--webui-require-token` / `--require-token` | `webui --require-token` | require the token even on loopback binds |
-| `--open` | `webui --open` / `WEBUI_OPEN=1` | open the browser after the server is ready |
-| — | `webui --list` | print running instances and exit |
+| `--webui` | `wstackui` | start the server |
+| `--host <h>` / `--webui-host <h>` | `wstackui --host <h>` | bind host/interface (`0.0.0.0` for LAN/Tailscale) |
+| `--webui-port <n>` / `--http-port <n>` | `wstackui --port <n>` | HTTP frontend port |
+| `--ws-port <n>` / `--port <n>` | `wstackui --ws-port <n>` | WebSocket backend port (`--port` kept for CLI compatibility) |
+| `--webui-token <t>` | `wstackui --token <t>` | fixed access token/password instead of a random process token |
+| `--webui-public-url <url>` / `--public-url <url>` | `wstackui --public-url <url>` | browser-facing HTTP URL for tunnels/proxies |
+| `--webui-public-ws-url <url>` / `--public-ws-url <url>` | `wstackui --public-ws-url <url>` | browser-facing `ws://` or `wss://` URL for tunnels/proxies |
+| `--webui-require-token` / `--require-token` | `wstackui --require-token` | require the token even on loopback binds |
+| `--open` | `wstackui --open` / `WEBUI_OPEN=1` | open the browser after the server is ready |
+| — | `wstackui --list` | print running instances and exit |
 
 | Env var | Default | Effect |
 |---|---|---|
@@ -151,7 +151,7 @@ the same registry as standalone ones.
 
 ```bash
 # Tailscale/LAN: expose both HTTP and WS ports on the machine's Tailscale IP.
-WEBUI_TOKEN="$(openssl rand -hex 16)" webui --host 0.0.0.0 --port 8080 --ws-port 8081
+WEBUI_TOKEN="$(openssl rand -hex 16)" wstackui --host 0.0.0.0 --port 8080 --ws-port 8081
 
 # CLI-embedded WebUI, same live agent as the terminal.
 wstack --webui --host 0.0.0.0 --webui-port 8080 --ws-port 8081 --webui-token "$WEBUI_TOKEN"
@@ -165,7 +165,7 @@ export WEBUI_TOKEN="$(openssl rand -hex 16)"
 WEBUI_REQUIRE_TOKEN=1 \
 WEBUI_PUBLIC_URL=https://wrongstack.example.com \
 WEBUI_PUBLIC_WS_URL=wss://wrongstack-ws.example.com \
-webui --host 127.0.0.1 --port 8080 --ws-port 8081 --token "$WEBUI_TOKEN"
+wstackui --host 127.0.0.1 --port 8080 --ws-port 8081 --token "$WEBUI_TOKEN"
 ```
 
 Example `cloudflared` ingress:

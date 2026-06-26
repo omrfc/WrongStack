@@ -290,7 +290,7 @@ handlers stop being importable directly from this file.
     ~17,000-LOC CLI test suite plus the 5 existing
     `webui-server-*.test.ts` files plus the new integration test).
   - A 30-second manual smoke test: launch
-    `node packages/cli/dist/index.js --webui --port 0`, open the
+    `node packages/cli/dist/index.js --webui --ws-port 0`, open the
     printed `http://127.0.0.1:<port>/` URL, send one provider-add
     WS message via the browser devtools, and confirm the WebUI
     renders the new provider.

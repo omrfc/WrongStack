@@ -3,7 +3,7 @@ import type { SddSubtaskSpec } from './sdd-parallel-run.js';
 
 /**
  * Control surface over a live SDD run, exposed to every steering surface
- * (TUI, CLI-hosted webui in-process; standalone webui via a control file the
+ * (TUI, CLI-hosted WebUI in-process; standalone WebUI via a control file the
  * run drains). The run itself stays CLI-owned — this is the only sanctioned
  * way to pause / retry / reassign from outside the run loop.
  */

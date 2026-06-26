@@ -679,7 +679,7 @@ export WRONGSTACK_HQ_URL=http://localhost:3499
 wstack repl
 
 # Terminal 4 — WebUI server (separate project)
-WRONGSTACK_HQ_URL=http://localhost:3499 wstack webui --port 4000
+WRONGSTACK_HQ_URL=http://localhost:3499 wstackui --port 4000
 ```
 
 A client only needs to be in the same network as HQ; it does not need to

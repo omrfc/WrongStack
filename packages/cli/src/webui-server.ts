@@ -677,7 +677,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     );
   }
 
-  // Record this instance so it shows up in `webui --list` /
+  // Record this instance so it shows up in `wstackui --list` /
   // ~/.wrongstack/webui-instances.json alongside standalone instances.
   const registryBaseDir = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : undefined;
   if (opts.projectRoot) {
@@ -1491,7 +1491,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
 
   // Shared skills handlers context. The CLI passes its own skillLoader; the
   // installer (backing install/uninstall/update) is constructed here the same
-  // way the standalone webui server does. Absent skillLoader ⇒ skills feature
+  // way the standalone WebUI server does. Absent skillLoader ⇒ skills feature
   // disabled and the handlers respond with an "enabled: false" payload.
   const skillsProjectRoot =
     opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';

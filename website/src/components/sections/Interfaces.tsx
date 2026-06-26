@@ -105,7 +105,7 @@ const surfaces: Surface[] = [
     ],
     preview: (
       <div className="space-y-1.5">
-        <Prompt>webui</Prompt>
+        <Prompt>wstackui</Prompt>
         <div className="space-y-0.5 pl-4 text-zinc-400">
           <div>
             <Out tone="green">▸ backend</Out> 127.0.0.1:3457
@@ -113,7 +113,7 @@ const surfaces: Surface[] = [
           <div>
             <Out tone="green">▸ ui</Out> http://localhost:3456
           </div>
-          <div className="text-zinc-500">WS_HOST=0.0.0.0 webui # expose on LAN</div>
+          <div className="text-zinc-500">WS_HOST=0.0.0.0 wstackui # expose on LAN</div>
         </div>
         <Prompt>
           <span className="caret" />

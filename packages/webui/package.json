@@ -50,7 +50,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "webui": "./dist/server/entry.js"
+    "wstackui": "./dist/server/entry.js"
   },
   "scripts": {
     "dev": "vite",

@@ -231,7 +231,7 @@ so contributors know where each message-type group lives.
     `ws-auth.test.ts: 411 lines`, and the new dispatcher
     integration test).
   - A 30-second manual smoke test: launch
-    `node packages/cli/dist/index.js --webui --port 0`, open
+    `node packages/cli/dist/index.js --webui --ws-port 0`, open
     the printed URL, click through every UI panel (agent,
     brain, session, plan, tasks, todos, goal, cost, token,
     fleet, mailbox, worktree, autophase, files, memory), and

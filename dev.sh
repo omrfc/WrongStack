@@ -13,6 +13,7 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEBSOCKET_PORT=3457
 WEBUI_PORT=3456
+EMBEDDED_WEBUI_PORT=3458
 
 echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║     WrongStack Dev Environment          ║${NC}"
@@ -48,7 +49,7 @@ echo ""
 
 if [[ "$BACKGROUND" == "true" ]]; then
     echo -e "${GREEN}[3/3]${NC} Starting CLI + WebSocket server in background..."
-    node packages/cli/dist/index.js webui --port $WEBSOCKET_PORT &
+    node packages/cli/dist/index.js --webui --ws-port $WEBSOCKET_PORT --webui-port $EMBEDDED_WEBUI_PORT &
     CLI_PID=$!
 
     echo -e "${GREEN}[3/3]${NC} Starting WebUI (Vite) in background..."
@@ -76,7 +77,7 @@ else
     trap cleanup SIGINT SIGTERM
 
     # Start WebSocket server in background (with log prefix)
-    node packages/cli/dist/index.js webui --port $WEBSOCKET_PORT 2>&1 &
+    node packages/cli/dist/index.js --webui --ws-port $WEBSOCKET_PORT --webui-port $EMBEDDED_WEBUI_PORT 2>&1 &
     WS_PID=$!
     echo -e "  ${CYAN}WebSocket${NC} started (PID: $WS_PID)"
 

@@ -13,7 +13,7 @@ import {
  * Three concerns pulled out of the ~3000-line `runWebUI` body:
  *
  *   - `registerWebuiInstance` — record this embedded WebUI in the shared
- *     running-instance registry (so `webui --list` sees it).
+ *     running-instance registry (so `wstackui --list` sees it).
  *   - `announceWebuiReady` — log the ready banner and pop the browser
  *     once the HTTP server is listening.
  *   - `createWebuiShutdown` + `registerWebuiSignalHandlers` — the

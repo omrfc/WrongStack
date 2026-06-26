@@ -30,7 +30,7 @@ import type { WsCommon } from './index.js';
  * which format is canonical.
  *
  * The shared handlers live at `@wrongstack/webui/server/handlers` and are
- * used by the standalone webui server (`startWebUI`).
+ * used by the standalone WebUI server (`startWebUI`).
  */
 
 export interface WorklistContext extends WsCommon {

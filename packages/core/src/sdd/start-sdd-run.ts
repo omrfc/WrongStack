@@ -142,7 +142,7 @@ export function startSddRun(opts: StartSddRunOptions): SddRunHandle {
     isRunning: () => run.isRunning(),
   });
 
-  // Cross-process control channel: any board surface (e.g. the standalone webui
+  // Cross-process control channel: any board surface (e.g. the standalone WebUI
   // in another process) appends a command to <runId>.control.jsonl; we drain +
   // apply it here so this run stays the single driver.
   const drainMs = opts.controlDrainMs ?? 500;

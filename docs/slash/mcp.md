@@ -26,7 +26,7 @@ MCP servers can be managed from every surface, all backed by the **same**
 `MCPRegistry`:
 
 - **REPL / TUI** — the `/mcp` command above (`mcp-utils.ts`).
-- **WebUI** — Settings → MCP panel. Works in both `wrongstack webui` (standalone
+- **WebUI** — Settings → MCP panel. Works in both `wstackui` (standalone
   server) and `wrongstack --webui` (CLI-embedded server). Add/remove/enable/
   disable/restart/discover and live status + tool names are wired to a real
   registry. SSE / streamable-http servers (e.g. `context7`) persist their `url`.

@@ -98,7 +98,7 @@ through `ws-handlers/index.ts`, add a router case.
 
 ## Notes
 
-- The standalone webui server (`packages/webui/src/server/index.ts`) is a
+- The standalone WebUI server (`packages/webui/src/server/index.ts`) is a
   near-duplicate that is further along its own extraction (`provider-keys`,
   `provider-config-io`, `lifecycle`, `setup-events`, `ws-utils`, …). It's
   the reference for shapes the CLI side can mirror.

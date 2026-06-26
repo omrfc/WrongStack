@@ -2121,11 +2121,11 @@ discoverable instead of implicit.
 - **WebUI multiple instances.** Run any number of WebUI servers at once (one per
   project, or several per project). The HTTP (`PORT`, 3456) and WebSocket
   (`WS_PORT`, 3457) ports now **auto-advance** past anything already bound, so
-  successive `webui` launches land on tidy adjacent pairs (3456/3457, 3458/3459,
+  successive `wstackui` launches land on tidy adjacent pairs (3456/3457, 3458/3459,
   …) with no manual port juggling. `WEBUI_STRICT_PORT=1` disables auto-advance.
 - **WebUI instance registry.** Every running instance records itself in
   `~/.wrongstack/webui-instances.json` (port ↔ project path ↔ pid, self-healing on
-  crash via PID liveness pruning, atomic writes). `webui --list` (alias `ls` / `-l`)
+  crash via PID liveness pruning, atomic writes). `wstackui --list` (alias `ls` / `-l`)
   prints them without starting a server. CLI-embedded (`--webui`) instances share
   the same registry.
 - **`wrongstack --webui` now serves the browser UI.** Previously it only opened a
@@ -2134,7 +2134,7 @@ discoverable instead of implicit.
   browser share the same live agent/session). Reuses the webui package's
   static-serve / port / registry building blocks via a new `@wrongstack/webui/server`
   export surface.
-- **`--open` flag** (CLI `--webui --open`, standalone `webui --open` / `WEBUI_OPEN=1`)
+- **`--open` flag** (CLI `--webui --open`, standalone `wstackui --open` / `WEBUI_OPEN=1`)
   pops the default browser to the served URL once the server is ready.
 - **`docs/webui.md`** — full Web UI reference (launch modes, ports, registry,
   flags/env, security, internals). README / ARCHITECTURE / AGENTS updated to match,

@@ -379,7 +379,7 @@ export async function startWebUI(
   const requireToken = opts.requireToken ?? envFlag('WEBUI_REQUIRE_TOKEN');
 
   // Port resolution. Unless WEBUI_STRICT_PORT is set, auto-advance past any port
-  // already taken by another instance so running `webui` several times "just
+  // already taken by another instance so running `wstackui` several times "just
   // works" — the real ports are then stamped into the served HTML and the
   // instance registry. Strict mode keeps the requested ports and lets bind fail
   // loudly (useful behind a reverse proxy that expects fixed ports).
@@ -2745,7 +2745,7 @@ export async function startWebUI(
     console.log(`[WebUI] HTTP server running on ${openUrl}`);
     // Optionally pop the browser open (best-effort; the URL is always printed).
     if (opts.open) openBrowser(openUrl);
-    // Record this instance so `webui --list` (and `~/.wrongstack/
+    // Record this instance so `wstackui --list` (and `~/.wrongstack/
     // webui-instances.json`) show which ports are open for which project.
     // Best-effort: a registry write failure must not affect serving.
     void registerInstance(

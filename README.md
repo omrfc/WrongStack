@@ -48,7 +48,7 @@ npm install -g wrongstack
 pnpm install -g wrongstack
 ```
 
-This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wrongstack/providers`, `@wrongstack/tools`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`, and `@wrongstack/tui`. The TUI is shipped but lazy-loaded behind `--tui`, so plain-REPL users pay no React/Ink import cost at startup. The web-based UI (`@wrongstack/webui`) is available as a separate binary (`webui`).
+This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wrongstack/providers`, `@wrongstack/tools`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`, and `@wrongstack/tui`. The TUI is shipped but lazy-loaded behind `--tui`, so plain-REPL users pay no React/Ink import cost at startup. The web-based UI (`@wrongstack/webui`) is available as a separate binary (`wstackui`).
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
@@ -70,7 +70,7 @@ After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an a
 - Signal-safe cleanup, non-TTY guard, re-entrancy guard on Enter, resize ghost mitigation
 - Real-time stage chip: `⟳ DECIDE` / `⚡ EXECUTE` / `◎ REFLECT` updates every tick during eternal/parallel runs
 
-**Web UI** (`@wrongstack/webui`): React + Radix + Tailwind frontend with a Node `ws` backend. Standalone `webui` binary serves on `3456/3457`; CLI can opt in with `wrongstack --webui`. Highlights:
+**Web UI** (`@wrongstack/webui`): React + Radix + Tailwind frontend with a Node `ws` backend. Standalone `wstackui` binary serves on `3456/3457`; CLI can opt in with `wrongstack --webui`. Highlights:
 
 - Topbar status bar: ctx% · tokens · cache hit · cost · elapsed · iteration
 - Per-message footer: token usage, Pin / Edit & resend / Retry
@@ -83,8 +83,8 @@ After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an a
 
 ```bash
 # Standalone (recommended for the full experience)
-webui                          # binds backend to 127.0.0.1:3457, serves UI on 3456
-WS_HOST=0.0.0.0 webui          # expose on the LAN
+wstackui                       # binds backend to 127.0.0.1:3457, serves UI on 3456
+WS_HOST=0.0.0.0 wstackui       # expose on the LAN
 
 # Or piggy-back on the CLI process
 wrongstack --webui
@@ -671,7 +671,7 @@ Commit this file to share project conventions with the agent across all develope
 | `@wrongstack/tui` | Ink-based TUI (lazy-loaded behind `--tui`) |
 | `@wrongstack/plug-lsp` | LSP plugin (`wrongstack-lsp-setup` binary) |
 | `@wrongstack/telegram` | Telegram plugin: send/read/notifications, `/telegram:*` slash commands |
-| `@wrongstack/webui` | Standalone web UI — `webui` binary, also via `wrongstack --webui` |
+| `@wrongstack/webui` | Standalone web UI — `wstackui` binary, also via `wrongstack --webui` |
 | `@wrongstack/plugins` | Official plugin collection — 10 plugins via subpath exports |
 
 ## Architecture

@@ -2,7 +2,7 @@
  * Unit tests for the shared skills WebSocket handlers
  * (`packages/webui/src/server/skills-handlers.ts`).
  *
- * These handlers back BOTH the standalone webui server and the CLI's
+ * These handlers back BOTH the standalone WebUI server and the CLI's
  * `--webui` embedded server. They were extracted from inlined switch cases
  * (the CLI copy had drifted to only handle `skills.list`, leaving the rest
  * as "Unhandled message type"), so these tests pin the one source of truth.
@@ -274,4 +274,3 @@ describe('handleSkillsExport', () => {
     expect((p?.zipBase64 as string).length).toBeGreaterThan(0);
   });
 });
-

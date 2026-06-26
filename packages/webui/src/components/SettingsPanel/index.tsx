@@ -304,9 +304,7 @@ export function SettingsPanel() {
                 <p className="text-xs text-muted-foreground mb-3">
                   Standalone: run <code className="bg-muted px-1 py-0.5 rounded">./dev.ps1</code>{' '}
                   from the repo root, or set WS_HOST/WS_PORT before launching{' '}
-                  <code className="bg-muted px-1 py-0.5 rounded">
-                    node packages/webui/dist/server/entry.js
-                  </code>
+                  <code className="bg-muted px-1 py-0.5 rounded">wstackui</code>
                   . Or alongside the CLI:{' '}
                   <code className="bg-muted px-1 py-0.5 rounded">wstack --webui</code>.
                 </p>
