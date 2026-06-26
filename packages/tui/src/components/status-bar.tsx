@@ -3,7 +3,7 @@ import type { EventBus, TokenCounter, AutonomyStage } from '@wrongstack/core';
 import { Box, Text, useStdout } from '../ink.js';
 import type React from 'react';
 import { Fragment } from 'react';
-import type { ChipMeta } from './statusline-picker.js';
+import type { ChipMeta, StatuslineItem } from './statusline-picker.js';
 import type { StatuslineMode } from './settings-picker.js';
 import { useEffect, useMemo, useState } from 'react';
 import { useTokenCounterRefresh } from '../hooks/use-token-counter-refresh.js';
@@ -319,8 +319,8 @@ export interface StatusBarProps {
   autonomy?: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel' | undefined;
   /** Number of tracked bash/exec processes from the process registry. */
   processCount?: number | undefined;
-  /** Items to hide from the status bar. */
-  hiddenItems?: Array<'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir' | 'brain' | 'mailbox' | 'enhance' | 'debug_stream'> | undefined;
+  /** Items to hide from the status bar. Canonical set: {@link StatuslineItem}. */
+  hiddenItems?: StatuslineItem[] | undefined;
   /** Statusline density. Detailed is the default to preserve the full multi-line display. */
   mode?: StatuslineMode | undefined;
   /** EventBus for subscribing to token.accounted events for real-time cost/token updates. */

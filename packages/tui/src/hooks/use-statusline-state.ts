@@ -19,9 +19,12 @@ import { useState } from 'react';
 export type AutonomyStage = 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel';
 
 /**
- * A statusline chip the user can hide. The canonical set — `StatusBar` and the
- * `/statusline` slash command both key off these names (including `working_dir`,
- * which some of the older inline unions had drifted out of sync on).
+ * A statusline chip the user can *persistently* hide (written to
+ * `statusline.json` and toggled by the `/statusline` command). Intentionally a
+ * subset of the picker's full {@link StatuslineItem} union: the four stream
+ * chips (brain/mailbox/enhance/debug_stream) are ephemeral/auto-expiring and
+ * are NOT persisted here — their session visibility is tracked separately via
+ * the reducer's stream-chip expiry, not this list.
  */
 export type StatuslineHiddenItem =
   | 'todos'
