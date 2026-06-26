@@ -1,6 +1,6 @@
 import { Box, type DOMElement, Text, measureElement, useStdout } from '../ink.js';
 import type React from 'react';
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, memo } from 'react';
 import { theme } from '../theme.js';
 import {
   AssistantTail,
@@ -110,8 +110,12 @@ function Scrollbar({
  *
  * Streaming tails (assistant + tool) are the last children of the content box,
  * so they participate in the scrolled content and auto-follow when pinned.
+ *
+ * Wrapped in `React.memo` so keystrokes in the input buffer don't
+ * trigger a full managed-viewport re-layout. All props are primitives
+ * or stable reducer references.
  */
-export function ScrollableHistory({
+export const ScrollableHistory = memo(function ScrollableHistory({
   entries,
   streamingText,
   toolStream,
@@ -201,7 +205,7 @@ export function ScrollableHistory({
       <Scrollbar rows={vp} offset={Math.max(0, scrollOffset)} total={totalLines} />
     </Box>
   );
-}
+});
 
 // Re-exported for convenience so app.tsx can import both from one module.
 export type { HistoryEntry };

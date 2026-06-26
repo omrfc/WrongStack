@@ -1,6 +1,6 @@
 import { Box, Static, useStdout } from '../../ink.js';
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { AssistantTail } from './assistant.js';
 import { Entry } from './entry.js';
 import { MAX_STREAM_DISPLAY_CHARS, tailForDisplay } from './utils.js';
@@ -62,8 +62,14 @@ export {
 /**
  * History component — renders committed entries via <Static> so they
  * flow into terminal scrollback, plus a live streaming assistant tail.
+ *
+ * Wrapped in `React.memo` so keystrokes in the input buffer (which
+ * change `state.buffer`/`state.cursor` in the same reducer) don't
+ * trigger an expensive full-history re-render. All props are either
+ * primitives or stable reducer references, so default shallow
+ * comparison is sufficient.
  */
-export function History({ entries, generation, streamingText, toolStream, setSuggestions, autonomyMode, autoSubmitCountdown, multiDiffSummaryThreshold }: HistoryProps): React.ReactElement {
+export const History = memo(function History({ entries, generation, streamingText, toolStream, setSuggestions, autonomyMode, autoSubmitCountdown, multiDiffSummaryThreshold }: HistoryProps): React.ReactElement {
   const { stdout } = useStdout();
   const [termSize, setTermSize] = useState({
     columns: stdout?.columns ?? 80,
@@ -113,4 +119,4 @@ export function History({ entries, generation, streamingText, toolStream, setSug
       </Box>
     </>
   );
-}
+});
