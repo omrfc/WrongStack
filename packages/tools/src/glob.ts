@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { compileGlob } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
+import { mapWithConcurrency } from './_concurrency.js';
 import { safeResolve } from './_util.js';
 
 interface GlobInput {
@@ -16,6 +17,7 @@ interface GlobOutput {
 }
 
 const DEFAULT_IGNORE = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.turbo'];
+const WALK_CONCURRENCY = 16;
 
 export const globTool: Tool<GlobInput, GlobOutput> = {
   name: 'glob',
@@ -62,6 +64,27 @@ export const globTool: Tool<GlobInput, GlobOutput> = {
 
     const results: { rel: string; mtime: number }[] = [];
     let truncated = false;
+    const pushResult = async (full: string): Promise<void> => {
+      // Bail before stat if a concurrent worker has already filled the budget —
+      // the limit is a global cap across all parallel walkers, not per-worker.
+      if (truncated || results.length >= limit) {
+        truncated = true;
+        return;
+      }
+      try {
+        const st = await fs.stat(full);
+        // Re-check after the await: another worker may have filled the budget
+        // while we were waiting on fs.stat.
+        if (truncated || results.length >= limit) {
+          truncated = true;
+          return;
+        }
+        results.push({ rel: full, mtime: st.mtimeMs });
+        if (results.length >= limit) truncated = true;
+      } catch {
+        // skip stat error
+      }
+    };
     const walk = async (dir: string, relPrefix: string): Promise<void> => {
       /* v8 ignore start -- the inner limit guards (file push + post-recursion return) always stop first; this re-entry guard is defensive. */
       if (results.length >= limit) {
@@ -75,6 +98,8 @@ export const globTool: Tool<GlobInput, GlobOutput> = {
       } catch {
         return;
       }
+      const subdirs: Array<{ full: string; rel: string }> = [];
+      const matchedFiles: string[] = [];
       for (const e of entries) {
         const name = e.name;
         if (DEFAULT_IGNORE.includes(name)) continue;
@@ -82,23 +107,40 @@ export const globTool: Tool<GlobInput, GlobOutput> = {
         const rel = relPrefix ? `${relPrefix}/${name}` : name;
         const full = path.join(dir, name);
         if (e.isDirectory()) {
-          await walk(full, rel);
-          if (truncated) return;
+          subdirs.push({ full, rel });
         } else if (e.isFile()) {
-          if (re.test(rel) || re.test(name)) {
-            try {
-              const st = await fs.stat(full);
-              results.push({ rel: full, mtime: st.mtimeMs });
-              if (results.length >= limit) {
-                truncated = true;
-                return;
-              }
-            } catch {
-              // skip stat error
+          re.lastIndex = 0;
+          const relMatch = re.test(rel);
+          re.lastIndex = 0;
+          const nameMatch = re.test(name);
+          if (relMatch || nameMatch) {
+            matchedFiles.push(full);
+          }
+        } else if (e.isSymbolicLink()) {
+          try {
+            const st = await fs.stat(full);
+            if (st.isDirectory()) {
+              subdirs.push({ full, rel });
+            } else if (st.isFile()) {
+              re.lastIndex = 0;
+              const relMatch = re.test(rel);
+              re.lastIndex = 0;
+              const nameMatch = re.test(name);
+              if (relMatch || nameMatch) matchedFiles.push(full);
             }
+          } catch {
+            // skip broken symlink/stat error
           }
         }
+        if (truncated) return;
       }
+      await mapWithConcurrency(matchedFiles, WALK_CONCURRENCY, pushResult);
+      if (truncated) return;
+      // Subdir walks: each one re-checks the limit at entry (re-entry guard),
+      // but we also stop dispatching new walks once truncated, so siblings of
+      // a hit-limit subdir don't keep adding results.
+      const remainingSubdirs = truncated ? [] : subdirs;
+      await mapWithConcurrency(remainingSubdirs, WALK_CONCURRENCY, ({ full, rel }) => walk(full, rel));
     };
     await walk(base, '');
     results.sort((a, b) => b.mtime - a.mtime);

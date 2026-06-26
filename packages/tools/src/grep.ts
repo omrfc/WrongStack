@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { buildChildEnv, compileGlob } from '@wrongstack/core';
+import { mapWithConcurrency } from './_concurrency.js';
 import { capSubject, compileUserRegex } from './_regex.js';
 import { isBinaryBuffer, safeResolve } from './_util.js';
 interface GrepInput {
@@ -25,6 +26,8 @@ interface GrepOutput {
 
 const DEFAULT_IGNORE = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage'];
 const NATIVE_SCAN_CONCURRENCY = 32;
+const NATIVE_READ_CHUNK_BYTES = 64 * 1024;
+const NATIVE_MAX_FILE_BYTES = 1_000_000;
 
 export const grepTool: Tool<GrepInput, GrepOutput> = {
   name: 'grep',
@@ -292,7 +295,8 @@ async function runNative(
   const re = compiled.regex;
   const globRe = input.glob ? compileGlob(input.glob) : null;
   const matches: string[] = [];
-  const fileMatches = new Map<string, number>();
+  const countOnlyFirstHit = mode === 'count' && limit === 1;
+  const maxBytes = mode === 'content' ? NATIVE_MAX_FILE_BYTES : Math.min(NATIVE_MAX_FILE_BYTES, 256 * 1024);
   let total = 0;
   let stopped = false;
 
@@ -300,36 +304,92 @@ async function runNative(
     if (stopped || signal.aborted) return;
     if (globRe && !globRe.test(name) && !globRe.test(full)) return;
     if (globRe) globRe.lastIndex = 0;
+
     try {
       const stat = await fs.stat(full);
-      if (stat.size > 1_000_000 || stopped || signal.aborted) return;
-      const head = await fs.readFile(full);
-      if (isBinaryBuffer(head) || stopped || signal.aborted) return;
-      const text = head.toString('utf8');
-      const lines = text.split(/\r?\n/);
-      let fileHits = 0;
-      for (let i = 0; i < lines.length; i++) {
-        if (stopped || signal.aborted) break;
-        const ln = capSubject(lines[i] ?? '');
-        re.lastIndex = 0;
-        if (re.test(ln)) {
-          fileHits++;
-          total++;
-          if (mode === 'content' && matches.length < limit) {
-            matches.push(`${full}:${i + 1}:${ln}`);
+      if (!stat.isFile() || stat.size > maxBytes || stopped || signal.aborted) return;
+
+      const file = await fs.open(full, 'r');
+      try {
+        let bytesReadTotal = 0;
+        let lineNumber = 0;
+        let fileHits = 0;
+        let leftover = '';
+        let binaryChecked = false;
+        const buffer = Buffer.allocUnsafe(Math.min(NATIVE_READ_CHUNK_BYTES, maxBytes));
+
+        while (!stopped && !signal.aborted && bytesReadTotal < maxBytes) {
+          const remaining = maxBytes - bytesReadTotal;
+          const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, remaining), null);
+          if (bytesRead === 0) break;
+          const chunk = buffer.subarray(0, bytesRead);
+          if (!binaryChecked) {
+            binaryChecked = true;
+            if (isBinaryBuffer(chunk)) return;
+          }
+          bytesReadTotal += bytesRead;
+          const text = leftover + chunk.toString('utf8');
+          const lines = text.split(/\r?\n/);
+          leftover = lines.pop() ?? '';
+
+          for (const rawLine of lines) {
+            if (stopped || signal.aborted) break;
+            lineNumber++;
+            const ln = capSubject(rawLine);
+            re.lastIndex = 0;
+            if (!re.test(ln)) continue;
+
+            fileHits++;
+            total++;
+
+            if (mode === 'content') {
+              if (matches.length < limit) matches.push(`${full}:${lineNumber}:${ln}`);
+            } else if (mode === 'files_with_matches') {
+              if (fileHits === 1 && matches.length < limit) matches.push(full);
+              break;
+            } else if (fileHits === 1 && matches.length < limit) {
+              matches.push(`${full}:${countOnlyFirstHit ? 1 : 0}`);
+            }
+
+            if (countOnlyFirstHit || (mode !== 'content' && matches.length >= limit)) {
+              stopped = true;
+              break;
+            }
+          }
+
+          if (mode === 'files_with_matches' && fileHits > 0) break;
+        }
+
+        if (!stopped && !signal.aborted && leftover.length > 0) {
+          lineNumber++;
+          const ln = capSubject(leftover);
+          re.lastIndex = 0;
+          if (re.test(ln)) {
+            fileHits++;
+            total++;
+            if (mode === 'content') {
+              if (matches.length < limit) matches.push(`${full}:${lineNumber}:${ln}`);
+            } else if (mode === 'files_with_matches') {
+              if (matches.length < limit) matches.push(full);
+            } else if (matches.length < limit) {
+              matches.push(`${full}:${countOnlyFirstHit ? 1 : fileHits}`);
+            }
           }
         }
-      }
-      if (fileHits > 0) {
-        fileMatches.set(full, fileHits);
-        if (mode === 'files_with_matches' && matches.length < limit) {
-          matches.push(full);
+
+        if (fileHits > 0) {
+          if (mode === 'count') {
+            const idx = matches.findIndex((entry) => entry.startsWith(`${full}:`));
+            if (idx !== -1) matches[idx] = `${full}:${fileHits}`;
+          }
+          if (mode === 'files_with_matches' && matches.length >= limit) stopped = true;
         }
-        if (mode === 'count' && matches.length < limit) {
-          matches.push(`${full}:${fileHits}`);
-        }
+
+        if (mode === 'content' && matches.length >= limit) stopped = true;
+        if (mode === 'count' && matches.length >= limit && (countOnlyFirstHit || mode !== 'count')) stopped = true;
+      } finally {
+        await file.close();
       }
-      if (matches.length >= limit) stopped = true;
     } catch {
       // skip read errors
     }
@@ -344,22 +404,20 @@ async function runNative(
       return;
     }
     const files: Array<{ full: string; name: string }> = [];
+    const subdirs: string[] = [];
     for (const e of entries) {
       if (stopped) return;
       if (DEFAULT_IGNORE.includes(e.name)) continue;
-      // Skip symlinks entirely. fs.Dirent.isDirectory/isFile return the
-      // symlink's TYPE without resolving, but following the link into
-      // arbitrary places (e.g. ~/.ssh) is the security concern. Tools
-      // that genuinely need to traverse symlinks should opt in explicitly.
       if (e.isSymbolicLink()) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
-        await walk(full);
+        subdirs.push(full);
       } else if (e.isFile()) {
         files.push({ full, name: e.name });
       }
     }
     await mapWithConcurrency(files, NATIVE_SCAN_CONCURRENCY, ({ full, name }) => scanFile(full, name));
+    await mapWithConcurrency(subdirs, Math.min(16, NATIVE_SCAN_CONCURRENCY), walk);
   };
   await walk(base);
 
@@ -369,23 +427,4 @@ async function runNative(
     truncated: stopped,
     used: 'native',
   };
-}
-
-async function mapWithConcurrency<T>(
-  items: readonly T[],
-  concurrency: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
-  if (items.length === 0) return;
-  let next = 0;
-  const workerCount = Math.min(Math.max(1, concurrency), items.length);
-  const workers = Array.from({ length: workerCount }, async () => {
-    for (;;) {
-      const idx = next++;
-      if (idx >= items.length) return;
-      const item = items[idx];
-      if (item !== undefined) await fn(item);
-    }
-  });
-  await Promise.all(workers);
 }
