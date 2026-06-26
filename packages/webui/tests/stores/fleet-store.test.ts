@@ -138,7 +138,7 @@ describe('iteration_summary', () => {
 // ── ctx_pct ─────────────────────────────────────────────────────
 
 describe('ctx_pct', () => {
-  it('converts load fraction to percent without clamping', () => {
+  it('converts load fraction to display percent capped at 100', () => {
     fleet().applyEvent({ kind: 'spawned', subagentId: 'a1', name: 'Grace' });
     fleet().applyEvent({
       kind: 'ctx_pct',
@@ -150,9 +150,9 @@ describe('ctx_pct', () => {
     expect(get('a1')!.ctxPct).toBe(73);
     expect(get('a1')!.ctxTokens).toBe(73_200);
     expect(get('a1')!.maxContext).toBe(100_000);
-    // load > 1.0 is valid (over context limit) — no clamping
+    // load > 1.0 is a valid backend signal, but the UI display stays capped.
     fleet().applyEvent({ kind: 'ctx_pct', subagentId: 'a1', load: 1.5 });
-    expect(get('a1')!.ctxPct).toBe(150);
+    expect(get('a1')!.ctxPct).toBe(100);
   });
 
   it('updates tokensIn and fleetTokensIn', () => {

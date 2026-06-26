@@ -476,6 +476,13 @@ describe('wsToVizEvent', () => {
     expect(result?.magnitude).toBe(80000);
   });
 
+  it('caps subagent.event ctx_pct labels at 100%', () => {
+    const result = wsToVizEvent('subagent.event', {
+      kind: 'ctx_pct', subagentId: 'a1', load: 1.5, tokens: 150000,
+    });
+    expect(result?.label).toBe('ctx 100%');
+  });
+
   it('handles subagent.event iteration_summary', () => {
     const result = wsToVizEvent('subagent.event', {
       kind: 'iteration_summary', subagentId: 'a1', partialText: 'Writing tests...', costUsd: 0.05,

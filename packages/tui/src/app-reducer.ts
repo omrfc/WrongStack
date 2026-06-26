@@ -70,6 +70,11 @@ function closePanels(state: State): PanelResetState {
     coordinator: { ...state.coordinator, monitorOpen: false },
   };
 }
+
+function clampContextLoad(load: number): number {
+  if (!Number.isFinite(load)) return 0;
+  return Math.max(0, Math.min(1, load));
+}
 // Re-export types from app-state.ts for backward compatibility.
 export type {
   Action,
@@ -1412,13 +1417,14 @@ export function reducer(state: State, action: Action): State {
     case 'fleetCtxPct': {
       const cur = state.fleet[action.id];
       if (!cur) return state;
+      const ctxPct = clampContextLoad(action.load);
       return {
         ...state,
         fleet: {
           ...state.fleet,
           [action.id]: {
             ...cur,
-            ctxPct: action.load,
+            ctxPct,
             ctxTokens: action.tokens,
             ctxMaxTokens: action.maxContext,
             ctxCost: action.ctxCost,
@@ -1506,11 +1512,12 @@ export function reducer(state: State, action: Action): State {
       };
     }
     case 'leaderCtxPct': {
+      const ctxPct = clampContextLoad(action.load);
       return {
         ...state,
         leader: {
           ...state.leader,
-          ctxPct: action.load,
+          ctxPct,
           ctxTokens: action.tokens,
           ctxMaxTokens: action.maxContext,
           lastEventAt: Date.now(),

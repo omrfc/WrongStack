@@ -210,7 +210,7 @@ function FleetAgentDetailPanel({
                         ? 'bg-amber-500'
                         : 'bg-emerald-500',
                   )}
-                  style={{ width: `${Math.min(200, agent.ctxPct)}%` }}
+                  style={{ width: `${Math.min(100, agent.ctxPct)}%` }}
                 />
               </div>
               <span className="text-[10px] text-muted-foreground tabular-nums font-mono">
@@ -452,7 +452,7 @@ export function FleetAgentRow({
                   : 'bg-emerald-500',
             )}
             // Cap visual width at 200% so over-capacity bars still show meaningfully
-            style={{ width: `${Math.min(200, agent.ctxPct)}%` }}
+            style={{ width: `${Math.min(100, agent.ctxPct)}%` }}
           />
         </div>
         <span className="text-[9px] tabular-nums text-muted-foreground font-mono leading-none">

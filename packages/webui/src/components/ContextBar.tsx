@@ -14,7 +14,7 @@ import { fmtTok } from '@/components/ChatView/utils';
  * 1/8-block precision: ▏▎▍▌▋▊▉█). Each segment is 3.33% of the bar.
  */
 export interface ContextBarProps {
-  /** Context fill percentage 0–100 (can exceed 100 for over-full contexts). */
+  /** Context fill percentage 0–100. Values above 100 are displayed as 100. */
   pct: number;
   /** Current token count (raw number). */
   tokens?: number | undefined;
@@ -54,6 +54,11 @@ function getTextColor(pct: number): string {
   return 'text-[hsl(var(--success))]';
 }
 
+function clampPct(pct: number): number {
+  if (!Number.isFinite(pct)) return 0;
+  return Math.max(0, Math.min(100, pct));
+}
+
 export function ContextBar({
   pct,
   tokens,
@@ -63,7 +68,7 @@ export function ContextBar({
   className,
   onClick,
 }: ContextBarProps): React.ReactElement {
-  const clamped = Math.max(0, Math.min(200, pct)); // cap visual at 200%
+  const clamped = clampPct(pct);
   const eighths = Math.round((clamped / 100) * segments * 8);
 
   // Build bar segments
@@ -75,7 +80,7 @@ export function ContextBar({
     remaining -= segFill;
   }
 
-  const pctText = pct >= 100 ? `${Math.round(pct)}%+` : `${Math.round(pct)}%`;
+  const pctText = `${Math.round(clamped)}%`;
   const tokenText =
     showTokens && tokens !== undefined && maxTokens !== undefined && maxTokens > 0
       ? ` ${fmtTok(tokens)}/${fmtTok(maxTokens)}`
@@ -86,10 +91,10 @@ export function ContextBar({
       className={cn(
         'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-mono font-medium shrink-0',
         onClick && 'cursor-pointer hover:ring-1 hover:ring-ring transition-shadow',
-        getTextColor(pct),
-        pct >= 75
+        getTextColor(clamped),
+        clamped >= 75
           ? 'bg-red-500/10'
-          : pct >= 60
+          : clamped >= 60
             ? 'bg-amber-500/10'
             : 'bg-emerald-500/10',
         className,
@@ -112,7 +117,7 @@ export function ContextBar({
             key={i}
             className={cn(
               'tabular-nums w-[0.55em] text-center',
-              b.fill > 0 ? getTextColor(pct) : 'text-muted-foreground/30',
+              b.fill > 0 ? getTextColor(clamped) : 'text-muted-foreground/30',
             )}
           >
             {SEGMENT_FILL[b.fill] ?? ' '}
@@ -137,10 +142,8 @@ export function ContextFillBar({
   className,
   onClick,
 }: Omit<ContextBarProps, 'segments'>): React.ReactElement {
-  // Allow bar to grow past 100% visually (up to 200%) so over-capacity
-  // is visible even when the text says "125%".
-  const clamped = Math.max(0, Math.min(200, pct));
-  const pctText = pct > 100 ? `${Math.round(pct)}%+` : `${Math.round(pct)}%`;
+  const clamped = clampPct(pct);
+  const pctText = `${Math.round(clamped)}%`;
   const tokenText =
     showTokens && tokens !== undefined && maxTokens !== undefined && maxTokens > 0
       ? ` ${fmtTok(tokens)}/${fmtTok(maxTokens)}`
@@ -166,12 +169,12 @@ export function ContextFillBar({
     >
       <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted shrink-0">
         <span
-          className={cn('h-full rounded-full transition-all duration-300', getColor(pct))}
+          className={cn('h-full rounded-full transition-all duration-300', getColor(clamped))}
           style={{ width: `${Math.max(2, clamped)}%` }}
         />
       </span>
       <span
-        className={cn('text-[11px] font-mono tabular-nums font-medium', getTextColor(pct))}
+        className={cn('text-[11px] font-mono tabular-nums font-medium', getTextColor(clamped))}
       >
         {pctText}
       </span>

@@ -7,7 +7,7 @@ import type { Request, Response } from '../types/provider.js';
 import type { ContentBlock, TextBlock } from '../types/blocks.js';
 import { isTextBlock, isToolUseBlock } from '../types/blocks.js';
 import { toWrongStackError } from '../types/errors.js';
-import { estimateRequestTokens, estimateRequestTokensCalibrated, getCalibrationState, recordActualUsage } from '../utils/token-estimate.js';
+import { estimateRequestTokens, estimateRequestTokensCalibrated, getCalibrationState, recordActualUsage, type RequestTokenBreakdown } from '../utils/token-estimate.js';
 import { recordUserIntentEvidence } from '../utils/context-evidence.js';
 import { toErrorMessage } from '../utils/error.js';
 import { consumeAutonomousContinue } from './continue-to-next-iteration.js';
@@ -75,7 +75,7 @@ export function createAgentLoopHandler(
    * If the last run actually fired a compaction, we must also re-run so
    * the noop-retry logic gets its delta check.
    */
-  async function compactContextIfNeeded(): Promise<void> {
+  async function compactContextIfNeeded(): Promise<boolean> {
     const msgCount = a.ctx.messages.length;
     const maxContext = currentMaxContext();
     if (
@@ -84,31 +84,117 @@ export function createAgentLoopHandler(
       _lastCompactionMaxContext === maxContext &&
       maxContext > 0
     ) {
-      return;
+      return false;
     }
+    const beforeMessages = a.ctx.messages;
+    const beforeMsgCount = a.ctx.messages.length;
     await a.pipelines.contextWindow.run(a.ctx);
-    _lastCompactionMsgCount = msgCount;
+    _lastCompactionMsgCount = a.ctx.messages.length;
     _lastCompactionMaxContext = maxContext;
+    const changed =
+      a.ctx.messages !== beforeMessages || a.ctx.messages.length !== beforeMsgCount;
     // Mark as noop when the cached token count is below the warn fraction.
     // The middleware's own noop-retry check (lastNoopAttempt) tracks a more
     // nuanced "tried but couldn't reduce" state — this flag is coarser: it
     // answers "should we even bother running the pipeline next time?"
-    const stashed = a.ctx.lastRequestTokens;
-    const tokens = typeof stashed === 'number' && stashed > 0
-      ? stashed
-      : 0;
+    const tokens = refreshContextRequestTokenStash({ force: changed });
     const load = maxContext > 0 ? tokens / maxContext : 0;
     // 0.5 is the soft default warn threshold used by `defaultConfig`; we
     // hard-code it here to avoid a context.options lookup. The middleware
     // is the authority on the actual policy threshold — this is just a
     // fast-path heuristic for "definitely below warn" to skip the pipeline.
     _lastCompactionWasNoop = tokens > 0 && load < 0.5;
+    if (changed) {
+      _lastEmittedMsgCount = -1;
+      _lastEmittedToolCount = -1;
+      _lastEmittedMaxContext = -1;
+    }
+    return changed;
   }
 
   /** Per-(provider,model) calibration bucket so a model-switching or fleet
    *  process doesn't collapse every tokenizer onto one shared ratio. */
   const calibrationKey = (model: string = a.ctx.model): string =>
     `${a.ctx.provider?.id ?? 'unknown'}/${model}`;
+
+  function stashRequestTokens(req: Request): RequestTokenBreakdown {
+    const preFlight = estimateRequestTokens(
+      req.messages,
+      req.system,
+      req.tools ?? [],
+      calibrationKey(req.model),
+    );
+
+    // Stash the uncalibrated total on ctx so the middleware and the
+    // context bar (emitContextPct) can read it without re-walking the
+    // messages. The middleware applies its own per-(provider,model)
+    // calibration ratio on read so the value it sees matches the
+    // calibrated figure the compaction decision was made on.
+    a.ctx.lastRequestTokens = preFlight.total;
+    _lastPreFlightMsgCount = req.messages.length;
+    // Companion meta entry: the (msg, tool) count snapshot the stash
+    // was computed at, so the middleware can detect when tool results
+    // were appended between pre-flight and compaction and refuse the
+    // stale value. See AutoCompactionMiddleware.tryStashedTokens.
+    a.ctx.meta['lastRequestTokensAt'] = {
+      msgCount: req.messages.length,
+      toolCount: (req.tools ?? []).length,
+    };
+
+    return preFlight;
+  }
+
+  function refreshContextRequestTokenStash(opts: { force?: boolean | undefined } = {}): number {
+    const msgCount = a.ctx.messages.length;
+    const toolCount = (a.ctx.tools ?? []).length;
+    const stashed = a.ctx.lastRequestTokens;
+    const stashedAt = a.ctx.meta?.['lastRequestTokensAt'];
+    if (
+      !opts.force &&
+      typeof stashed === 'number' &&
+      stashed > 0 &&
+      typeof stashedAt === 'object' &&
+      stashedAt !== null
+    ) {
+      const meta = stashedAt as { msgCount?: unknown; toolCount?: unknown };
+      if (
+        meta.msgCount === msgCount &&
+        (typeof meta.toolCount !== 'number' || meta.toolCount === toolCount)
+      ) {
+        return stashed;
+      }
+    }
+
+    const refreshed = estimateRequestTokens(
+      a.ctx.messages,
+      a.ctx.systemPrompt,
+      a.ctx.tools ?? [],
+      calibrationKey(),
+    ).total;
+    a.ctx.lastRequestTokens = refreshed;
+    _lastPreFlightMsgCount = msgCount;
+    a.ctx.meta['lastRequestTokensAt'] = { msgCount, toolCount };
+    return refreshed;
+  }
+
+  async function buildRequestWithPreflightCompaction(opts: RunOptions): Promise<{
+    req: Request;
+    preFlight: RequestTokenBreakdown;
+  }> {
+    let req = await handlers.response.buildAndRunRequestPipeline(opts);
+    let preFlight = stashRequestTokens(req);
+
+    // The new user turn may be what crosses the context threshold. Run the
+    // context-window pipeline before the provider call and rebuild the request
+    // if compaction rewrote ctx.messages, otherwise the oversized stale request
+    // would still be sent.
+    if (await compactContextIfNeeded()) {
+      req = await handlers.response.buildAndRunRequestPipeline(opts);
+      preFlight = stashRequestTokens(req);
+    }
+
+    return { req, preFlight };
+  }
 
   /** Emit ctx.pct event for live context-fill bar in UIs. */
   function emitContextPct(): void {
@@ -469,35 +555,10 @@ export function createAgentLoopHandler(
           return { status: 'aborted', iterations, abortReason: reason, finalText };
         }
 
-        const req = await handlers.response.buildAndRunRequestPipeline(opts);
-
         // H1: compute once, share with the middleware + context bar.
-        // Previously this estimate was repeated three times per iteration
-        // (pre-flight, emitContextPct, AutoCompactionMiddleware), each
-        // walking the same messages/system/tools arrays. Now the result
-        // is stashed on ctx and the other two call sites consult it.
-        const preFlight = estimateRequestTokens(
-          req.messages,
-          req.system,
-          req.tools ?? [],
-          calibrationKey(req.model),
-        );
-
-        // Stash the uncalibrated total on ctx so the middleware and the
-        // context bar (emitContextPct) can read it without re-walking the
-        // messages. The middleware applies its own per-(provider,model)
-        // calibration ratio on read so the value it sees matches the
-        // calibrated figure the compaction decision was made on.
-        a.ctx.lastRequestTokens = preFlight.total;
-        _lastPreFlightMsgCount = req.messages.length;
-        // Companion meta entry: the (msg, tool) count snapshot the stash
-        // was computed at, so the middleware can detect when tool results
-        // were appended between pre-flight and compaction and refuse the
-        // stale value. See AutoCompactionMiddleware.tryStashedTokens.
-        a.ctx.meta['lastRequestTokensAt'] = {
-          msgCount: req.messages.length,
-          toolCount: (req.tools ?? []).length,
-        };
+        // The helper also gives auto-compaction one pre-send chance to shrink
+        // a newly over-budget turn and rebuilds the request when it does.
+        const { req, preFlight } = await buildRequestWithPreflightCompaction(opts);
 
         await a.ctx.session.append({
           type: 'llm_request',
@@ -654,10 +715,10 @@ export function createAgentLoopHandler(
         }
 
         if (toolUses.length === 0) {
+          await compactContextIfNeeded();
           emitContextPct();
           a.events.emit('iteration.completed', { ctx: a.ctx, index: i });
           if (autonomousContinue && responseResult.directive === 'continue') {
-            await compactContextIfNeeded();
             await a.extensions.runAfterIteration(a.ctx, i);
             continue;
           }
@@ -679,16 +740,16 @@ export function createAgentLoopHandler(
         }
 
         if (autonomousContinue && consumeAutonomousContinue(a.ctx)) {
+          await compactContextIfNeeded();
           emitContextPct();
           a.events.emit('iteration.completed', { ctx: a.ctx, index: i });
-          await compactContextIfNeeded();
           await a.extensions.runAfterIteration(a.ctx, i);
           continue;
         }
 
+        await compactContextIfNeeded();
         emitContextPct();
         a.events.emit('iteration.completed', { ctx: a.ctx, index: i });
-        await compactContextIfNeeded();
         await a.extensions.runAfterIteration(a.ctx, i);
 
         if (autonomousContinue && responseResult.directive === 'continue') {

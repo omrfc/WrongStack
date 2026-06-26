@@ -669,6 +669,27 @@ describe('TUI reducer', () => {
     expect(s.fleet['agent-1']?.cost).toBe(0);
   });
 
+  it('caps fleet and leader context load at 100%', () => {
+    let s = initial();
+    s = reducer(s, { type: 'fleetSpawn', id: 'agent-1', name: 'worker' });
+    s = reducer(s, {
+      type: 'fleetCtxPct',
+      id: 'agent-1',
+      load: 1.5,
+      tokens: 150_000,
+      maxContext: 100_000,
+    });
+    expect(s.fleet['agent-1']?.ctxPct).toBe(1);
+
+    const withLeader = reducer(s, {
+      type: 'leaderCtxPct',
+      load: 1.25,
+      tokens: 125_000,
+      maxContext: 100_000,
+    });
+    expect(withLeader.leader.ctxPct).toBe(1);
+  });
+
   it('fleetMessage keeps only the last two compact text snippets', () => {
     let s = initial();
     s = reducer(s, { type: 'fleetSpawn', id: 'agent-1', name: 'worker' });

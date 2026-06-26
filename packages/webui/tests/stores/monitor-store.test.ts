@@ -115,6 +115,21 @@ describe('useMonitorStore.setLiveSessions', () => {
     expect(state.activeAgents).toBe(1);
   });
 
+  it('caps live agent context percentages at 100', () => {
+    useMonitorStore
+      .getState()
+      .setLiveSessions([
+        session({
+          sessionId: 'x',
+          clientType: 'webui',
+          agents: [{ id: 'x1', name: 'X1', status: 'running', ctxPct: 145 }],
+        }),
+      ]);
+
+    const agent = useMonitorStore.getState().liveSessions[0]?.agents[0];
+    expect(agent?.ctxPct).toBe(100);
+  });
+
   it('clear() resets liveSessions and counts', () => {
     useMonitorStore
       .getState()

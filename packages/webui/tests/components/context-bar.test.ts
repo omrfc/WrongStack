@@ -24,8 +24,7 @@ function getTextColor(pct: number): 'success' | 'warning' | 'destructive' {
 }
 
 function fmtPct(pct: number): string {
-  if (pct >= 100) return `${Math.round(pct)}%+`;
-  return `${Math.round(pct)}%`;
+  return `${Math.min(100, Math.max(0, Math.round(pct)))}%`;
 }
 
 describe('ContextBar color thresholds', () => {
@@ -62,9 +61,9 @@ describe('percentage formatting', () => {
     expect(fmtPct(99)).toBe('99%');
   });
 
-  it('appends + for >= 100%', () => {
-    expect(fmtPct(100)).toBe('100%+');
-    expect(fmtPct(120)).toBe('120%+');
+  it('caps display at 100%', () => {
+    expect(fmtPct(100)).toBe('100%');
+    expect(fmtPct(120)).toBe('100%');
   });
 
   it('rounds correctly', () => {

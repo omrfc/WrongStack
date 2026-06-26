@@ -110,6 +110,22 @@ export function deriveMonitorStats(sessions: LiveSession[]): {
   return { clientCounts, totalAgents, activeAgents, aggregate };
 }
 
+function clampCtxPct(pct: number | undefined): number | undefined {
+  if (pct === undefined) return undefined;
+  if (!Number.isFinite(pct)) return 0;
+  return Math.max(0, Math.min(100, Math.round(pct)));
+}
+
+function normalizeLiveSessions(sessions: LiveSession[]): LiveSession[] {
+  return sessions.map((session) => ({
+    ...session,
+    agents: session.agents.map((agent) => ({
+      ...agent,
+      ctxPct: clampCtxPct(agent.ctxPct),
+    })),
+  }));
+}
+
 /** Real-time session stats from client.status_update events */
 export interface CurrentSessionStats {
   clientType?: string;
@@ -178,12 +194,14 @@ export const useMonitorStore = create<MonitorState>()((set) => ({
   setClientCounts: (counts) =>
     set({ clientCounts: counts, lastUpdated: Date.now() }),
 
-  setLiveSessions: (sessions) =>
+  setLiveSessions: (sessions) => {
+    const normalized = normalizeLiveSessions(sessions);
     set({
-      liveSessions: sessions,
-      ...deriveMonitorStats(sessions),
+      liveSessions: normalized,
+      ...deriveMonitorStats(normalized),
       lastUpdated: Date.now(),
-    }),
+    });
+  },
 
   addMailActivity: (activity) =>
     set((state) => ({

@@ -112,6 +112,11 @@ export interface VizNode {
   positionHint?: { zone: 'left' | 'center' | 'right' | 'top' | 'bottom'; order: number } | undefined;
 }
 
+function contextPctFromLoad(load: unknown): number {
+  const value = typeof load === 'number' && Number.isFinite(load) ? load : 0;
+  return Math.max(0, Math.min(100, Math.round(value * 100)));
+}
+
 // ── Store state ───────────────────────────────────────────────────────
 
 interface VizState {
@@ -574,7 +579,7 @@ export function wsToVizEvent(
           return {
             id: nextId(), kind: 'agent:ctx', timestamp: Date.now(),
             source: agentId, target: 'session',
-            label: `ctx ${Math.round((payload.load as number ?? 0) * 100)}%`,
+            label: `ctx ${contextPctFromLoad(payload.load)}%`,
             magnitude: payload.tokens as number ?? 0,
             data: payload as Record<string, unknown>,
             color: NODE_COLORS.agent,
@@ -654,12 +659,11 @@ export function wsToVizEvent(
       };
     }
     case 'ctx.pct': {
-      const load = payload.load as number ?? 0;
       const tokens = payload.tokens as number ?? 0;
       return {
         id: nextId(), kind: 'agent:ctx', timestamp: Date.now(),
         source: 'leader', target: 'session',
-        label: `ctx ${Math.round(load * 100)}%`,
+        label: `ctx ${contextPctFromLoad(payload.load)}%`,
         magnitude: tokens,
         data: payload as Record<string, unknown>,
         color: NODE_COLORS.agent,

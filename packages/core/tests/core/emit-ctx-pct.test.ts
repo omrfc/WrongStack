@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Agent, createDefaultPipelines } from '../../src/core/agent.js';
 import { Context } from '../../src/core/context.js';
+import { AutoCompactionMiddleware } from '../../src/execution/auto-compaction-middleware.js';
 import { DefaultErrorHandler } from '../../src/execution/error-handler.js';
 import { DefaultRetryPolicy } from '../../src/execution/retry-policy.js';
 import { ToolExecutor } from '../../src/execution/tool-executor.js';
@@ -17,15 +18,26 @@ import { ToolRegistry } from '../../src/registry/tool-registry.js';
 import { DefaultPermissionPolicy } from '../../src/security/permission-policy.js';
 import { DefaultSecretScrubber } from '../../src/security/secret-scrubber.js';
 import { DefaultSessionStore } from '../../src/storage/session-store.js';
+import type { Compactor } from '../../src/types/compactor.js';
+import type { Message } from '../../src/types/messages.js';
 import type { Capabilities, Provider, Request, Response } from '../../src/types/provider.js';
+import { estimateRequestTokens } from '../../src/utils/token-estimate.js';
 
 // ── Mock provider that echoes back a fixed text response ─────────────────
 
-function mockProvider(): Provider & { complete: (req: Request) => Promise<Response> } {
+function mockProvider(maxContext = 200_000): Provider & {
+  requests: Request[];
+  complete: (req: Request, opts: { signal: AbortSignal }) => Promise<Response>;
+} {
+  const requests: Request[] = [];
+  const capture = (req: Request) => {
+    requests.push({ ...req, messages: [...req.messages] });
+  };
   return {
     id: 'mock',
+    requests,
     capabilities: {
-      maxContext: 200_000,
+      maxContext,
       streaming: true,
       tools: true,
       vision: false,
@@ -33,6 +45,7 @@ function mockProvider(): Provider & { complete: (req: Request) => Promise<Respon
       parallelism: 0,
     } as Capabilities,
     async complete(req: Request): Promise<Response> {
+      capture(req);
       return {
         model: req.model,
         content: [{ type: 'text', text: 'I received your message.' }],
@@ -40,7 +53,8 @@ function mockProvider(): Provider & { complete: (req: Request) => Promise<Respon
         usage: { input: 50, output: 10 },
       };
     },
-    async *stream(): AsyncGenerator<import('../../src/types/provider.js').StreamEvent> {
+    async *stream(req: Request): AsyncGenerator<import('../../src/types/provider.js').StreamEvent> {
+      capture(req);
       yield { type: 'message_start', model: 'mock' };
       yield { type: 'content_block_start', kind: 'text' };
       yield { type: 'text_delta', text: 'I received your message.' };
@@ -51,7 +65,11 @@ function mockProvider(): Provider & { complete: (req: Request) => Promise<Respon
   };
 }
 
-async function buildAgent() {
+async function buildAgent(opts: {
+  maxContext?: number | undefined;
+  compactor?: Compactor | undefined;
+  initialMessages?: Message[] | undefined;
+} = {}) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-ctxpct-'));
   const trustFile = path.join(tmp, 'trust.json');
   const sessionDir = path.join(tmp, 'sessions');
@@ -67,7 +85,7 @@ async function buildAgent() {
     () => new DefaultPermissionPolicy({ trustFile, yolo: true }),
   );
 
-  const provider = mockProvider();
+  const provider = mockProvider(opts.maxContext);
   const tools = new ToolRegistry();
   const providers = new ProviderRegistry();
   const events = new EventBus();
@@ -87,6 +105,23 @@ async function buildAgent() {
     model: 'test-model',
     tools: [],
   });
+  if (opts.initialMessages) ctx.state.replaceMessages(opts.initialMessages);
+  if (opts.compactor) {
+    const autoCompactor = new AutoCompactionMiddleware(
+      opts.compactor,
+      provider.capabilities.maxContext,
+      (c) =>
+        estimateRequestTokens(
+          c.messages,
+          c.systemPrompt,
+          c.tools ?? [],
+          `${c.provider?.id ?? 'unknown'}/${c.model}`,
+        ).total,
+      { warn: 0.1, soft: 0.2, hard: 0.3 },
+      { events, failureMode: 'throw_on_hard' },
+    );
+    pipelines.contextWindow.use({ name: 'AutoCompaction', handler: autoCompactor.handler() });
+  }
 
   const toolExecutor = new ToolExecutor(tools, {
     permissionPolicy: container.resolve(TOKENS.PermissionPolicy),
@@ -109,7 +144,7 @@ async function buildAgent() {
     maxIterations: 10,
   });
 
-  return { agent, events, ctx, tmp, session };
+  return { agent, events, ctx, tmp, session, provider };
 }
 
 describe('B5 — emitContextPct elision on idle loops', () => {
@@ -231,5 +266,44 @@ describe('B5 — emitContextPct elision on idle loops', () => {
     // emit), confirming we haven't broken the emission logic. The IDLE path
     // (messages unchanged → skip) is verified by the B5 benchmark in
     // session-hot-path.bench.ts, which measures ~1000-5000× speedup.
+  });
+
+  it('compacts and rebuilds an oversized request before the provider call', async () => {
+    const compactCalls: number[] = [];
+    const compactor: Compactor = {
+      async compact(ctx) {
+        compactCalls.push(ctx.messages.length);
+        const before = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total;
+        ctx.state.replaceMessages(ctx.messages.slice(-1));
+        const after = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total;
+        return {
+          before,
+          after,
+          fullRequestTokensBefore: before,
+          fullRequestTokensAfter: after,
+          reductions: [{ phase: 'summary', saved: Math.max(0, before - after) }],
+        };
+      },
+    };
+    const { agent, provider, tmp, session } = await buildAgent({
+      maxContext: 1_000,
+      compactor,
+      initialMessages: [
+        { role: 'user', content: `old context ${'x'.repeat(8000)}` },
+        { role: 'assistant', content: 'old answer' },
+      ],
+    });
+    cleanup = async () => {
+      await session.close();
+      await fs.rm(tmp, { recursive: true, force: true });
+    };
+
+    await agent.run('fresh question', {});
+
+    expect(compactCalls.length).toBeGreaterThan(0);
+    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests[0]!.messages).toHaveLength(1);
+    expect(JSON.stringify(provider.requests[0]!.messages[0]!.content)).toContain('fresh question');
+    expect(JSON.stringify(provider.requests[0]!.messages[0]!.content)).not.toContain('old context');
   });
 });

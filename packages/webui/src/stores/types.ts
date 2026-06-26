@@ -144,7 +144,7 @@ export interface SubagentView {
   failureReason?: string | undefined;
   /** True when this is the leader agent (vs. a spawned subagent). */
   isLeader?: boolean | undefined;
-  /** Per-agent token usage (from ctx_pct event). */
+  /** Per-agent token usage (from ctx_pct event). ctxPct is display-capped at 100. */
   tokensIn?: number | undefined;
   tokensOut?: number | undefined;
 }

@@ -349,9 +349,9 @@ export interface EventMap {
   };
   /**
    * Fired on every `iteration.completed`. UIs subscribe to render a live
-   * context-window fill bar per agent (e.g. "67% ████████░░"). The
-   * `load` fraction matches the threshold levels: 0–0.6 green, 0.6–0.75
-   * yellow, 0.75+ red.
+   * context-window fill bar per agent (e.g. "67% ████████░░"). UIs cap the
+   * displayed percentage at 100; the raw `load` remains uncapped so diagnostics
+   * can tell when an agent was over budget.
    */
   'ctx.pct': {
     /** Fraction of maxContext currently in use (0–1+. Can exceed 1 when over budget). */

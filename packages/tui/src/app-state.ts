@@ -76,7 +76,7 @@ export interface FleetEntry {
    */
   extensions?: number | undefined;
   /**
-   * Latest context window fill percentage (0–1, can exceed 1 when over budget).
+   * Latest displayed context window fill percentage (0–1, capped at 1).
    * Emitted on every `iteration.completed` via `ctx.pct` event.
    * Rendered as a colored progress bar in the AgentsMonitor.
    */
@@ -405,7 +405,7 @@ export type State = {
     lastEventAt: number;
     /** True while inside an iteration (between iteration.started and iteration.completed). */
     iterating: boolean;
-    /** Latest context window fill fraction (from ctx.pct event). */
+    /** Latest displayed context window fill fraction (from ctx.pct event, capped at 1). */
     ctxPct?: number | undefined;
     /** Estimated total tokens in context window. */
     ctxTokens?: number | undefined;

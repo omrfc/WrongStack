@@ -235,6 +235,15 @@ describe('AgentStatusTracker', () => {
     expect(leader?.ctxPct).toBe(68);
   });
 
+  it('caps leader context fill at 100%', () => {
+    tracker.start();
+    events.emit('ctx.pct', { load: 1.35, tokens: 270_000, maxContext: 200_000 });
+
+    const call = registry.updateAgents.mock.calls.at(-1)?.[0] as AgentEntry[];
+    const leader = call?.find((a: AgentEntry) => a.id === 'leader');
+    expect(leader?.ctxPct).toBe(100);
+  });
+
   it('updates leader model when provider fallback switches model', () => {
     tracker.start();
     events.emit('provider.fallback', {
@@ -258,6 +267,16 @@ describe('AgentStatusTracker', () => {
     const sub = call?.find((a: AgentEntry) => a.id === 'sa-m');
     expect(sub?.model).toBe('anthropic/claude-opus-4-8');
     expect(sub?.ctxPct).toBe(42);
+  });
+
+  it('caps subagent context fill at 100%', () => {
+    tracker.start();
+    events.emit('subagent.spawned', { subagentId: 'sa-hot', name: 'worker' });
+    events.emit('subagent.ctx_pct', { subagentId: 'sa-hot', load: 1.2 });
+
+    const call = registry.updateAgents.mock.calls.at(-1)?.[0] as AgentEntry[];
+    const sub = call?.find((a: AgentEntry) => a.id === 'sa-hot');
+    expect(sub?.ctxPct).toBe(100);
   });
 
   it('records subagent cost from iteration_summary', () => {

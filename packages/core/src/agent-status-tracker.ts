@@ -26,6 +26,11 @@ const PARTIAL_TEXT_CAP = 1200;
 /** Min gap between registry flushes triggered purely by streamed text. */
 const PARTIAL_FLUSH_THROTTLE_MS = 300;
 
+function clampPct(pct: number): number {
+  if (!Number.isFinite(pct)) return 0;
+  return Math.max(0, Math.min(100, pct));
+}
+
 export interface AgentStatusTrackerOptions {
   events: EventBus;
   registry: SessionRegistry;
@@ -219,7 +224,7 @@ export class AgentStatusTracker {
       this.events.onPattern('ctx.pct', (_e, payload) => {
         const p = payload as { load?: number } | undefined;
         if (typeof p?.load === 'number' && Number.isFinite(p.load)) {
-          this.leaderCtxPct = Math.round(p.load * 100);
+          this.leaderCtxPct = clampPct(Math.round(p.load * 100));
           this.flush();
         }
       }),
@@ -273,7 +278,7 @@ export class AgentStatusTracker {
         const p = payload as { subagentId?: string; load?: number } | undefined;
         if (!p?.subagentId) return;
         const entry = touch(p.subagentId);
-        if (typeof p.load === 'number') entry.ctxPct = Math.round(p.load * 100);
+        if (typeof p.load === 'number') entry.ctxPct = clampPct(Math.round(p.load * 100));
         this.flush();
       }),
     );
@@ -495,7 +500,7 @@ export class AgentStatusTracker {
       c.lastRequestTokens > 0 &&
       maxContext !== undefined
     ) {
-      this.leaderCtxPct = Math.round((c.lastRequestTokens / maxContext) * 100);
+      this.leaderCtxPct = clampPct(Math.round((c.lastRequestTokens / maxContext) * 100));
     }
   }
 }

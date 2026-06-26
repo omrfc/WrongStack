@@ -76,6 +76,11 @@ function bumpSparkline(bins: number[]): number[] {
   return [bins[0] + 1, ...bins.slice(0, SPARKLINE_BINS - 1)];
 }
 
+function clampContextPct(pct: number): number {
+  if (!Number.isFinite(pct)) return 0;
+  return Math.max(0, Math.min(100, pct));
+}
+
 export const useFleetStore = create<FleetState>()((set, get) => ({
   agents: new Map(),
   leaderId: undefined,
@@ -260,10 +265,7 @@ export const useFleetStore = create<FleetState>()((set, get) => ({
           });
           break;
         case 'ctx_pct':
-          // Note: we do NOT cap load at 1.0 here — values > 100% are valid when the
-          // agent is over context limit. The rendering side (ContextFillBar / visual bar)
-          // clamps the visual fill independently so it doesn't overflow the viewport.
-          next.ctxPct = Math.round(Math.max(0, e.load ?? 0) * 100);
+          next.ctxPct = clampContextPct(Math.round(Math.max(0, e.load ?? 0) * 100));
           next.ctxTokens = e.tokens ?? next.ctxTokens;
           next.maxContext = e.maxContext ?? next.maxContext;
 

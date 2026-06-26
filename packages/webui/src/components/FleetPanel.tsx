@@ -174,7 +174,7 @@ export function AgentDetail({
                         ? 'bg-[hsl(var(--warning))]'
                         : 'bg-primary',
                   )}
-                  style={{ width: `${Math.min(200, Math.max(2, agent.ctxPct))}%` }}
+                  style={{ width: `${Math.min(100, Math.max(2, agent.ctxPct))}%` }}
                 />
               </div>
               <div className="text-[10px] text-muted-foreground tabular text-right">
@@ -374,7 +374,7 @@ function AgentCard({
                     ? 'bg-[hsl(var(--warning))]'
                     : 'bg-primary',
               )}
-              style={{ width: `${Math.min(200, Math.max(2, a.ctxPct))}%` }}
+              style={{ width: `${Math.min(100, Math.max(2, a.ctxPct))}%` }}
             />
           </div>
           <span className="tabular text-[9px] text-muted-foreground">

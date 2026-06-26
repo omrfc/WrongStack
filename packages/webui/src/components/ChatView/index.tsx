@@ -189,10 +189,10 @@ export function ChatView() {
     return () => document.removeEventListener('open:context-breakdown', handler);
   }, []);
 
-  // Context window usage — uncapped so over-limit (>100%) is visible
+  // Context window usage: cap display at 100%; raw token counts still show overflow.
   const ctxPct =
     maxContext > 0 && lastInputTokens > 0
-      ? Math.round((lastInputTokens / maxContext) * 100)
+      ? Math.min(100, Math.round((lastInputTokens / maxContext) * 100))
       : 0;
   const _ctxTone =
     ctxPct >= 85
