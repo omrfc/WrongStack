@@ -69,6 +69,23 @@ export function handleAutoPhaseLifecycle(msg: WSServerMessage) {
     toast.warn('AutoPhase stopped');
     return;
   }
+  if (msg.type === 'autophase.cleared') {
+    // Reset to an empty board → the view falls back to the goal-entry screen.
+    useAutoPhaseStore.getState().clear();
+    return;
+  }
+  if (msg.type === 'autophase.reverted') {
+    const ok = (p as { ok?: boolean }).ok === true;
+    const reverted = typeof p.reverted === 'number' ? p.reverted : 0;
+    const reason = typeof p.reason === 'string' ? p.reason : undefined;
+    if (ok) {
+      toast.success(reverted > 0 ? `Reverted ${reverted} commit${reverted === 1 ? '' : 's'}` : 'Nothing to revert');
+    } else {
+      toast.error(`Revert failed: ${reason ?? 'unknown error'}`);
+    }
+    useAutoPhaseStore.getState().setState({ lastEvent: 'reverted' });
+    return;
+  }
   if (msg.type === 'autophase.saved') {
     useAutoPhaseStore.getState().setState({ lastEvent: 'saved' });
     toast.success('AutoPhase graph saved');
@@ -319,6 +336,8 @@ export const miscHandlerMap: Partial<Record<string, (msg: WSServerMessage) => vo
   'autophase.paused': handleAutoPhaseLifecycle,
   'autophase.resumed': handleAutoPhaseLifecycle,
   'autophase.stopped': handleAutoPhaseLifecycle,
+  'autophase.cleared': handleAutoPhaseLifecycle,
+  'autophase.reverted': handleAutoPhaseLifecycle,
   'autophase.saved': handleAutoPhaseLifecycle,
   'autophase.completed': handleAutoPhaseLifecycle,
   'autophase.failed': handleAutoPhaseLifecycle,

@@ -749,7 +749,9 @@ export interface WSAutoPhaseLifecycle {
     | 'autophase.saved'
     | 'autophase.completed'
     | 'autophase.failed'
-    | 'autophase.error';
+    | 'autophase.error'
+    | 'autophase.cleared'
+    | 'autophase.reverted';
   payload: Record<string, unknown>;
 }
 
@@ -832,6 +834,8 @@ export type WSClientMessage =
   | { type: 'autophase.pause'; payload: Record<string, never> }
   | { type: 'autophase.resume'; payload: Record<string, never> }
   | { type: 'autophase.stop'; payload: Record<string, never> }
+  | { type: 'autophase.clear'; payload?: Record<string, never> }
+  | { type: 'autophase.revert'; payload?: Record<string, never> }
   | { type: 'autophase.status'; payload?: Record<string, never> }
   | { type: 'autophase.save'; payload?: Record<string, never> }
   | { type: 'autophase.list'; payload?: Record<string, never> }

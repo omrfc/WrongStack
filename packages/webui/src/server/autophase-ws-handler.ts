@@ -39,6 +39,25 @@ function isGitRepo(cwd: string): boolean {
   }
 }
 
+/**
+ * List the commits on `branch` since `baseSha` (oldest → newest, the order they
+ * landed). Used by `autophase.revert` to feed WorktreeManager.revertCommits,
+ * which reverses them. Returns [] on any git error.
+ */
+function commitsSince(cwd: string, baseSha: string, branch: string): string[] {
+  try {
+    const r = spawnSync('git', ['log', '--reverse', '--format=%H', `${baseSha}..${branch}`], {
+      cwd,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (r.status !== 0) return [];
+    return r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 interface WSClient {
   ws: WebSocket;
   id: string;
@@ -67,10 +86,17 @@ export class AutoPhaseWebSocketHandler {
   private store: PhaseStore;
   private clients = new Set<WSClient>();
   private broadcastInterval: ReturnType<typeof setInterval> | null = null;
-  /** Aborts in-flight task agents when the run is stopped. */
+  /** Aborts in-flight task agents AND the planning turn when the run is stopped. */
   private abort: AbortController | null = null;
+  /** Set the instant a stop/clear/revert is requested, so a planning turn that
+   *  resolves afterwards never launches the orchestrator (the abort alone can't
+   *  cover the window between the LLM call resolving and the orchestrator start). */
+  private stopping = false;
   /** Optional per-phase git-worktree isolation (lazily created at start). */
   private worktrees: WorktreeManager | null = null;
+  /** Base branch + tip SHA captured at run start so a revert can git-revert the
+   *  run's squash commits (history-preserving) instead of a destructive reset. */
+  private runBase: { branch: string; sha: string } | null = null;
   /** Per-run worker identities so the board can show "who is on what". */
   private usedNicknames = new Set<string>();
 
@@ -110,11 +136,13 @@ export class AutoPhaseWebSocketHandler {
         this.broadcast({ type: 'autophase.resumed', payload: {} });
         break;
       case 'autophase.stop':
-        this.abort?.abort();
-        this.orchestrator?.stop();
-        this.stopBroadcast();
-        if (this.graph) void this.store.save(this.graph);
-        this.broadcast({ type: 'autophase.stopped', payload: {} });
+        await this.handleStop();
+        break;
+      case 'autophase.clear':
+        await this.handleClear();
+        break;
+      case 'autophase.revert':
+        await this.handleRevert();
         break;
       case 'autophase.status':
         this.broadcastState();
@@ -210,13 +238,28 @@ export class AutoPhaseWebSocketHandler {
     const title = deriveTitle(goal);
     const autonomous = (payload?.autonomous as boolean) ?? true;
 
+    // Fresh abort for THIS run, created BEFORE planning so a stop pressed during
+    // the (long) planning turn actually cancels it. Previously the controller was
+    // created only after planning, so a stop while "starting" was a no-op and the
+    // run launched anyway.
+    this.abort = new AbortController();
+    this.stopping = false;
+
     // Phase plan resolution:
     //   1. explicit phases in the payload win (caller override);
     //   2. otherwise the LLM plans phases+todos for the goal;
     //   3. failing that, fall back to the generic default phases.
     const phases = Array.isArray(payload?.phases)
       ? (payload.phases as PhaseTemplate[])
-      : await this.planPhases(goal);
+      : await this.planPhases(goal, this.abort.signal);
+
+    // Stop requested during planning → never launch the orchestrator. The abort
+    // may not have interrupted the in-flight LLM call promptly, so the `stopping`
+    // flag is the authoritative guard for the resolve-after-stop window.
+    if (this.stopping || this.abort.signal.aborted) {
+      this.broadcast({ type: 'autophase.stopped', payload: { title } });
+      return;
+    }
 
     this.logger.info(`[AutoPhase] Starting: ${title}`);
 
@@ -224,7 +267,6 @@ export class AutoPhaseWebSocketHandler {
     // persistence *before* the (long-running) build begins.
     const graph = await new PhaseGraphBuilder({ title, description: goal, phases, autonomous }).build();
     this.graph = graph;
-    this.abort = new AbortController();
     await this.store.save(graph);
 
     // Per-phase git-worktree isolation, when enabled and inside a git repo.
@@ -240,6 +282,11 @@ export class AutoPhaseWebSocketHandler {
       isGitRepo(this.projectRoot)
     ) {
       this.worktrees = new WorktreeManager({ projectRoot: this.projectRoot, events: this.events });
+    }
+    // Capture the pre-run base tip so `autophase.revert` can git-revert exactly
+    // the commits this run lands on the base branch.
+    if (this.worktrees) {
+      this.runBase = await this.worktrees.currentBase();
     }
 
     // NOTE: this interactive-board orchestrator deliberately omits the CLI host's
@@ -309,6 +356,66 @@ export class AutoPhaseWebSocketHandler {
       });
   }
 
+  /**
+   * Halt the run NOW — at any phase. Sets `stopping` (so a planning turn that
+   * resolves afterwards bails), aborts in-flight agents, stops the orchestrator
+   * tick, and ends the live broadcast. The board is kept for review; use
+   * `autophase.clear` to reset or `autophase.revert` to undo the changes.
+   */
+  private async handleStop(): Promise<void> {
+    this.stopping = true;
+    this.abort?.abort();
+    this.orchestrator?.stop();
+    this.stopBroadcast();
+    if (this.graph) await this.store.save(this.graph).catch(() => undefined);
+    this.broadcast({ type: 'autophase.stopped', payload: { title: this.graph?.title } });
+  }
+
+  /**
+   * Stop + wipe: tear down phase worktrees and reset to an empty board so the UI
+   * returns to the start screen ("new one"). Does NOT touch already-merged commits
+   * on the base branch — that is `autophase.revert`.
+   */
+  private async handleClear(): Promise<void> {
+    await this.handleStop();
+    if (this.worktrees) await this.worktrees.cleanupAllManaged().catch(() => undefined);
+    this.orchestrator = null;
+    this.graph = null;
+    this.runBase = null;
+    this.usedNicknames.clear();
+    this.broadcast({ type: 'autophase.cleared', payload: {} });
+    // Empty state → board/wizard falls back to the goal-entry screen.
+    this.broadcast({ type: 'autophase.state', payload: this.buildState() });
+  }
+
+  /**
+   * Stop + undo: remove phase worktrees, then history-preservingly `git revert`
+   * every commit this run landed on the base branch (captured `runBase`..HEAD),
+   * then reset to an empty board. Refuses (reports a reason) on a dirty tree or a
+   * conflicting revert rather than leaving the tree half-reverted.
+   */
+  private async handleRevert(): Promise<void> {
+    await this.handleStop();
+    if (!this.worktrees || !this.runBase || !this.projectRoot) {
+      this.broadcast({
+        type: 'autophase.reverted',
+        payload: { ok: false, reverted: 0, reason: 'no git baseline was captured for this run' },
+      });
+      return;
+    }
+    await this.worktrees.cleanupAllManaged().catch(() => undefined);
+    const shas = commitsSince(this.projectRoot, this.runBase.sha, this.runBase.branch);
+    const res = await this.worktrees.revertCommits(this.runBase.branch, shas);
+    this.broadcast({ type: 'autophase.reverted', payload: res });
+    if (res.ok) {
+      this.orchestrator = null;
+      this.graph = null;
+      this.runBase = null;
+      this.broadcast({ type: 'autophase.cleared', payload: {} });
+      this.broadcast({ type: 'autophase.state', payload: this.buildState() });
+    }
+  }
+
   /** Generic fallback phases when the LLM planner produces nothing usable. */
   private defaultPhases(): PhaseTemplate[] {
     return [
@@ -320,13 +427,18 @@ export class AutoPhaseWebSocketHandler {
     ];
   }
 
-  /** Plan phases+todos for the goal via the LLM; fall back to defaults on failure. */
-  private async planPhases(goal: string): Promise<PhaseTemplate[]> {
+  /** Plan phases+todos for the goal via the LLM; fall back to defaults on failure.
+   *  The caller passes the run's abort signal so a stop during planning cancels
+   *  the LLM turn (the previous fresh, never-aborted controller made planning
+   *  uninterruptible). */
+  private async planPhases(goal: string, signal?: AbortSignal): Promise<PhaseTemplate[]> {
     try {
       const planner = new AutoPhasePlanner({
         goal,
         runOnce: async (prompt) => {
-          const result = (await this.agent.run(prompt, { signal: new AbortController().signal })) as {
+          const result = (await this.agent.run(prompt, {
+            signal: signal ?? new AbortController().signal,
+          })) as {
             status: string;
             finalText?: string | undefined;
           };

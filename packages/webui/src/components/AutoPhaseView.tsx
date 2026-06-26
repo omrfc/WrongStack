@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { BoardView } from './BoardView';
 import { WorktreeGraph } from './WorktreeGraph';
 import { WorktreeLanes } from './WorktreeLanes';
-import { Layers, Loader2, Pause, Play, Rocket, Square, X, Zap } from 'lucide-react';
+import { Layers, Loader2, Pause, Play, Plus, Rocket, Square, Undo2, X, Zap } from 'lucide-react';
 import { Button } from './ui/button';
 
 /**
@@ -88,7 +88,24 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
     client?.send?.({ type: 'autophase.stop', payload: {} });
   }, [client]);
 
+  // Reset to an empty board and start fresh. Clears locally too so the start
+  // screen shows immediately, even before the server's cleared state arrives.
+  const handleNew = useCallback(() => {
+    client?.send?.({ type: 'autophase.clear', payload: {} });
+    useAutoPhaseStore.getState().clear();
+    setPlanningGoal(null);
+    setGoal('');
+  }, [client]);
+
+  const [confirmRevert, setConfirmRevert] = useState(false);
+  const handleRevert = useCallback(() => {
+    client?.send?.({ type: 'autophase.revert', payload: {} });
+    setConfirmRevert(false);
+  }, [client]);
+
   const isLive = status === 'running' || status === 'paused';
+  // A finished/halted run: offer New (reset) and Revert (undo the run's commits).
+  const isDone = status === 'stopped' || status === 'completed' || status === 'failed';
 
   const handleSelectBoard = useCallback(
     (graphId: string) => {
@@ -183,6 +200,46 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
               >
                 <Square className="h-3.5 w-3.5 fill-current" /> Stop
               </button>
+            </>
+          )}
+          {hasPhases && isDone && (
+            <>
+              <button
+                type="button"
+                onClick={handleNew}
+                title="Clear this board and start a new AutoPhase run"
+                className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+              >
+                <Plus className="h-3.5 w-3.5" /> New
+              </button>
+              {confirmRevert ? (
+                <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs">
+                  <span className="text-amber-700 dark:text-amber-300">Revert run's commits?</span>
+                  <button
+                    type="button"
+                    onClick={handleRevert}
+                    className="rounded bg-destructive/15 px-1.5 py-0.5 font-medium text-destructive hover:bg-destructive/25"
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRevert(false)}
+                    className="rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground"
+                  >
+                    No
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmRevert(true)}
+                  title="Undo this run — git-revert the commits it landed and remove its worktrees"
+                  className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Undo2 className="h-3.5 w-3.5" /> Revert
+                </button>
+              )}
             </>
           )}
           <Button variant="ghost" size="icon" onClick={onClose}>
