@@ -2,11 +2,10 @@ import type { ResolvedProvider } from '@wrongstack/core';
 import {
   type Config,
   type Logger,
-  mergeCustomModelDefs,
   type ModelsRegistry,
   ProviderRegistry,
 } from '@wrongstack/core';
-import { buildProviderFactoriesFromRegistry, capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
+import { buildProviderFactoriesFromRegistry, makeProviderFromConfig, withCatalogCapabilities } from '@wrongstack/providers';
 import {
   fallbackCodexProviderModels,
   filterCurrentCodexModelIds,
@@ -139,41 +138,21 @@ export async function setupProvider(params: {
   // Without this step `provider.capabilities.maxOutput` stays at the
   // family default — and Chimera / other subagents would default to a
   // conservative 8K instead of the model's actual output ceiling.
+  //
+  // The overlay helper is exported from @wrongstack/providers so the
+  // same resolution rules (customCaps → catalog → base) are shared with
+  // any other caller that constructs a Provider post-init. Failures
+  // inside are swallowed inside the helper — the family default stands
+  // and agent-response's 8192 safety net covers the rare cases where
+  // the catalog is unreachable.
   if (config.features.modelsRegistry) {
-    try {
-      const mergedModels = mergeCustomModelDefs(
-        providerConfig.customModels,
-        config.models,
-      );
-      const resolvedCaps = await capabilitiesFor(
-        modelsRegistry,
-        config.provider,
-        config.model,
-        mergedModels,
-      );
-      // `Provider.capabilities` is declared `readonly`; the property
-      // descriptor was set with `writable: false` at construction time.
-      // `Object.defineProperty` lets us redefine it as a writable data
-      // property and assign the catalog-resolved value without the
-      // `as { capabilities: Capabilities }` type-assertion that an
-      // unrestricted assignment would need. The provider already holds
-      // the family baseline — we only need to refresh the catalog-
-      // resolved fields on top.
-      Object.defineProperty(provider, 'capabilities', {
-        value: resolvedCaps,
-        writable: true,
-        configurable: true,
-        enumerable: true,
-      });
-    } catch (err) {
-      // Catalog lookup failure should not block boot. The family default
-      // already provides a usable maxOutput fallback.
-      logger.debug(
-        `Provider capability resolution skipped for ${config.provider}/${config.model}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
+    provider = await withCatalogCapabilities(
+      modelsRegistry,
+      config.provider,
+      provider,
+      { ...providerConfig, type: config.provider, model: config.model },
+      logger,
+    );
   }
 
   return { resolvedProvider, provider, providerRegistry };

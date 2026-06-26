@@ -10,6 +10,7 @@ import type {
   WireFamily,
 } from '@wrongstack/core';
 import { ERROR_CODES, WrongStackError } from '@wrongstack/core';
+import { capabilitiesFor } from './capabilities.js';
 import { AnthropicProvider } from './anthropic.js';
 import { AnthropicOAuthProvider } from './anthropic-oauth.js';
 import { GitHubCopilotProvider } from './github-copilot.js';
@@ -146,6 +147,51 @@ export const setCodexTokenPersister = setOAuthTokenPersister;
  * matching transport. Unsupported families return a stub that throws when
  * complete() is called, so the system can still boot.
  */
+/**
+ * Wrap a provider so the catalog-resolved `Capabilities` overlay is
+ * applied after construction. The factory itself was created with the
+ * family default; `capabilitiesFor(registry, ...)` layers per-model
+ * facts on top — `ModelsDevModel.limit.output` for `maxOutput`, which
+ * drives Chimera's `Request.maxTokens`.
+ *
+ * Failures inside the resolution step are swallowed: the family default
+ * stands, and `agent-response.ts` keeps its 8192 safety net for the rare
+ * cases where the catalog is unreachable. The diagnostic lives at DEBUG
+ * so a healthy boot stays quiet.
+ */
+export async function withCatalogCapabilities(
+  registry: ModelsRegistry,
+  providerId: string,
+  provider: Provider,
+  cfg: ProviderConfig,
+  log?: Logger,
+): Promise<Provider> {
+  try {
+    const resolved = await capabilitiesFor(
+      registry,
+      providerId,
+      cfg.model ?? '',
+      cfg.customModels,
+    );
+    // `Provider.capabilities` is `readonly`; the property descriptor was
+    // set with `writable: false` at construction time. Redefine it so
+    // the catalog overlay lands cleanly.
+    Object.defineProperty(provider, 'capabilities', {
+      value: resolved,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  } catch (err) {
+    log?.debug(
+      `Provider capability overlay skipped for ${providerId}/${cfg.model ?? ''}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  return provider;
+}
+
 export async function buildProviderFactoriesFromRegistry(
   opts: BuildFactoriesOptions,
 ): Promise<ProviderFactory[]> {
