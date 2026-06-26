@@ -498,3 +498,38 @@ function mutateAutonomyConfig(
 ): Promise<void> {
   return persistAutonomySetting(deps, mutator);
 }
+
+/**
+ * Derive the filesystem-access pair (`features.allowOutsideProjectRoot` and
+ * `tools.restrictToProjectRoot`) from a save input. The two are inverses
+ * of each other and the codebase intentionally keeps both in sync for
+ * backward compatibility with older readers that only know about
+ * `tools.restrictToProjectRoot`.
+ *
+ * Single source of truth: `allowOutsideProjectRoot`. If the caller only
+ * sets `restrictFsToRoot`, it is converted to its inverse. If both are
+ * set (which the picker should not do, but defensive code paths may),
+ * `allowOutsideProjectRoot` wins. Returns `undefined` if neither is set,
+ * so the caller can skip the write.
+ *
+ * The input is duck-typed (only the two relevant fields are read) so any
+ * caller can pass a partial shape: the TUI's full `LiveSettingsInput`,
+ * a slash-command's `{ restrictFsToRoot: boolean }`, or any future
+ * save-handler that only carries these two knobs.
+ */
+export function deriveFsAccessPair(input: {
+  allowOutsideProjectRoot?: boolean | undefined;
+  restrictFsToRoot?: boolean | undefined;
+}):
+  | { allowOutsideProjectRoot: boolean; restrictToProjectRoot: boolean }
+  | undefined {
+  if (input.allowOutsideProjectRoot !== undefined) {
+    const allow = input.allowOutsideProjectRoot;
+    return { allowOutsideProjectRoot: allow, restrictToProjectRoot: !allow };
+  }
+  if (input.restrictFsToRoot !== undefined) {
+    const restrict = input.restrictFsToRoot;
+    return { allowOutsideProjectRoot: !restrict, restrictToProjectRoot: restrict };
+  }
+  return undefined;
+}

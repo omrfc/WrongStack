@@ -22,7 +22,7 @@ import {
   noOpVault,
   normalizeTokenSavingTier,
 } from '@wrongstack/core';
-import { filterSafeForProject } from '../settings-menu.js';
+import { deriveFsAccessPair, filterSafeForProject } from '../settings-menu.js';
 import { normalizeTuiThinkingWord } from '../tui-thinking-word.js';
 import type { LiveSettingsInput } from '../execution.js';
 
@@ -48,32 +48,10 @@ export interface SettingsAdapter {
 export function createSettingsAdapter(ctx: SettingsAdapterContext): SettingsAdapter {
   const { configStore, wpaths, fleetStreamController, applyLiveSettings } = ctx;
 
-  /**
-   * Derive the filesystem-access pair (`features.allowOutsideProjectRoot`
-   * and `tools.restrictToProjectRoot`) from a save input. The two are
-   * inverses of each other and the codebase intentionally keeps both
-   * in sync for backward compatibility with older readers that only
-   * know about `tools.restrictToProjectRoot`.
-   *
-   * Single source of truth: `s.allowOutsideProjectRoot`. If the caller
-   * only sets `s.restrictFsToRoot`, that is converted to its inverse.
-   * If both are set (which the picker should not do, but defensive
-   * code paths may), `s.allowOutsideProjectRoot` wins. Returns
-   * `undefined` if neither is set, so the caller can skip the write.
-   */
-  function deriveFsAccess(s: LiveSettingsInput):
-    | { allowOutsideProjectRoot: boolean; restrictToProjectRoot: boolean }
-    | undefined {
-    if (s.allowOutsideProjectRoot !== undefined) {
-      const allow = s.allowOutsideProjectRoot;
-      return { allowOutsideProjectRoot: allow, restrictToProjectRoot: !allow };
-    }
-    if (s.restrictFsToRoot !== undefined) {
-      const restrict = s.restrictFsToRoot;
-      return { allowOutsideProjectRoot: !restrict, restrictToProjectRoot: restrict };
-    }
-    return undefined;
-  }
+  // Filesystem-access pair derivation is shared with the slash command
+  // and the cli-main live-apply path. See settings-menu.ts for the
+  // single source of truth and the precedence rules.
+  const deriveFsAccess = deriveFsAccessPair;
 
   function getSettings(): Record<string, unknown> {
     const cfg = configStore.get();

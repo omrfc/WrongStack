@@ -1,7 +1,7 @@
 import type { SlashCommand } from '@wrongstack/core';
 import { color, noOpVault } from '@wrongstack/core';
 import { getProcessRegistry } from '@wrongstack/tools';
-import { persistAutonomySetting, persistConfigSetting } from '../settings-menu.js';
+import { deriveFsAccessPair, persistAutonomySetting, persistConfigSetting } from '../settings-menu.js';
 import { formatDelay } from '../utils/delay-format.js';
 import { parseSubcommand, unknownSubcommand } from './helpers.js';
 import type { SlashCommandContext } from './index.js';
@@ -325,13 +325,18 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
             return { message: `${color.amber('Usage:')} /settings fs-access unrestricted|project` };
           }
           const restrict = raw === 'project';
+          // Single source of truth for the inverse pair — see
+          // deriveFsAccessPair in settings-menu.ts for the precedence
+          // rules. The picker, the slash command, and the cli-main
+          // live-apply path all use this helper so they cannot drift.
+          const fsAccess = deriveFsAccessPair({ restrictFsToRoot: restrict });
           await persistConfigSetting(persistDeps, (cfg) => {
             const tools = (cfg.tools as Record<string, unknown> | undefined) ?? {};
-            tools.restrictToProjectRoot = restrict;
+            tools.restrictToProjectRoot = fsAccess!.restrictToProjectRoot;
             cfg.tools = tools;
             // Dual-write the new canonical key in sync (inverse of restrict).
             const features = (cfg.features as Record<string, unknown> | undefined) ?? {};
-            features.allowOutsideProjectRoot = !restrict;
+            features.allowOutsideProjectRoot = fsAccess!.allowOutsideProjectRoot;
             cfg.features = features;
           });
           const label = restrict

@@ -103,6 +103,7 @@ import { makeConfirmAwaiter } from './permission-prompt.js';
 import { runPluginManagementCommand } from './plugin-management.js';
 import { buildPickableProviders } from './provider-helpers.js';
 import { SessionStats } from './session-stats.js';
+import { deriveFsAccessPair } from './settings-menu.js';
 import type { CommitLLMProvider } from './slash-commands/commit-llm.js';
 import { generateCommitMessageWithLLM } from './slash-commands/commit-llm.js';
 import { makeProviderClassifier } from './slash-commands/dispatch-llm.js';
@@ -2785,21 +2786,31 @@ export async function main(argv: string[]): Promise<number> {
           config = patchConfig(config, { maxConcurrent: s.maxConcurrent });
         }
         if (s.restrictFsToRoot !== undefined || s.allowOutsideProjectRoot !== undefined) {
-          const allowOutsideProjectRoot =
-            s.allowOutsideProjectRoot ?? !Boolean(s.restrictFsToRoot);
-          const restrictToProjectRoot =
-            s.restrictFsToRoot ?? !allowOutsideProjectRoot;
-          // Toggle the live filesystem-access scope on the leader context so
-          // file tools immediately honor the new boundary. Subagents spawned
-          // afterwards read the patched config below.
-          context.allowOutsideProjectRoot = allowOutsideProjectRoot;
-          // Dual-write both config keys in sync (inverses): the new canonical
-          // features.allowOutsideProjectRoot plus the legacy
-          // tools.restrictToProjectRoot, so older readers don't break.
-          config = patchConfig(config, {
-            features: { ...config.features, allowOutsideProjectRoot },
-            tools: { ...config.tools, restrictToProjectRoot },
-          });
+          // Single source of truth for the inverse pair — see
+          // deriveFsAccessPair in settings-menu.ts for the precedence
+          // rules. Without this, the picker and the /settings slash
+          // command would each maintain their own copy of the math
+          // and could disagree on contradictory inputs.
+          const fsAccess = deriveFsAccessPair(s);
+          if (fsAccess) {
+            // Toggle the live filesystem-access scope on the leader
+            // context so file tools immediately honor the new boundary.
+            // Subagents spawned afterwards read the patched config below.
+            context.allowOutsideProjectRoot = fsAccess.allowOutsideProjectRoot;
+            // Dual-write both config keys in sync (inverses): the new
+            // canonical features.allowOutsideProjectRoot plus the legacy
+            // tools.restrictToProjectRoot, so older readers don't break.
+            config = patchConfig(config, {
+              features: {
+                ...config.features,
+                allowOutsideProjectRoot: fsAccess.allowOutsideProjectRoot,
+              },
+              tools: {
+                ...config.tools,
+                restrictToProjectRoot: fsAccess.restrictToProjectRoot,
+              },
+            });
+          }
         }
       } catch {
         // Live-apply is best-effort; the persisted config is the source of truth.
