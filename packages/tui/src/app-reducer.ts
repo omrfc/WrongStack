@@ -3,7 +3,7 @@ import { expectDefined } from '@wrongstack/core';
 // This file has NO React or Ink dependencies.
 import type { HistoryEntry } from './components/history.js';
 import type { WorktreeRow } from './components/worktree-panel.js';
-import type { ChipMeta } from './components/statusline-picker.js';
+import { STATUSLINE_FIELD_COUNT, type ChipMeta } from './components/statusline-picker.js';
 
 import {
   AUDIT_LEVELS,
@@ -1042,7 +1042,7 @@ export function reducer(state: State, action: Action): State {
         statuslinePicker: { ...state.statuslinePicker, open: false, hint: undefined },
       };
     case 'statuslineFieldMove': {
-      const totalFields = 13; // 9 base chips + 4 stream chips
+      const totalFields = STATUSLINE_FIELD_COUNT;
       const next = (state.statuslinePicker.field + action.delta + totalFields) % totalFields;
       return {
         ...state,
@@ -1050,7 +1050,7 @@ export function reducer(state: State, action: Action): State {
       };
     }
     case 'statuslineFieldSet': {
-      const totalFields = 13; // 9 base chips + 4 stream chips
+      const totalFields = STATUSLINE_FIELD_COUNT;
       const field = action.field >= 0 && action.field < totalFields ? action.field : 0;
       return { ...state, statuslinePicker: { ...state.statuslinePicker, field, hint: undefined } };
     }

@@ -66,6 +66,7 @@ import { capabilitiesFor } from '@wrongstack/providers';
 import { createToolVisionAdapters } from '@wrongstack/runtime/vision';
 import { runSingleShotDispatch } from './boot/dispatch-singleshot.js';
 import { runWebUIDispatch } from './boot/dispatch-webui.js';
+import type { StatuslineConfigKey } from './slash-commands/statusline.js';
 import { wireAutoPhase } from './boot/tui-autophase-wiring.js';
 import { setupAutonomousCoordinator } from './boot/tui-coordinator-setup.js';
 import {
@@ -231,20 +232,10 @@ export interface ExecutionDeps {
    */
   getEnhancerReasoning?: () => import('@wrongstack/core').ReasoningRequest | undefined;
   /** Status bar hidden items controller (passed to TUI). */
-  statuslineHiddenItems: Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-  >;
-  setStatuslineHiddenItems: (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => void;
+  statuslineHiddenItems: StatuslineConfigKey[];
+  setStatuslineHiddenItems: (items: StatuslineConfigKey[]) => void;
   /** Atomically updates in-memory state AND persists statusline hidden items. */
-  saveStatuslineHiddenItems: (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => Promise<void>;
+  saveStatuslineHiddenItems: (items: StatuslineConfigKey[]) => Promise<void>;
   /** Agents monitor overlay controller (passed to TUI). */
   agentsMonitorController?: {
     visible: boolean;

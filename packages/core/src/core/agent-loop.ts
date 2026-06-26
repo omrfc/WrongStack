@@ -249,7 +249,9 @@ export function createAgentLoopHandler(
       );
       total = est.total;
     }
-    a.events.emit('ctx.pct', { load: total / maxContext, tokens: total, maxContext });
+    const rawLoad = maxContext > 0 ? total / maxContext : 0;
+    const load = Math.max(0, Math.min(1, rawLoad));
+    a.events.emit('ctx.pct', { load, rawLoad, tokens: total, maxContext });
   }
 
   function currentMaxContext(): number {

@@ -66,6 +66,7 @@ function FleetAgentDetailPanel({
   const [showFullToolLog, setShowFullToolLog] = useState(false);
   const meta = STATUS_META[agent.status];
   const active = agent.status === 'running';
+  const ctxPct = Math.min(100, Math.max(0, agent.ctxPct));
 
   const handleCopy = useCallback(async (text: string) => {
     try {
@@ -204,17 +205,17 @@ function FleetAgentDetailPanel({
                 <div
                   className={cn(
                     'h-full rounded-full transition-all',
-                    agent.ctxPct >= 85
+                    ctxPct >= 85
                       ? 'bg-destructive'
-                      : agent.ctxPct >= 70
+                      : ctxPct >= 70
                         ? 'bg-amber-500'
                         : 'bg-emerald-500',
                   )}
-                  style={{ width: `${Math.min(100, agent.ctxPct)}%` }}
+                  style={{ width: `${ctxPct}%` }}
                 />
               </div>
               <span className="text-[10px] text-muted-foreground tabular-nums font-mono">
-                {agent.ctxPct}% used
+                {ctxPct}% used
               </span>
             </div>
           </div>
@@ -389,6 +390,7 @@ export function FleetAgentRow({
 }) {
   const meta = STATUS_META[agent.status];
   const active = agent.status === 'running';
+  const ctxPct = Math.min(100, Math.max(0, agent.ctxPct));
 
   return (
     <button
@@ -445,18 +447,17 @@ export function FleetAgentRow({
           <div
             className={cn(
               'h-full rounded-full transition-all',
-              agent.ctxPct >= 85
+              ctxPct >= 85
                 ? 'bg-destructive'
-                : agent.ctxPct >= 70
+                : ctxPct >= 70
                   ? 'bg-amber-500'
                   : 'bg-emerald-500',
             )}
-            // Cap visual width at 200% so over-capacity bars still show meaningfully
-            style={{ width: `${Math.min(100, agent.ctxPct)}%` }}
+            style={{ width: `${ctxPct}%` }}
           />
         </div>
         <span className="text-[9px] tabular-nums text-muted-foreground font-mono leading-none">
-          {agent.maxContext > 0 ? `${agent.ctxPct}%` : '—'}
+          {agent.maxContext > 0 ? `${ctxPct}%` : '—'}
         </span>
       </div>
 

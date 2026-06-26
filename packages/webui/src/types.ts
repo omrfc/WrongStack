@@ -340,6 +340,7 @@ export interface WSContextPct {
   type: 'ctx.pct';
   payload: {
     load: number;
+    rawLoad?: number | undefined;
     tokens: number;
     maxContext: number;
   };

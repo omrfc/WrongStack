@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { buildChildEnv } from '../utils/child-env.js';
-import { PROMPT as DEFAULT_PROMPT } from './modes/default.js';
+import { PROMPT as DEFAULT_PROMPT, LEADER_AFTER_TASK_PROMPT } from './modes/default.js';
 import type { TextBlock } from '../types/blocks.js';
 import type { MemoryStore } from '../types/memory.js';
 import type { ModeStore } from '../types/mode.js';
@@ -296,6 +296,16 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
           // break the system prompt assembly.
         }
       }
+    }
+
+    // Leader-only after-task affordances (the `<next_steps>` block + post-task
+    // mailbox update). Host-only and appended last: subagents are headless
+    // workers whose output is parsed (SDD spec/plan/task JSON) or rolled up by
+    // the parent, so a `<next_steps>` tag there is just noise that leaks into
+    // specs/plans. Lives outside layer1 so the host keeps it in EVERY mode while
+    // no subagent ever receives it.
+    if (!ctx.subagent) {
+      blocks.push({ type: 'text', text: LEADER_AFTER_TASK_PROMPT });
     }
 
     return blocks;

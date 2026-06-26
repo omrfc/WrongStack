@@ -10,8 +10,11 @@ import {
   type PendingConfirm,
   type WsStatus,
   getTokenFromWsUrl,
+  getTokenFromPageUrl,
   defaultWsUrl,
   httpOriginForAuth,
+  stripTokenFromAddressBar,
+  stripTokenFromUrl,
 } from './ws-client-utils';
 
 // Re-export types for backward compat
@@ -25,6 +28,15 @@ export type { WsStatus };
 // where an XSS could lift it. See ws-auth.ts for the full policy and
 // security rationale.
 
+function wsUrlCanUseAuthCookie(wsUrl: string): boolean {
+  try {
+    const ws = new URL(wsUrl);
+    const auth = new URL(httpOriginForAuth());
+    return ws.hostname === auth.hostname;
+  } catch {
+    return true;
+  }
+}
 
 export class WrongStackWebSocketClient {
   private ws: WebSocket | null = null;
@@ -85,21 +97,23 @@ export class WrongStackWebSocketClient {
    * already set, when the server is on a loopback bind (no token
    * required), or when no token is available yet.
    *
-   * Failure is non-fatal: the legacy `?token=` URL path still works, so
-   * the client just continues to use it. Cookie is a defense-in-depth
-   * layer, not a hard requirement.
+   * Failure is non-fatal only for local loopback or explicit public-WS URL
+   * flows. Normal remote browser clients need the cookie path so the token does
+   * not remain in the WebSocket URL.
    */
   async ensureAuthCookie(): Promise<void> {
     if (typeof window === 'undefined') return;
     if (document.cookie.split(';').some((c) => c.trim().startsWith('ws_token='))) {
       // Cookie already set — the browser sends it automatically on the
       // WS upgrade. Nothing to do.
+      if (wsUrlCanUseAuthCookie(this.url)) this.url = stripTokenFromUrl(this.url);
+      stripTokenFromAddressBar();
       return;
     }
-    // The token, if any, is in the WS URL itself (server-printed on
-    // startup). sessionStorage persistence was removed in the C-2
+    // The token, if any, is in the initial page URL or in an explicitly
+    // configured WS URL. sessionStorage persistence was removed in the C-2
     // fix: the token must not live in client-accessible storage.
-    const token = getTokenFromWsUrl(this.url);
+    const token = getTokenFromWsUrl(this.url) ?? getTokenFromPageUrl();
     if (!token) return; // first boot, no token yet — fallback to loopback-bootstrap
     const authUrl = httpOriginForAuth() + `/ws-auth?token=${encodeURIComponent(token)}`;
     try {
@@ -117,10 +131,15 @@ export class WrongStackWebSocketClient {
           status: res.status,
           timestamp: new Date().toISOString(),
         }));
+      } else {
+        if (wsUrlCanUseAuthCookie(this.url)) {
+          this.url = stripTokenFromUrl(this.url);
+        }
+        stripTokenFromAddressBar();
       }
     } catch (err) {
-      // Network failure on the auth bootstrap is non-fatal — the URL
-      // token path still works. Just log it and continue.
+      // Network failure on the auth bootstrap may still work for loopback or
+      // explicit public-WS URL flows. Log it and let the handshake policy decide.
       console.warn(JSON.stringify({
         level: 'warn',
         event: 'ws_client.ws_auth_error',
@@ -149,19 +168,9 @@ export class WrongStackWebSocketClient {
       try {
         // Prefer the cookie path (C-2 fix): the browser already sends
         // `Cookie: ws_token=…` on the WS upgrade after `ensureAuthCookie`.
-        // Fall back to `?token=` from sessionStorage when the cookie
-        // is missing (loopback bind, first boot, or `ensureAuthCookie`
-        // was unable to reach `/ws-auth`). The URL path will be
-        // removed once the frontend fully migrates — for now it's
-        // kept for back-compat and for the "browser opened with a
-        // token in the URL" case. The token is read from the URL
-        // itself (server-printed on startup); sessionStorage
-        // persistence was removed in the C-2 fix.
-        const urlToken = getTokenFromWsUrl(this.url);
-        const wsUrl = urlToken
-          ? `${this.url}${this.url.includes('?') ? '&' : '?'}token=${urlToken}`
-          : this.url;
-        this.ws = new WebSocket(wsUrl);
+        // If the first-load URL carried `?token=...`, ensureAuthCookie()
+        // strips it from this.url after the cookie exchange succeeds.
+        this.ws = new WebSocket(this.url);
         this.ws.binaryType = 'arraybuffer';
 
         const connectTimeout = setTimeout(() => {

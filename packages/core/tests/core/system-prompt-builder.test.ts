@@ -28,14 +28,16 @@ describe('DefaultSystemPromptBuilder', () => {
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
-  it('emits three text blocks for empty memory/skills', async () => {
+  it('emits the identity/tools/env blocks plus the leader after-task block for the host', async () => {
     const b = new DefaultSystemPromptBuilder({ todayIso: '2026-05-13' });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
-    expect(blocks).toHaveLength(3);
+    // layer1 identity + tools + env + leader after-task (host-only, appended last)
+    expect(blocks).toHaveLength(4);
     expect(blocks[0]?.text).toContain(LAYER_1_IDENTITY.slice(0, 40));
     expect(blocks[1]?.text).toContain('No tools registered');
     expect(blocks[2]?.text).toContain('2026-05-13');
     expect(blocks[2]?.text).toContain(tmp);
+    expect(blocks[3]?.text).toContain('<next_steps>');
   });
 
   it('renders tool usage with usageHint or description fallback', async () => {
@@ -95,7 +97,8 @@ describe('DefaultSystemPromptBuilder', () => {
     } as never as SkillLoader;
     const b = new DefaultSystemPromptBuilder({ memoryStore: memory, skillLoader: skills });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
-    expect(blocks).toHaveLength(4);
+    // identity + tools + env + memory + leader after-task (host-only, last)
+    expect(blocks).toHaveLength(5);
     // Memory is in layer 4 (ephemeral)
     const last = blocks[3]!;
     expect(last.text).toContain('Project Memory');
@@ -120,7 +123,8 @@ describe('DefaultSystemPromptBuilder', () => {
     };
     const b = new DefaultSystemPromptBuilder({ memoryStore: memory });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
-    expect(blocks).toHaveLength(3);
+    // identity + tools + env + leader after-task (no memory block)
+    expect(blocks).toHaveLength(4);
   });
 
   it('swallows memory store errors gracefully', async () => {
@@ -138,7 +142,8 @@ describe('DefaultSystemPromptBuilder', () => {
     };
     const b = new DefaultSystemPromptBuilder({ memoryStore: memory });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
-    expect(blocks).toHaveLength(3); // memory swallowed → no layer 4
+    // identity + tools + env + leader after-task; memory swallowed → no layer 4
+    expect(blocks).toHaveLength(4);
   });
 
   it('caches environment block across builds', async () => {

@@ -34,6 +34,7 @@ export function AgentDetail({
   const [copied, setCopied] = useState(false);
   const leaderId = useFleetStore((s) => s.leaderId);
   const isLeader = agent.id === leaderId;
+  const ctxPct = Math.min(100, Math.max(0, agent.ctxPct));
 
   const handleCopy = useCallback(async (text: string) => {
     try {
@@ -45,9 +46,9 @@ export function AgentDetail({
     }
   }, []);
   const ctxTone =
-    agent.ctxPct >= 85
+    ctxPct >= 85
       ? 'bg-red-500/15 text-red-600 dark:text-red-400'
-      : agent.ctxPct >= 70
+      : ctxPct >= 70
         ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
         : 'bg-muted text-muted-foreground';
 
@@ -161,20 +162,20 @@ export function AgentDetail({
               <div className="flex items-center justify-between text-[10px]">
                 <span className="text-muted-foreground">Context window</span>
                 <span className={cn('tabular font-medium', ctxTone.replace(/bg-\S+\s*/g, ''))}>
-                  {agent.ctxPct}%
+                  {ctxPct}%
                 </span>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className={cn(
                     'h-full rounded-full transition-all',
-                    agent.ctxPct >= 85
+                    ctxPct >= 85
                       ? 'bg-destructive'
-                      : agent.ctxPct >= 70
+                      : ctxPct >= 70
                         ? 'bg-[hsl(var(--warning))]'
                         : 'bg-primary',
                   )}
-                  style={{ width: `${Math.min(100, Math.max(2, agent.ctxPct))}%` }}
+                  style={{ width: `${Math.max(2, ctxPct)}%` }}
                 />
               </div>
               <div className="text-[10px] text-muted-foreground tabular text-right">
@@ -310,6 +311,7 @@ function AgentCard({
   const meta = STATUS_META[a.status];
   const active = a.status === 'running';
   const tool = a.currentTool ?? a.lastTool;
+  const ctxPct = Math.min(100, Math.max(0, a.ctxPct));
   return (
     <button
       type="button"
@@ -363,22 +365,22 @@ function AgentCard({
 
       {/* Context bar — only when running */}
       {active && a.maxContext > 0 && (
-        <div className="flex items-center gap-1" title={`Context ${a.ctxPct}%`}>
+        <div className="flex items-center gap-1" title={`Context ${ctxPct}%`}>
           <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
             <div
               className={cn(
                 'h-full rounded-full transition-all',
-                a.ctxPct >= 85
+                ctxPct >= 85
                   ? 'bg-destructive'
-                  : a.ctxPct >= 70
+                  : ctxPct >= 70
                     ? 'bg-[hsl(var(--warning))]'
                     : 'bg-primary',
               )}
-              style={{ width: `${Math.min(100, Math.max(2, a.ctxPct))}%` }}
+              style={{ width: `${Math.max(2, ctxPct)}%` }}
             />
           </div>
           <span className="tabular text-[9px] text-muted-foreground">
-            {a.maxContext > 0 ? `${a.ctxPct}%` : '—'}
+            {a.maxContext > 0 ? `${ctxPct}%` : '—'}
           </span>
         </div>
       )}

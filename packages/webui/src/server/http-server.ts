@@ -16,11 +16,10 @@
  *   cookie-based WS auth delivery (`/ws-auth` → `Set-Cookie: ws_token=
  *   …; HttpOnly; SameSite=Strict; Path=/`), this prevents cross-origin
  *   WS abuse.
- * - **API auth**: the `/api/sessions` and `/api/sessions/:id/agents`
- *   endpoints accept the same shared token as the WS upgrade, via the
- *   `X-WS-Token` header. Without it, those endpoints return 401. This
- *   closes the LAN-attacker enumeration vector when `wsHost` is
- *   non-loopback (e.g. `WS_HOST=0.0.0.0`).
+ * - **Access auth**: on non-loopback binds, all HTTP routes require the same
+ *   shared token as the WS upgrade, accepted via `?token=...`, `X-WS-Token`,
+ *   or the `ws_token` HttpOnly cookie. This protects the React UI and the
+ *   `/api/*` control/read endpoints when `WS_HOST=0.0.0.0`.
  *
  * Extracted from `index.ts` so the static-serve concern can be tested
  * with a tiny fake `distDir` and asserted on path-traversal, MIME
@@ -38,7 +37,7 @@ import {
   handleApiSessionMessage,
   handleApiSessions,
 } from './http-server/api-handlers.js';
-import { isLoopbackBind, tokenMatches } from './ws-auth.js';
+import { extractTokenFromCookie, isLoopbackBind, tokenMatches } from './ws-auth.js';
 import type { FileWatcherMetrics } from './setup-events.js';
 
 export interface CreateHttpServerOptions {
@@ -54,17 +53,24 @@ export interface CreateHttpServerOptions {
    */
   wsPort: number;
   /**
+   * Public WebSocket URL injected into the frontend. Use this behind tunnels or
+   * reverse proxies where the browser-facing WS URL differs from host:wsPort.
+   */
+  publicWsUrl?: string | undefined;
+  /**
    * Path to the global WrongStack root (~/.wrongstack). Used by the
    * /api/sessions and /api/sessions/:id/agents endpoints to read the
    * cross-process SessionRegistry.
    */
   globalRoot?: string | undefined;
   /**
-   * Shared auth token for `/api/*` endpoints. Required for non-loopback
-   * binds (LAN exposure). Loopback binds accept any local origin without
+   * Shared auth token for HTTP and WS access. Required for non-loopback
+   * binds (LAN exposure). Loopback binds accept local browser access without
    * a token (the WS path's loopback-bootstrap policy — see ws-auth.ts).
    */
   apiToken?: string | undefined;
+  /** Force HTTP token auth even on loopback binds, useful behind public tunnels. */
+  requireToken?: boolean | undefined;
   /**
    * If true, the `/ws-auth` endpoint exchanges a `?token=` query param (or
    * `X-WS-Token` header) for an `HttpOnly` auth cookie. The cookie is then
@@ -119,11 +125,88 @@ export function injectWsPort(html: string, wsPort: number): string {
   return `${tag}\n${html}`;
 }
 
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+export function injectWsConfig(
+  html: string,
+  opts: { wsPort: number; publicWsUrl?: string | undefined },
+): string {
+  let out = injectWsPort(html, opts.wsPort);
+  if (!opts.publicWsUrl || out.includes('name="wrongstack-ws-url"')) return out;
+  const tag = `<meta name="wrongstack-ws-url" content="${escapeHtmlAttr(opts.publicWsUrl)}" />`;
+  if (out.includes('</head>')) {
+    return out.replace('</head>', `  ${tag}\n  </head>`);
+  }
+  return `${tag}\n${out}`;
+}
+
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function wsTokenCookie(token: string): string {
+  return `ws_token=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600`;
+}
+
+function requestToken(req: http.IncomingMessage, url: URL): string | undefined {
+  return (
+    url.searchParams.get('token') ??
+    firstHeader(req.headers['x-ws-token']) ??
+    extractTokenFromCookie(req.headers.cookie)
+  );
+}
+
+function requestHostForCsp(hostHeader: string | string[] | undefined): string | undefined {
+  const raw = firstHeader(hostHeader)?.trim();
+  if (!raw) return undefined;
+  try {
+    return new URL(`http://${raw}`).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+function formatCspHostname(hostname: string): string {
+  return hostname.includes(':') && !hostname.startsWith('[') ? `[${hostname}]` : hostname;
+}
+
+function cspSourceFromUrl(rawUrl: string): string | undefined {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'ws:' && url.protocol !== 'wss:') return undefined;
+    return `${url.protocol}//${formatCspHostname(url.hostname)}${url.port ? `:${url.port}` : ''}`;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Build the Content-Security-Policy value for the given WS port. */
-export function buildCspHeader(wsPort: number): string {
+export function buildCspHeader(
+  wsPort: number,
+  requestHost?: string | undefined,
+  publicWsUrl?: string | undefined,
+): string {
+  const connect = new Set([
+    "'self'",
+    `ws://127.0.0.1:${wsPort}`,
+    `wss://127.0.0.1:${wsPort}`,
+  ]);
+  if (requestHost && requestHost !== '127.0.0.1') {
+    const host = formatCspHostname(requestHost);
+    connect.add(`ws://${host}:${wsPort}`);
+    connect.add(`wss://${host}:${wsPort}`);
+  }
+  const publicWsSource = publicWsUrl ? cspSourceFromUrl(publicWsUrl) : undefined;
+  if (publicWsSource) connect.add(publicWsSource);
   return (
     `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ` +
-    `connect-src 'self' ws://127.0.0.1:${wsPort} wss://127.0.0.1:${wsPort}; ` +
+    `connect-src ${Array.from(connect).join(' ')}; ` +
     `img-src 'self' data:; font-src 'self' data:; worker-src 'self' blob:; object-src 'none'; ` +
     `base-uri 'self'; frame-ancestors 'none'; form-action 'self'`
   );
@@ -179,14 +262,19 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
   const port = opts.port ?? Number.parseInt(process.env['PORT'] ?? '3456', 10);
   const distDir = path.resolve(opts.distDir);
   const wsPort = opts.wsPort;
-  // Loopback bind: no API token required (mirrors WS loopback-bootstrap).
-  // LAN bind: caller MUST supply a token; we reject any /api request that
-  // doesn't present it via `X-WS-Token` (constant-time compared).
-  const requireApiToken = !isLoopbackBind(opts.host) && Boolean(opts.apiToken);
+  // Loopback bind: no HTTP token required (mirrors WS loopback-bootstrap).
+  // LAN bind: caller MUST supply a token; fail closed if it is absent.
+  const requireAccessToken = Boolean(opts.requireToken) || !isLoopbackBind(opts.host);
 
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
+      const providedAccessToken = requestToken(req, url);
+      const accessTokenOk =
+        Boolean(opts.apiToken) && tokenMatches(providedAccessToken, opts.apiToken ?? '');
+      const shouldSetAuthCookie =
+        Boolean(opts.apiToken) &&
+        tokenMatches(url.searchParams.get('token') ?? undefined, opts.apiToken ?? '');
 
       // ── API routes ──────────────────────────────────────────────────
       // /ws-auth — exchange a one-shot token (header or query) for an
@@ -198,8 +286,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
         // Accept the token from `?token=` query (browser navigation
         // from the server-printed URL) OR the `X-WS-Token` header
         // (scripted client).
-        const provided =
-          url.searchParams.get('token') ?? (req.headers['x-ws-token'] as string | undefined);
+        const provided = requestToken(req, url);
         if (!provided || !opts.apiToken || !tokenMatches(provided, opts.apiToken)) {
           res.writeHead(401, { 'Content-Type': 'text/plain' });
           res.end('Unauthorized');
@@ -212,7 +299,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
         // and a Secure cookie over HTTP would not be sent by the browser.
         res.writeHead(200, {
           'Content-Type': 'text/plain',
-          'Set-Cookie': `ws_token=${encodeURIComponent(opts.apiToken)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600`,
+          'Set-Cookie': wsTokenCookie(opts.apiToken),
           // Belt-and-braces: tell any caches the cookie response itself
           // is sensitive.
           'Cache-Control': 'no-store',
@@ -221,14 +308,26 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
         return;
       }
 
+      if (requireAccessToken && !accessTokenOk) {
+        res.writeHead(401, {
+          'Content-Type': 'text/plain',
+          'Cache-Control': 'no-store',
+        });
+        res.end('Unauthorized');
+        return;
+      }
+
+      if (shouldSetAuthCookie && opts.apiToken) {
+        res.setHeader('Set-Cookie', wsTokenCookie(opts.apiToken));
+        res.setHeader('Cache-Control', 'no-store');
+      }
+
       // /api/fleet/ping — push-on-write nudge from a same-project TUI/REPL.
       // Triggers an immediate fleet re-broadcast of data the WS clients already
       // receive (no new disclosure, no persistent mutation). Same auth posture
       // as /api/sessions: open on loopback, token-gated on a LAN bind.
       if (url.pathname === '/api/fleet/ping' && req.method === 'POST') {
-        const headerToken = req.headers['x-ws-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+        if (requireAccessToken && !accessTokenOk) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
@@ -244,12 +343,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       }
 
       if (url.pathname === '/api/sessions' && req.method === 'GET') {
-        // `req.headers['x-ws-token']` is typed as `string | string[] | undefined`
-        // because some Node http clients send repeated headers as an array.
-        // Pick the first value for the constant-time compare.
-        const headerToken = req.headers['x-ws-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+        if (requireAccessToken && !accessTokenOk) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
@@ -260,9 +354,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
 
       const agentsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/agents$/);
       if (agentsMatch && req.method === 'GET') {
-        const headerToken = req.headers['x-ws-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+        if (requireAccessToken && !accessTokenOk) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
@@ -277,9 +369,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       // reader; the browser re-fetches to tail it live.
       const eventsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/events$/);
       if (eventsMatch && req.method === 'GET') {
-        const headerToken = req.headers['x-ws-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+        if (requireAccessToken && !accessTokenOk) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
@@ -296,9 +386,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       // TUI/REPL working in the same project. Loopback-open, token-gated on LAN.
       const msgMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/message$/);
       if (msgMatch && req.method === 'POST') {
-        const headerToken = req.headers['x-ws-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+        if (requireAccessToken && !accessTokenOk) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
@@ -311,9 +399,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       // replies). Makes the two-way loop visible in Fleet HQ.
       const mailboxMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mailbox$/);
       if (mailboxMatch && req.method === 'GET') {
-        const headerToken = req.headers['x-ws-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+        if (requireAccessToken && !accessTokenOk) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
@@ -325,9 +411,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       // /api/sessions/:id/interrupt — cooperative stop (control message).
       const interruptMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/interrupt$/);
       if (interruptMatch && req.method === 'POST') {
-        const headerToken = req.headers['x-ws-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+        if (requireAccessToken && !accessTokenOk) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
@@ -343,9 +427,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
 
       // /api/fleet/broadcast — one message to every live session's leader.
       if (url.pathname === '/api/fleet/broadcast' && req.method === 'POST') {
-        const headerToken = req.headers['x-ws-token'];
-        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+        if (requireAccessToken && !accessTokenOk) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized' }));
           return;
@@ -355,7 +437,8 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       }
 
       // Debug endpoint: /debug/watcher-metrics
-      // Returns file watcher metrics as JSON. No auth required (localhost only by default).
+      // Returns file watcher metrics as JSON. Protected by the same HTTP access
+      // token when the server is bound beyond loopback.
       if (url.pathname === '/debug/watcher-metrics' && req.method === 'GET') {
         if (opts.watcherMetrics) {
           // Update computed fields before returning
@@ -409,14 +492,17 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
 
       if (ext === '.html') {
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Content-Security-Policy', buildCspHeader(wsPort));
+        if (!shouldSetAuthCookie) res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader(
+          'Content-Security-Policy',
+          buildCspHeader(wsPort, requestHostForCsp(req.headers.host), opts.publicWsUrl),
+        );
         // Stamp the live WS port into the HTML so the frontend dials this
         // instance's backend (not the hardcoded default) — required for
         // running multiple WebUI instances on different ports.
         const html = await fs.readFile(resolvedPath, 'utf8');
         res.writeHead(200);
-        res.end(injectWsPort(html, wsPort));
+        res.end(injectWsConfig(html, { wsPort, publicWsUrl: opts.publicWsUrl }));
         return;
       }
 
@@ -433,9 +519,13 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
             'X-Content-Type-Options': 'nosniff',
             'X-Frame-Options': 'DENY',
             'Referrer-Policy': 'strict-origin-when-cross-origin',
-            'Content-Security-Policy': buildCspHeader(wsPort),
+            'Content-Security-Policy': buildCspHeader(
+              wsPort,
+              requestHostForCsp(req.headers.host),
+              opts.publicWsUrl,
+            ),
           });
-          res.end(injectWsPort(html, wsPort));
+          res.end(injectWsConfig(html, { wsPort, publicWsUrl: opts.publicWsUrl }));
         } catch {
           res.writeHead(404);
           res.end('Not found');

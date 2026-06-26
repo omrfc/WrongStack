@@ -234,6 +234,79 @@ describe('AutoCompactionMiddleware', () => {
     expect(ran).toBe(false);
   });
 
+  it('throws when hard compaction succeeds but remains above the hard threshold', async () => {
+    const stuckCompactor: Compactor = {
+      async compact() {
+        return {
+          before: 9500,
+          after: 9500,
+          fullRequestTokensBefore: 9500,
+          fullRequestTokensAfter: 9500,
+          reductions: [],
+        };
+      },
+    };
+    const events = new EventBus();
+    const failures: Array<{ fatal: boolean; tokens: number; load: number }> = [];
+    events.on('compaction.failed', (p) => failures.push({ fatal: p.fatal, tokens: p.tokens, load: p.load }));
+
+    const mw = new AutoCompactionMiddleware(stuckCompactor, 10000, simpleEstimator(9500), {
+      warn: 0.5,
+      soft: 0.75,
+      hard: 0.9,
+    }, { events });
+
+    let ran = false;
+    await expect(
+      mw.handler()(mockContext(0), async (c) => {
+        ran = true;
+        return c;
+      }),
+    ).rejects.toThrow(/did not reduce context below hard threshold/);
+
+    expect(ran).toBe(false);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ fatal: true, tokens: 9500, load: 0.95 });
+  });
+
+  it('can continue when hard compaction remains above the hard threshold if configured', async () => {
+    const stuckCompactor: Compactor = {
+      async compact() {
+        return {
+          before: 9500,
+          after: 9500,
+          fullRequestTokensBefore: 9500,
+          fullRequestTokensAfter: 9500,
+          reductions: [],
+        };
+      },
+    };
+    const events = new EventBus();
+    const failures: Array<{ fatal: boolean }> = [];
+    events.on('compaction.failed', (p) => failures.push({ fatal: p.fatal }));
+
+    const mw = new AutoCompactionMiddleware(
+      stuckCompactor,
+      10000,
+      simpleEstimator(9500),
+      {
+        warn: 0.5,
+        soft: 0.75,
+        hard: 0.9,
+      },
+      { events, failureMode: 'continue' },
+    );
+
+    let ran = false;
+    await mw.handler()(mockContext(0), async (c) => {
+      ran = true;
+      return c;
+    });
+
+    expect(ran).toBe(true);
+    expect(failures).toEqual([{ fatal: false }]);
+  });
+
   it('uses custom estimator', async () => {
     const estimator = vi.fn(() => 9500);
     const mw = new AutoCompactionMiddleware(compactor, 10000, estimator, {

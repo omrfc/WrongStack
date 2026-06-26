@@ -563,11 +563,13 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
   events.on('provider.response', (e) => {
     if (e.usage?.input != null) {
       const maxCtx = context.provider.capabilities.maxContext;
-      const pct = maxCtx > 0 ? e.usage.input / maxCtx : 0;
+      const rawLoad = maxCtx > 0 ? e.usage.input / maxCtx : 0;
+      const load = Math.max(0, Math.min(1, rawLoad));
       const costUsd = context.tokenCounter.estimateCost().total;
       forwardSubagent('ctx_pct', {
         subagentId: 'leader',
-        load: pct,
+        load,
+        rawLoad,
         tokens: e.usage.input,
         maxContext: maxCtx,
         costUsd,

@@ -97,11 +97,93 @@ export async function runWebUIDispatch(ctx: WebUIDispatchContext): Promise<numbe
   // suppressed so they don't appear in both the terminal and the browser.
   renderer.setSilent(true);
   const { runWebUI } = await import('../webui-server.js');
+
+  const flagValue = (names: string[]): string | undefined => {
+    for (const name of names) {
+      if (!Object.prototype.hasOwnProperty.call(flags, name)) continue;
+      const value = flags[name];
+      if (typeof value === 'string' && value.trim() !== '') return value.trim();
+      throw new Error(`--${name} requires a value`);
+    }
+    return undefined;
+  };
+  const flagBoolean = (names: string[]): boolean | undefined => {
+    for (const name of names) {
+      if (!Object.prototype.hasOwnProperty.call(flags, name)) continue;
+      const value = flags[name];
+      if (value === undefined) continue;
+      if (typeof value === 'boolean') return value;
+      const normalized = value.trim().toLowerCase();
+      if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+      if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+      throw new Error(`--${name} must be a boolean value`);
+    }
+    return undefined;
+  };
+  const envFlag = (name: string): boolean => {
+    const value = process.env[name]?.trim().toLowerCase();
+    return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+  };
+  const parsePort = (value: string | undefined, fallback: number, label: string): number => {
+    if (value === undefined) return fallback;
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+      throw new Error(`${label} must be a port between 1 and 65535`);
+    }
+    return parsed;
+  };
+
+  let webuiHost: string;
+  let webuiHttpPort: number;
+  let webuiWsPort: number;
+  let webuiAccessToken: string | undefined;
+  let webuiPublicUrl: string | undefined;
+  let webuiPublicWsUrl: string | undefined;
+  let webuiRequireToken: boolean;
+  try {
+    webuiHost =
+      flagValue(['webui-host', 'host']) ??
+      process.env['WEBUI_HOST'] ??
+      process.env['WS_HOST'] ??
+      '127.0.0.1';
+    webuiHttpPort = parsePort(
+      flagValue(['webui-port', 'http-port']) ??
+        process.env['WEBUI_PORT'] ??
+        process.env['PORT'],
+      3456,
+      '--webui-port',
+    );
+    webuiWsPort = parsePort(
+      flagValue(['ws-port']) ?? flagValue(['port']) ?? process.env['WS_PORT'],
+      3457,
+      '--ws-port',
+    );
+    webuiAccessToken =
+      flagValue(['webui-token']) ?? process.env['WEBUI_TOKEN'] ?? process.env['WEBUI_AUTH_TOKEN'];
+    webuiPublicUrl =
+      flagValue(['webui-public-url', 'public-url']) ?? process.env['WEBUI_PUBLIC_URL'];
+    webuiPublicWsUrl =
+      flagValue(['webui-public-ws-url', 'public-ws-url']) ??
+      process.env['WEBUI_PUBLIC_WS_URL'];
+    webuiRequireToken =
+      flagBoolean(['webui-require-token', 'require-token']) ?? envFlag('WEBUI_REQUIRE_TOKEN');
+  } catch (err) {
+    renderer.setSilent(false);
+    renderer.writeInfo(color.red(`  ${err instanceof Error ? err.message : String(err)}`));
+    return 1;
+  }
+
   const webuiPromise = runWebUI({
     agent,
     events,
     session,
-    port: Number.parseInt(String(flags.port ?? '3457'), 10),
+    host: webuiHost,
+    port: webuiWsPort,
+    httpPort: webuiHttpPort,
+    accessToken: webuiAccessToken,
+    publicUrl: webuiPublicUrl,
+    publicWsUrl: webuiPublicWsUrl,
+    requireToken: webuiRequireToken,
     projectRoot,
     appConfig: config,
     open: !!flags.open,
@@ -131,16 +213,13 @@ export async function runWebUIDispatch(ctx: WebUIDispatchContext): Promise<numbe
     needsSetup,
     sddSubagentFactory,
     // Print the "open this" banner only once the server is actually
-    // listening, using the RESOLVED ports. The requested port
-    // (flags.port) auto-advances past busy ports inside runWebUI, so a
-    // banner printed up-front with flags.port lies whenever 3456/3457 are
-    // taken (a second instance, leftover sockets). Bind is 127.0.0.1-only,
-    // so the host must be the literal IPv4 loopback — `localhost` resolves
-    // to `::1` first on Windows and never reaches the server.
-    onListening: ({ httpPort: boundHttpPort }) => {
+    // listening, using the RESOLVED ports. Requested ports auto-advance past
+    // busy ports inside runWebUI, so a banner printed up-front lies whenever
+    // 3456/3457 are taken (a second instance, leftover sockets).
+    onListening: ({ url }) => {
       renderer.writeInfo(
         color.green(
-          `  ✦ WebUI running → ${color.bold(`http://127.0.0.1:${boundHttpPort}`)}`,
+          `  ✦ WebUI running → ${color.bold(url)}`,
         ),
       );
       renderer.writeInfo(

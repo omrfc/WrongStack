@@ -11,6 +11,17 @@ interface WizardMessage {
   payload?: Record<string, unknown>;
 }
 
+/** Short, single-line heading derived from a (possibly long) goal prompt. */
+function deriveTitle(goal: string): string {
+  const firstLine = goal
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!firstLine) return 'New SDD Project';
+  const sentence = firstLine.split(/(?<=[.!?])\s/)[0] ?? firstLine;
+  return sentence.length <= 64 ? sentence : `${sentence.slice(0, 63).trimEnd()}…`;
+}
+
 /**
  * Dependencies each webui server supplies. The handler is deliberately
  * agent-agnostic: every surface decides how to build a driver, how to run an
@@ -111,7 +122,10 @@ export class SddWizardWebSocketHandler {
     }
     if (this.busy) return;
     this.driver = this.deps.makeDriver();
-    const prompt = this.driver.start(goal);
+    // Keep the operator's full prompt as the interview's intent/goal, but give
+    // the session a short readable title — pasting the whole prompt as the title
+    // made the wizard header unreadable.
+    const prompt = this.driver.start(deriveTitle(goal), goal);
     await this.runTurn(prompt);
   }
 

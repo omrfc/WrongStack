@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import {
+  buildWebUIAccessUrl,
   openBrowser,
   registerInstance,
   unregisterInstance,
@@ -33,6 +34,8 @@ export interface RegisterWebuiInstanceParams {
   host: string;
   httpPort: number;
   wsPort: number;
+  /** Browser-facing public URL when served through a tunnel/proxy. */
+  publicUrl?: string | undefined;
   projectRoot: string;
   /** ISO timestamp when the instance registered. */
   startedAt: string;
@@ -64,7 +67,11 @@ export function registerWebuiInstance(
       projectRoot: p.projectRoot,
       projectName: path.basename(p.projectRoot) || p.projectRoot,
       startedAt: p.startedAt,
-      url: `http://${p.host}:${p.httpPort}`,
+      url: buildWebUIAccessUrl({
+        host: p.host,
+        port: p.httpPort,
+        publicUrl: p.publicUrl,
+      }),
     },
     p.registryBaseDir,
   ).catch(() => {});
@@ -81,6 +88,8 @@ export interface AnnounceWebuiReadyParams {
   open: boolean;
   /** Auth token for WS connections. Included in the URL so the frontend can exchange it for an HttpOnly cookie via /ws-auth. */
   wsToken?: string;
+  /** Browser-facing public URL when served through a tunnel/proxy. */
+  publicUrl?: string | undefined;
   log?: (msg: string) => void;
   openBrowserFn?: (url: string) => void;
 }
@@ -92,11 +101,15 @@ export interface AnnounceWebuiReadyParams {
 export function announceWebuiReady(p: AnnounceWebuiReadyParams): void {
   const log = p.log ?? ((m: string) => console.log(m));
   const launch = p.openBrowserFn ?? openBrowser;
-  // Include the auth token in the URL so the frontend can exchange it for an HttpOnly cookie.
-  // This closes C-598 (query-string token exposure) after the first /ws-auth request.
-  const openUrl = p.wsToken
-    ? `http://${p.host}:${p.httpPort}?token=${encodeURIComponent(p.wsToken)}`
-    : `http://${p.host}:${p.httpPort}`;
+  // Include the auth token in the URL so the frontend can exchange it for an
+  // HttpOnly cookie. Wildcard binds are printed as a local browser URL because
+  // http://0.0.0.0 is not navigable.
+  const openUrl = buildWebUIAccessUrl({
+    host: p.host,
+    port: p.httpPort,
+    token: p.wsToken,
+    publicUrl: p.publicUrl,
+  });
   p.server.on('listening', () => {
     log(
       `\n  ▸ WebUI ready — open \x1b[1m${openUrl}\x1b[0m in your browser` +

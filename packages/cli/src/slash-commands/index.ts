@@ -306,23 +306,13 @@ export interface SlashCommandContext {
    * Current list of hidden status bar items. Written by the /statusline command
    * so the TUI can update without a restart.
    */
-  statuslineHiddenItems?: Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-  >;
-  setStatuslineHiddenItems?: (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => void;
+  statuslineHiddenItems?: import('./statusline.js').StatuslineConfigKey[];
+  setStatuslineHiddenItems?: (items: import('./statusline.js').StatuslineConfigKey[]) => void;
   /**
    * Atomically updates the in-memory hidden items list AND persists to
    * ~/.wrongstack/statusline.json. Used by the TUI's statusline picker.
    */
-  saveStatuslineHiddenItems?: (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => Promise<void>;
+  saveStatuslineHiddenItems?: (items: import('./statusline.js').StatuslineConfigKey[]) => Promise<void>;
   /**
    * Controller for the agents monitor overlay. The TUI installs the actual
    * setter on mount via a shared controller; before that, calls are buffered

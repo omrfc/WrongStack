@@ -295,11 +295,23 @@ export function handleCompactionFailed(msg: WSServerMessage) {
     tokens: number;
     maxContext: number;
     fatal: boolean;
+    budget?: { inputTokens: number; availableInputTokens: number; load: number };
   };
-  const load = payload.maxContext > 0 ? Math.round((payload.tokens / payload.maxContext) * 100) : 0;
+  let load: number;
+  let label: string;
+  if (payload.budget && payload.budget.availableInputTokens > 0) {
+    // Prefer budget-derived load when the server supplies it (more accurate than tokens/maxContext).
+    load = Math.min(100, Math.max(0, Math.round(payload.budget.load * 100)));
+    label = 'input budget';
+  } else {
+    load = payload.maxContext > 0
+      ? Math.min(100, Math.max(0, Math.round((payload.tokens / payload.maxContext) * 100)))
+      : 0;
+    label = 'context';
+  }
   useChatStore.getState().addMessage({
     role: 'assistant',
-    content: `Compaction failed at ${payload.level} (${load}% context): ${payload.message}`,
+    content: `Compaction failed at ${payload.level} (${load}% ${label}): ${payload.message}`,
     isError: payload.fatal,
   });
   toast.error(`Compaction failed: ${payload.message}`);

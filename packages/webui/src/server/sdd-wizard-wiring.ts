@@ -47,6 +47,19 @@ export interface SddWizardWiringOptions {
  * isolated turn off the main chat bus) and the real multi-agent run, so each
  * server only has to supply the right factory for its process.
  */
+/**
+ * Prepended to every isolated interview/splitter turn. Keeps the spec interview
+ * a pure planning conversation — no file writes, no shell — regardless of how
+ * "implement"-flavoured the underlying phase prompt reads.
+ */
+const PLANNING_ONLY_GUARD =
+  'SYSTEM: You are running a PLANNING-ONLY specification interview. Do NOT write, ' +
+  'create, or edit any files, and do NOT run shell/terminal commands or use any ' +
+  'code-editing tools — they are disabled here and any attempt will fail and waste ' +
+  'the turn. Respond with TEXT ONLY: ask your question, or emit the requested spec / ' +
+  'plan / task JSON. All code is written later, automatically, once the plan is ' +
+  'approved and the multi-agent run starts.\n\n---\n\n';
+
 export function buildSddWizardDeps(opts: SddWizardWiringOptions): SddWizardDeps {
   const registry = new SddRunRegistry();
   let isolatedSeq = 0;
@@ -58,17 +71,25 @@ export function buildSddWizardDeps(opts: SddWizardWiringOptions): SddWizardDeps 
    * the repo (restricted to the read-only capability floor; the execute phase is
    * where writes happen). The factory's per-turn cleanup is invoked here because
    * we drive it directly, not via makeAgentSubagentRunner.
+   *
+   * The interview is PLANNING-ONLY: it must never write code. The read-only
+   * capability floor already denies fs.write/shell, but a capable model will
+   * still *attempt* a write/bash call when the implementation-planning prompt
+   * mentions "implement" — the call then fails and derails the turn. So we belt-
+   * and-suspenders it: (1) disable the mutating tools by name, and (2) prepend an
+   * explicit text guard so the agent never even tries. Code is written later, by
+   * the real run, after the plan is approved.
    */
   const runIsolatedTurn = async (prompt: string, name: string): Promise<string> => {
     const result = await opts.subagentFactory({
       id: `sdd-${name.toLowerCase().replace(/\s+/g, '-')}-${isolatedSeq++}`,
       role: 'executor',
       name,
-      disabledTools: ['delegate'],
+      disabledTools: ['delegate', 'write', 'edit', 'patch', 'bash', 'exec'],
       allowedCapabilities: ['fs.read', 'net.outbound'],
     });
     try {
-      const res = await result.agent.run([{ type: 'text', text: prompt }]);
+      const res = await result.agent.run([{ type: 'text', text: PLANNING_ONLY_GUARD + prompt }]);
       return res.finalText ?? '';
     } finally {
       await result.dispose?.();

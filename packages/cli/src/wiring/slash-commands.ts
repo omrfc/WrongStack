@@ -19,8 +19,8 @@ import type {
 } from '@wrongstack/core';
 import type { MultiAgentHost } from '../multi-agent.js';
 import { buildBuiltinSlashCommands } from '../slash-commands/index.js';
-import type { StatuslineConfig } from '../slash-commands/statusline.js';
-import { loadStatuslineConfig, saveStatuslineConfig } from '../slash-commands/statusline.js';
+import type { StatuslineConfig, StatuslineConfigKey } from '../slash-commands/statusline.js';
+import { STATUSLINE_CONFIG_KEYS, ensureStatuslineConfig, loadStatuslineConfig, saveStatuslineConfig } from '../slash-commands/statusline.js';
 
 export interface SlashCommandsDeps {
   slashRegistry: SlashCommandRegistry;
@@ -117,23 +117,14 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
   };
 
   // Statusline hidden items — derived from the config file
-  const hiddenItemsFromConfig = await loadStatuslineConfig();
-  const hiddenItemsList: Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-  > = [];
-  const ALL_ITEMS = ['todos', 'plan', 'tasks', 'fleet', 'git', 'elapsed', 'context', 'cost', 'working_dir'] as const;
-  for (const k of ALL_ITEMS) {
+  const hiddenItemsFromConfig = await ensureStatuslineConfig();
+  const hiddenItemsList: StatuslineConfigKey[] = [];
+  for (const k of STATUSLINE_CONFIG_KEYS) {
     if (!hiddenItemsFromConfig[k]) hiddenItemsList.push(k);
   }
   const statuslineHiddenItems = hiddenItemsList;
-  let currentHiddenItems = [...statuslineHiddenItems] as Array<
-    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-  >;
-  const setStatuslineHiddenItems = (
-    items: Array<
-      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-    >,
-  ) => {
+  let currentHiddenItems = [...statuslineHiddenItems];
+  const setStatuslineHiddenItems = (items: StatuslineConfigKey[]) => {
     currentHiddenItems = items;
   };
 

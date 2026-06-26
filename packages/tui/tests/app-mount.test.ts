@@ -72,7 +72,7 @@ describe('<App /> baseline mount (PR 0 of Issue #23)', () => {
         listSessions: async () => [],
         onResumeSession: noopAsync,
         fleetStreamController: undefined,
-        statuslineHiddenItems: new Set(),
+        statuslineHiddenItems: [],
         setStatuslineHiddenItems: noop,
         agentsMonitorController: undefined,
         initialGoal: undefined,

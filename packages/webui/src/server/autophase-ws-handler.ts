@@ -13,6 +13,23 @@ import {
 } from '@wrongstack/core';
 import type { Agent, Context, EventBus, Logger } from '@wrongstack/core';
 
+/**
+ * Derive a short, single-line heading from a (possibly multi-paragraph) goal
+ * prompt. Takes the first non-empty line, trims to its first sentence, and caps
+ * the length so AutoPhase headers stay readable. The full prompt is preserved
+ * separately as the graph description.
+ */
+function deriveTitle(goal: string): string {
+  const firstLine = goal
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!firstLine) return 'AutoPhase';
+  const sentence = firstLine.split(/(?<=[.!?])\s/)[0] ?? firstLine;
+  const trimmed = sentence.length <= 64 ? sentence : `${sentence.slice(0, 63).trimEnd()}…`;
+  return trimmed || 'AutoPhase';
+}
+
 function isGitRepo(cwd: string): boolean {
   try {
     const r = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, encoding: 'utf8', windowsHide: true });
@@ -185,7 +202,12 @@ export class AutoPhaseWebSocketHandler {
   }
 
   private async handleStart(payload?: Record<string, unknown>): Promise<void> {
-    const title = (payload?.goal as string) || (payload?.title as string) || 'Untitled Project';
+    // The caller sends the operator's full prompt as the goal. We keep it intact
+    // as the graph `description` and derive a short, human-readable `title` for
+    // headers / the board switcher — pasting the whole prompt as the title made
+    // the AutoPhase header unreadable.
+    const goal = (payload?.goal as string) || (payload?.title as string) || 'Untitled Project';
+    const title = deriveTitle(goal);
     const autonomous = (payload?.autonomous as boolean) ?? true;
 
     // Phase plan resolution:
@@ -194,13 +216,13 @@ export class AutoPhaseWebSocketHandler {
     //   3. failing that, fall back to the generic default phases.
     const phases = Array.isArray(payload?.phases)
       ? (payload.phases as PhaseTemplate[])
-      : await this.planPhases(title);
+      : await this.planPhases(goal);
 
     this.logger.info(`[AutoPhase] Starting: ${title}`);
 
     // Build the graph up-front so we have a reference for live broadcasts and
     // persistence *before* the (long-running) build begins.
-    const graph = await new PhaseGraphBuilder({ title, phases, autonomous }).build();
+    const graph = await new PhaseGraphBuilder({ title, description: goal, phases, autonomous }).build();
     this.graph = graph;
     this.abort = new AbortController();
     await this.store.save(graph);
@@ -474,6 +496,10 @@ export class AutoPhaseWebSocketHandler {
 
     return {
       title: this.graph.title,
+      // Full operator prompt, shown verbatim in a dedicated goal block (the
+      // title is only a short derived heading). Fall back to the title for
+      // legacy boards saved before the title/goal split.
+      goal: this.graph.description || this.graph.title,
       phases: phaseItems,
       tasks: taskItems,
       activePhaseId: currentActiveId,

@@ -45,6 +45,13 @@ describe('parseArgs', () => {
     expect(r.positional).toContain('prompt');
   });
 
+  it('treats --webui-require-token as a boolean flag', () => {
+    expect(BOOLEAN_FLAGS.has('webui-require-token')).toBe(true);
+    const r = parseArgs(['--webui', '--webui-require-token', 'prompt']);
+    expect(r.flags['webui-require-token']).toBe(true);
+    expect(r.positional).toContain('prompt');
+  });
+
   it('parses --fallback-model as a value flag (comma list preserved)', () => {
     expect(BOOLEAN_FLAGS.has('fallback-model')).toBe(false);
     const r = parseArgs(['--fallback-model', 'sonnet,haiku']);

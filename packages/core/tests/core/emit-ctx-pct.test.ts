@@ -174,6 +174,31 @@ describe('B5 — emitContextPct elision on idle loops', () => {
     expect(ctxPctEvents[0]!.load).toBeGreaterThan(0);
   });
 
+  it('caps ctx.pct load at 100% while preserving over-budget diagnostics', async () => {
+    const { agent, events, tmp, session } = await buildAgent({ maxContext: 100 });
+    cleanup = async () => {
+      await session.close();
+      await fs.rm(tmp, { recursive: true, force: true });
+    };
+
+    const ctxPctEvents: Array<{ load: number; rawLoad?: number | undefined; tokens: number; maxContext: number }> = [];
+    events.on('ctx.pct', (payload) => {
+      ctxPctEvents.push({
+        load: payload.load,
+        rawLoad: payload.rawLoad,
+        tokens: payload.tokens,
+        maxContext: payload.maxContext,
+      });
+    });
+
+    await agent.run('x'.repeat(2_000), {});
+
+    expect(ctxPctEvents.length).toBe(1);
+    expect(ctxPctEvents[0]!.tokens).toBeGreaterThan(ctxPctEvents[0]!.maxContext);
+    expect(ctxPctEvents[0]!.load).toBe(1);
+    expect(ctxPctEvents[0]!.rawLoad).toBeGreaterThan(1);
+  });
+
   it('emits ctx.pct again when messages grow (new user turn)', async () => {
     const { agent, events, tmp, session } = await buildAgent();
     cleanup = async () => {

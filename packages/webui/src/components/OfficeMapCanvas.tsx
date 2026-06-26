@@ -85,6 +85,10 @@ import {
 } from './OfficeMapCanvas/utils.js';
 import { feedColor, resolveClients } from './OfficeMapCanvas/resolve.js';
 
+function clampCtxPct(value: number | null | undefined): number {
+  return Math.min(100, Math.max(0, value ?? 0));
+}
+
 // ── Status LED ─────────────────────────────────────────────────────────────
 
 function StatusLED({ status, small, activity = 0 }: { status: ClientStatus; small?: boolean; activity?: number }) {
@@ -499,6 +503,7 @@ function AgentNode({ data }: { data: OfficeNodeData }) {
   const isError = data.status === 'error';
   const isCompleted = data.status === 'completed';
   const color = data.color || '#06b6d4';
+  const ctxPct = clampCtxPct(data.ctxPct);
 
   return (
     <div className={cn(
@@ -537,13 +542,13 @@ function AgentNode({ data }: { data: OfficeNodeData }) {
       </div>
 
       {/* Context-fill bar */}
-      {data.ctxPct != null && data.ctxPct > 0 && (
+      {ctxPct > 0 && (
         <div className="mb-1">
           <div className="flex justify-between text-[8px] text-gray-500 mb-0.5">
-            <span>ctx</span><span className={cn('font-mono', data.ctxPct >= 90 ? 'text-red-400' : data.ctxPct >= 70 ? 'text-amber-400' : 'text-gray-400')}>{data.ctxPct}%</span>
+            <span>ctx</span><span className={cn('font-mono', ctxPct >= 90 ? 'text-red-400' : ctxPct >= 70 ? 'text-amber-400' : 'text-gray-400')}>{ctxPct}%</span>
           </div>
           <div className="h-1 rounded-full bg-slate-700/60 overflow-hidden">
-            <div className={cn('h-full', data.ctxPct >= 90 ? 'bg-red-500' : data.ctxPct >= 70 ? 'bg-amber-500' : 'bg-cyan-500')} style={{ width: `${Math.min(100, data.ctxPct)}%` }} />
+            <div className={cn('h-full', ctxPct >= 90 ? 'bg-red-500' : ctxPct >= 70 ? 'bg-amber-500' : 'bg-cyan-500')} style={{ width: `${ctxPct}%` }} />
           </div>
         </div>
       )}
@@ -1738,6 +1743,7 @@ export function OfficeMapCanvas() {
             const isAgent = d.kind === 'agent';
             const isClient = d.kind === 'webui' || d.kind === 'tui' || d.kind === 'repl';
             const tokTotal = (d.tokensIn || 0) + (d.tokensOut || 0);
+            const ctxPct = clampCtxPct(d.ctxPct);
             return (
               <div className="space-y-1.5 text-xs">
                 <Row
@@ -1761,8 +1767,8 @@ export function OfficeMapCanvas() {
                     <Row k="Tokens in" v={fmtCompact(d.tokensIn)} />
                     <Row k="Tokens out" v={fmtCompact(d.tokensOut)} />
                     <Row k="Tokens total" v={fmtCompact(tokTotal)} />
-                    {d.ctxPct != null && d.ctxPct > 0 && (
-                      <Row k="Context" v={`${d.ctxPct}%`} accent={d.ctxPct >= 90 ? 'text-destructive' : d.ctxPct >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-foreground/70'} />
+                    {ctxPct > 0 && (
+                      <Row k="Context" v={`${ctxPct}%`} accent={ctxPct >= 90 ? 'text-destructive' : ctxPct >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-foreground/70'} />
                     )}
                     <Row k="Cost" v={`$${(d.costUsd || 0).toFixed(4)}`} accent="text-emerald-600 dark:text-emerald-400" />
                     {d.lastActivityAt && <Row k="Last seen" v={fmtAgo(d.lastActivityAt, now)} accent="text-muted-foreground" />}

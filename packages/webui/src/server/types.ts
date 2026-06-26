@@ -24,8 +24,23 @@ export interface WSClientMessage {
 }
 
 export interface WebUIOptions {
+  /** HTTP frontend port. Prefer `httpPort`; `port` is kept for compatibility. */
   port?: number | undefined;
+  /** HTTP frontend port. */
+  httpPort?: number | undefined;
   webuiPort?: number | undefined;
+  /** WebSocket backend port. */
+  wsPort?: number | undefined;
+  /** Host/interface to bind. */
+  wsHost?: string | undefined;
+  /** Fixed access token/password. Defaults to WEBUI_TOKEN or random per process. */
+  accessToken?: string | undefined;
+  /** Browser-facing HTTP URL, used in startup output and instance registry. */
+  publicUrl?: string | undefined;
+  /** Browser-facing WebSocket URL, injected into the frontend for tunnels/proxies. */
+  publicWsUrl?: string | undefined;
+  /** Force token/password protection even on loopback binds. */
+  requireToken?: boolean | undefined;
   /**
    * Pre-built backend services. When provided, `startWebUI` skips its
    * default agent/event-bus/session/store construction and wires the

@@ -45,6 +45,8 @@ export class DefaultMailbox implements Mailbox {
   private _byTo = new Map<string, Set<MailboxMessage>>();
   /** Secondary index: sender → Set of messages (points into _messageCache). */
   private _byFrom = new Map<string, Set<MailboxMessage>>();
+  /** Counts malformed JSONL lines skipped during parsing for observability. */
+  private _corruptionCount = 0;
 
   constructor(sessionDir: string) {
     this.filePath = path.join(sessionDir, MAILBOX_FILE);
@@ -52,6 +54,11 @@ export class DefaultMailbox implements Mailbox {
 
   get mailboxPath(): string {
     return this.filePath;
+  }
+
+  /** Returns the count of malformed JSONL lines encountered during reads. */
+  get corruptionCount(): number {
+    return this._corruptionCount;
   }
 
   // ── Send ──────────────────────────────────────────────────────────────
@@ -393,8 +400,9 @@ export class DefaultMailbox implements Mailbox {
         const msg = parsed as never as MailboxMessage;
         this._messageCache!.push(msg);
         this._indexMsg(msg);
-      } catch {
-        // Skip malformed lines
+      } catch (err) {
+        this._corruptionCount++;
+        console.debug(`[mailbox] skipped malformed line during incremental read: ${(err as Error).message}`);
       }
     }
     return this._messageCache!;
@@ -417,8 +425,9 @@ export class DefaultMailbox implements Mailbox {
           delete parsed['readAt'];
         }
         messages.push(parsed as never as MailboxMessage);
-      } catch {
-        // Skip malformed lines
+      } catch (err) {
+        this._corruptionCount++;
+        console.debug(`[mailbox] skipped malformed line during full parse: ${(err as Error).message}`);
       }
     }
     return messages;
