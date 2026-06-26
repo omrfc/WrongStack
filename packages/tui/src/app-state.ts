@@ -12,6 +12,7 @@ import type {
   LogLevel,
   ReasoningEffort,
   SettingsMode,
+  SettingsPickerPatch,
   StatuslineMode,
 } from './components/settings-picker.js';
 import type { ChipMeta, StatuslineItem } from './components/statusline-picker.js';
@@ -805,6 +806,13 @@ export type Action =
   | { type: 'settingsFieldMove'; delta: number }
   | { type: 'settingsFieldSet'; field: number }
   | { type: 'settingsValueChange'; delta: number }
+  /**
+   * Set a settings value directly from a typed patch (used by the
+   * `/settings <chord> <value>` slash command). The patch is produced
+   * by `resolveSettingsFieldValue` in settings-picker.tsx and validated
+   * before dispatch, so the reducer just spreads it.
+   */
+  | { type: 'settingsValueSet'; patch: SettingsPickerPatch }
   /**
    * Update the live row-search filter. Empty string clears the filter.
    * Setting any non-empty value while the filter is empty also implicitly

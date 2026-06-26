@@ -1100,6 +1100,16 @@ export function reducer(state: State, action: Action): State {
       }
       return state;
     }
+    case 'settingsValueSet': {
+      // Direct value-set from the `/settings <chord> <value>` slash
+      // command. The patch is already validated by
+      // `resolveSettingsFieldValue` before dispatch, so the reducer just
+      // spreads it and clears any stale hint.
+      return {
+        ...state,
+        settingsPicker: { ...state.settingsPicker, ...action.patch, hint: undefined },
+      };
+    }
     case 'settingsHint':
       return { ...state, settingsPicker: { ...state.settingsPicker, hint: action.text } };
     case 'settingsThinkingEditStart':

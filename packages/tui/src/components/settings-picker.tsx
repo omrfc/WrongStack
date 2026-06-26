@@ -1,5 +1,6 @@
 import { Box, Text } from '../ink.js';
 import type React from 'react';
+import { MAX_TUI_THINKING_WORD_LENGTH } from '../thinking-word.js';
 
 /** Selectable presets for the auto-proceed delay, so the field is fully
  *  keyboard-cyclable (←/→) instead of needing typed numeric input. */
@@ -408,6 +409,225 @@ export const THINKING_WORD_PRESETS = [
 
 export const CONFIG_SCOPES = ['global', 'project'] as const;
 export type ConfigScope = (typeof CONFIG_SCOPES)[number];
+
+// ─── Inline value-setting for `/settings <chord> <value>` ────────────
+//
+// These types and the resolver function allow the `/settings` slash
+// command to set a value directly from the prompt without opening the
+// picker overlay. The command handler calls `resolveSettingsFieldValue`
+// to validate the user's input; on success it dispatches
+// `settingsValueSet` with the returned patch and shows a confirmation.
+
+/**
+ * Partial patch for the configurable keys of the settings-picker state.
+ * Excludes non-configurable keys (open, field, lastSettingsField, filter,
+ * hint, thinkingWordEditing, thinkingWordDraft).
+ */
+export type SettingsPickerPatch = Partial<{
+  mode: SettingsMode;
+  delayMs: number;
+  titleAnimation: boolean;
+  yolo: boolean;
+  streamFleet: boolean;
+  chime: boolean;
+  confirmExit: boolean;
+  nextPrediction: boolean;
+  featureMcp: boolean;
+  featurePlugins: boolean;
+  featureMemory: boolean;
+  featureSkills: boolean;
+  featureModelsRegistry: boolean;
+  tokenSavingTier: TokenSavingTierTui;
+  allowOutsideProjectRoot: boolean;
+  contextAutoCompact: boolean;
+  contextStrategy: CompactorStrategy;
+  contextMode: ContextMode;
+  maxConcurrent: number;
+  logLevel: LogLevel;
+  auditLevel: AuditLevel;
+  indexOnStart: boolean;
+  multiDiffSummaryThreshold: number;
+  maxIterations: number;
+  autoProceedMaxIterations: number;
+  enhanceDelayMs: number;
+  enhanceEnabled: boolean;
+  enhanceLanguage: EnhanceLanguage;
+  debugStream: boolean;
+  statuslineMode: StatuslineMode;
+  reasoningMode: ReasoningMode;
+  reasoningEffort: ReasoningEffort;
+  reasoningPreserve: boolean;
+  thinkingWord: string;
+  cacheTtl: CacheTtl;
+  configScope: ConfigScope;
+}>;
+
+/**
+ * Human-readable labels for all 36 settings fields (0–35), in picker
+ * row order. Used by `resolveSettingsFieldValue` for confirmation and
+ * error messages, and by the `/settings` help text.
+ */
+export const SETTINGS_FIELD_LABELS: readonly string[] = [
+  'Default autonomy mode', // 0
+  'Auto-proceed delay', // 1
+  'Terminal title animation', // 2
+  'YOLO mode', // 3
+  'Stream fleet', // 4
+  'Completion chime', // 5
+  'Confirm before exit', // 6
+  'Next prediction', // 7
+  'MCP features', // 8
+  'Plugin features', // 9
+  'Memory features', // 10
+  'Skills features', // 11
+  'Models registry', // 12
+  'Token-saving mode', // 13
+  'Allow outside project root', // 14
+  'Max iterations', // 15
+  'Auto-proceed max iterations', // 16
+  'Refine preview countdown', // 17
+  'Refine', // 18
+  'Refine language', // 19
+  'Index on session start', // 20
+  'Multi-diff summary', // 21
+  'Thinking word', // 22
+  'Reasoning mode', // 23
+  'Reasoning effort', // 24
+  'Reasoning preserve', // 25
+  'Cache TTL', // 26
+  'Context auto-compact', // 27
+  'Compactor strategy', // 28
+  'Context mode', // 29
+  'Max concurrent', // 30
+  'Log level', // 31
+  'Audit level', // 32
+  'Stream debug logging', // 33
+  'Statusline', // 34
+  'Config scope', // 35
+];
+
+/**
+ * Resolve a free-text value for a given settings field into a typed
+ * state patch. Used by the `/settings <chord> <value>` slash command.
+ *
+ * Value parsing rules:
+ *  - **Boolean fields**: "on"/"off", "true"/"false", "yes"/"no",
+ *    "1"/"0" (case-insensitive).
+ *  - **Enum fields**: case-insensitive match against the allowed values.
+ *  - **Preset fields**: either the raw number (e.g. "500") or the
+ *    display name (e.g. "unlimited" for 0, "off" for 0, "1m" for 60000).
+ *  - **Text fields** (thinking word): accepted as-is, validated by
+ *    `normalizeTuiThinkingWord`.
+ *
+ * Returns `{ ok: true, patch, label, displayValue }` on success, or
+ * `{ ok: false, error }` with a helpful message listing valid options.
+ */
+export function resolveSettingsFieldValue(
+  field: number,
+  input: string,
+): { ok: true; patch: SettingsPickerPatch; label: string; displayValue: string } | { ok: false; error: string } {
+  const raw = input.trim().toLowerCase();
+  const label = SETTINGS_FIELD_LABELS[field] ?? `Field ${field}`;
+
+  // ── Boolean fields ──
+  const BOOL_FIELDS = new Map<number, keyof SettingsPickerPatch>([
+    [2, 'titleAnimation'], [3, 'yolo'], [4, 'streamFleet'], [5, 'chime'],
+    [6, 'confirmExit'], [7, 'nextPrediction'], [8, 'featureMcp'],
+    [9, 'featurePlugins'], [10, 'featureMemory'], [11, 'featureSkills'],
+    [12, 'featureModelsRegistry'], [14, 'allowOutsideProjectRoot'],
+    [18, 'enhanceEnabled'], [20, 'indexOnStart'], [25, 'reasoningPreserve'],
+    [27, 'contextAutoCompact'], [33, 'debugStream'],
+  ]);
+  const boolKey = BOOL_FIELDS.get(field);
+  if (boolKey) {
+    if (['on', 'true', 'yes', '1'].includes(raw)) {
+      return { ok: true, patch: { [boolKey]: true } as SettingsPickerPatch, label, displayValue: 'on' };
+    }
+    if (['off', 'false', 'no', '0'].includes(raw)) {
+      return { ok: true, patch: { [boolKey]: false } as SettingsPickerPatch, label, displayValue: 'off' };
+    }
+    return { ok: false, error: `Invalid value "${input}" for ${label}. Use on or off.` };
+  }
+
+  // ── Enum fields ──
+  // Each entry: [field, stateKey, allowedValues]
+  const ENUM_FIELDS: ReadonlyArray<readonly [number, keyof SettingsPickerPatch, readonly string[]]> = [
+    [0, 'mode', SETTINGS_MODES],
+    [13, 'tokenSavingTier', TOKEN_SAVING_TIERS],
+    [19, 'enhanceLanguage', ENHANCE_LANGUAGES],
+    [23, 'reasoningMode', REASONING_MODES],
+    [24, 'reasoningEffort', REASONING_EFFORTS],
+    [26, 'cacheTtl', CACHE_TTLS],
+    [28, 'contextStrategy', COMPACTOR_STRATEGIES],
+    [29, 'contextMode', CONTEXT_MODES],
+    [31, 'logLevel', LOG_LEVELS],
+    [32, 'auditLevel', AUDIT_LEVELS],
+    [34, 'statuslineMode', STATUSLINE_MODES],
+    [35, 'configScope', CONFIG_SCOPES],
+  ];
+  for (const [f, key, values] of ENUM_FIELDS) {
+    if (field !== f) continue;
+    const match = values.find((v) => v.toLowerCase() === raw);
+    if (match) {
+      return { ok: true, patch: { [key]: match } as SettingsPickerPatch, label, displayValue: match };
+    }
+    return {
+      ok: false,
+      error: `Invalid value "${input}" for ${label}. Valid: ${values.join(', ')}.`,
+    };
+  }
+
+  // ── Preset (numeric) fields ──
+  // Each entry: [field, stateKey, presets, formatFn]
+  // formatFn maps a preset number → its display name (for "unlimited", "off", etc.)
+  const presetLabel = (n: number, zeroLabel: string): string => (n === 0 ? zeroLabel : String(n));
+  const PRESET_FIELDS: ReadonlyArray<readonly [number, keyof SettingsPickerPatch, readonly number[], (n: number) => string]> = [
+    [1, 'delayMs', DELAY_PRESETS_MS, (n) => formatSettingsDelay(n)],
+    [15, 'maxIterations', MAX_ITERATIONS_PRESETS, (n) => formatMaxIterations(n)],
+    [16, 'autoProceedMaxIterations', AUTO_PROCEED_MAX_PRESETS, (n) => formatMaxIterations(n)],
+    [17, 'enhanceDelayMs', ENHANCE_DELAY_PRESETS, (n) => formatEnhanceDelay(n)],
+    [21, 'multiDiffSummaryThreshold', MULTI_DIFF_SUMMARY_THRESHOLD_PRESETS, (n) => formatMultiDiffSummaryThreshold(n)],
+    [30, 'maxConcurrent', MAX_CONCURRENT_PRESETS, (n) => presetLabel(n, 'runtime default')],
+  ];
+  for (const [f, key, presets, fmt] of PRESET_FIELDS) {
+    if (field !== f) continue;
+    // Try matching as a number first.
+    const asNum = Number.parseInt(raw, 10);
+    if (!Number.isNaN(asNum) && presets.includes(asNum)) {
+      return { ok: true, patch: { [key]: asNum } as SettingsPickerPatch, label, displayValue: fmt(asNum) };
+    }
+    // Try matching against display names (e.g. "unlimited" → 0, "30s" → 30000).
+    const byName = presets.find((p) => fmt(p).toLowerCase() === raw);
+    if (byName !== undefined) {
+      return { ok: true, patch: { [key]: byName } as SettingsPickerPatch, label, displayValue: fmt(byName) };
+    }
+    const options = presets.map((p) => fmt(p)).join(', ');
+    return {
+      ok: false,
+      error: `Invalid value "${input}" for ${label}. Available: ${options}.`,
+    };
+  }
+
+  // ── Text field (thinking word) ──
+  if (field === 22) {
+    const word = input.trim();
+    if (word.length === 0 || word.length > MAX_TUI_THINKING_WORD_LENGTH) {
+      return {
+        ok: false,
+        error: `"${input}" is not a valid thinking word. Use a single short word (1–${MAX_TUI_THINKING_WORD_LENGTH} chars, letters/numbers only).`,
+      };
+    }
+    if (!/^[\p{L}\p{N}_-]+$/u.test(word)) {
+      return {
+        ok: false,
+        error: `"${input}" is not a valid thinking word. Use a single short word (1–${MAX_TUI_THINKING_WORD_LENGTH} chars, letters/numbers only).`,
+      };
+    }
+    return { ok: true, patch: { thinkingWord: word }, label, displayValue: word };
+  }
+
+  return { ok: false, error: `Unknown settings field ${field}.` };
+}
 
 export function SettingsPicker({
   field,

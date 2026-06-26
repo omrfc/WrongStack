@@ -66,6 +66,7 @@ import { SessionsPanel } from './components/sessions-panel.js';
 import {
   SettingsPicker,
   THINKING_WORD_FIELD,
+  resolveSettingsFieldValue,
   settingsPickerJumpByName,
   settingsPickerJumpField,
   settingsPickerJumpNames,
@@ -2980,11 +2981,18 @@ export function App({
     const cmd = {
       name: 'settings',
       aliases: ['config', 'prefs'],
-      description: 'Open the interactive settings editor (19 config fields across 8 sections).',
-      argsHint: '[<chord>]',
+      description:
+        'Open the settings editor, or set a value inline: /settings [<chord> [<value>]].',
+      argsHint: '[<chord> [<value>]]',
       help:
-        'Open the settings editor. With no argument, opens on the last-visited row.\n' +
-        'With a chord name, opens on that row instead.\n\n' +
+        'Open the settings editor.\n\n' +
+        '  /settings              Open on the last-visited row\n' +
+        '  /settings <chord>      Open on that row\n' +
+        '  /settings <chord> <v>  Set <chord> to <v> without opening the picker\n\n' +
+        'Examples:\n' +
+        '  /settings yolo on      Enable YOLO mode\n' +
+        '  /settings multi-diff 8  Set multi-diff threshold to 8\n' +
+        '  /settings thinking-word pondering  Set the working-state word\n\n' +
         'Available chords:\n  ' +
         settingsPickerJumpNames().join('\n  '),
       async run(args: string) {
@@ -2993,6 +3001,61 @@ export function App({
           openSettings();
           return { message: undefined };
         }
+
+        // Check for `<chord> <value>` syntax — a space separates the
+        // row name from the value. Everything after the first space is
+        // the value (allows multi-word values like "thinking-word").
+        const spaceIdx = query.indexOf(' ');
+        if (spaceIdx > 0) {
+          const rowName = query.slice(0, spaceIdx);
+          const valueStr = query.slice(spaceIdx + 1).trim();
+          const field = settingsPickerJumpByName(rowName);
+          if (field === undefined) {
+            return {
+              message:
+                `Unknown settings row "${rowName}".\n` +
+                `Available chords:\n  ${settingsPickerJumpNames().join('\n  ')}`,
+            };
+          }
+          if (valueStr === '') {
+            // Trailing space but no value — fall back to navigation.
+            dispatch({ type: 'settingsFieldSet', field });
+            openSettings();
+            return { message: undefined };
+          }
+
+          const result = resolveSettingsFieldValue(field, valueStr);
+          if (!result.ok) {
+            return { message: result.error };
+          }
+
+          // 1. Update runtime state so the picker (if opened later)
+          //    reflects the change immediately.
+          dispatch({ type: 'settingsValueSet', patch: result.patch });
+
+          // 2. Persist to the canonical Settings shape. The auto-save
+          //    effect only fires while the picker is open, so we do it
+          //    manually here. The only key mapping is tokenSavingTier →
+          //    featureTokenSaving; all others are identical.
+          const cur = getSettings ? getSettings() : undefined;
+          if (cur && saveSettings) {
+            const { tokenSavingTier, ...rest } = result.patch;
+            const updated: Settings = {
+              ...cur,
+              ...rest,
+              ...(tokenSavingTier !== undefined
+                ? { featureTokenSaving: tokenSavingTier }
+                : {}),
+            };
+            Promise.resolve(saveSettings(updated)).then((err: string | null) => {
+              if (err) dispatch({ type: 'settingsHint', text: err });
+            });
+          }
+
+          return { message: `✓ ${result.label} → ${result.displayValue}` };
+        }
+
+        // Single token: navigation mode (open picker on that row).
         const field = settingsPickerJumpByName(query);
         if (field === undefined) {
           return {
@@ -3001,11 +3064,6 @@ export function App({
               `Available chords:\n  ${settingsPickerJumpNames().join('\n  ')}`,
           };
         }
-        // Update the runtime state so the picker lands on the right row,
-        // then open. We dispatch settingsFieldSet first (which also writes
-        // lastSettingsField — see the cross-session persistence work) so
-        // the auto-save effect persists this jump the next time the user
-        // closes the picker.
         dispatch({ type: 'settingsFieldSet', field });
         openSettings();
         return { message: undefined };
