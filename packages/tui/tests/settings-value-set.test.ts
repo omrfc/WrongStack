@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveSettingsFieldValue,
+  getSettingsFieldValue,
   SETTINGS_FIELD_LABELS,
   type SettingsPickerPatch,
+  type SettingsPickerValues,
 } from '../src/components/settings-picker.js';
 
 describe('resolveSettingsFieldValue', () => {
@@ -245,6 +247,148 @@ describe('resolveSettingsFieldValue', () => {
         const r = resolveSettingsFieldValue(f, '999999');
         expect(r.ok).toBe(false); // should fail with error, not crash
       }
+    });
+  });
+});
+
+// ── getSettingsFieldValue (read counterpart) ──────────────────────
+
+describe('getSettingsFieldValue', () => {
+  // A representative slice with all configurable keys populated with
+  // known values so we can assert exact display strings.
+  const baseValues: SettingsPickerValues = {
+    mode: 'auto',
+    delayMs: 30_000,
+    titleAnimation: true,
+    yolo: false,
+    streamFleet: true,
+    chime: true,
+    confirmExit: false,
+    nextPrediction: true,
+    featureMcp: true,
+    featurePlugins: false,
+    featureMemory: true,
+    featureSkills: true,
+    featureModelsRegistry: false,
+    tokenSavingTier: 'medium',
+    allowOutsideProjectRoot: true,
+    contextAutoCompact: false,
+    contextStrategy: 'hybrid',
+    contextMode: 'deep',
+    maxConcurrent: 10,
+    logLevel: 'debug',
+    auditLevel: 'standard',
+    indexOnStart: false,
+    multiDiffSummaryThreshold: 5,
+    maxIterations: 500,
+    autoProceedMaxIterations: 0,
+    enhanceDelayMs: 60_000,
+    enhanceEnabled: true,
+    enhanceLanguage: 'english',
+    debugStream: false,
+    statuslineMode: 'detailed',
+    reasoningMode: 'on',
+    reasoningEffort: 'xhigh',
+    reasoningPreserve: true,
+    thinkingWord: 'brewing',
+    cacheTtl: '5m',
+    configScope: 'project',
+  };
+
+  describe('boolean fields', () => {
+    it('returns "off" for false', () => {
+      const r = getSettingsFieldValue(baseValues, 3); // yolo = false
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.label).toBe('YOLO mode');
+        expect(r.displayValue).toBe('off');
+      }
+    });
+
+    it('returns "on" for true', () => {
+      const r = getSettingsFieldValue(baseValues, 5); // chime = true
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('on');
+    });
+  });
+
+  describe('enum fields', () => {
+    it('returns the raw enum value', () => {
+      const r = getSettingsFieldValue(baseValues, 0); // mode = 'auto'
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.label).toBe('Default autonomy mode');
+        expect(r.displayValue).toBe('auto');
+      }
+    });
+
+    it('returns reasoning effort', () => {
+      const r = getSettingsFieldValue(baseValues, 24); // xhigh
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('xhigh');
+    });
+
+    it('returns config scope', () => {
+      const r = getSettingsFieldValue(baseValues, 35); // project
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('project');
+    });
+  });
+
+  describe('preset fields', () => {
+    it('formats delay as "30s"', () => {
+      const r = getSettingsFieldValue(baseValues, 1); // delayMs = 30000
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('30s');
+    });
+
+    it('formats max iterations as "500"', () => {
+      const r = getSettingsFieldValue(baseValues, 15); // 500
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('500');
+    });
+
+    it('formats auto-proceed max as "unlimited" for 0', () => {
+      const r = getSettingsFieldValue(baseValues, 16); // 0
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('unlimited');
+    });
+
+    it('formats multi-diff threshold as "5"', () => {
+      const r = getSettingsFieldValue(baseValues, 21); // 5
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('5');
+    });
+
+    it('formats max concurrent as "10"', () => {
+      const r = getSettingsFieldValue(baseValues, 30); // 10
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('10');
+    });
+
+    it('formats max concurrent 0 as "runtime default"', () => {
+      const r = getSettingsFieldValue({ ...baseValues, maxConcurrent: 0 }, 30);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.displayValue).toBe('runtime default');
+    });
+  });
+
+  describe('text field', () => {
+    it('returns the thinking word', () => {
+      const r = getSettingsFieldValue(baseValues, 22); // brewing
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.label).toBe('Thinking word');
+        expect(r.displayValue).toBe('brewing');
+      }
+    });
+  });
+
+  describe('edge cases', () => {
+    it('returns error for out-of-range field', () => {
+      const r = getSettingsFieldValue(baseValues, 99);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain('99');
     });
   });
 });

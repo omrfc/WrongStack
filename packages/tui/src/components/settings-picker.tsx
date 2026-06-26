@@ -629,6 +629,78 @@ export function resolveSettingsFieldValue(
   return { ok: false, error: `Unknown settings field ${field}.` };
 }
 
+/**
+ * Read-only counterpart to {@link resolveSettingsFieldValue}. Given the
+ * current settings-picker values and a field index, returns the value
+ * formatted for display (e.g. `30s`, `unlimited`, `off`, `high`).
+ *
+ * Used by the `/settings-get <chord>` slash command so the user can
+ * query a setting without opening the picker.
+ *
+ * The input type is `SettingsPickerValues` — all keys of
+ * {@link SettingsPickerPatch} made required — which matches the
+ * settingsPicker state slice from app-state.ts (minus non-configurable
+ * keys like `open`, `field`, `filter`).
+ */
+export type SettingsPickerValues = {
+  [K in keyof SettingsPickerPatch]-?: SettingsPickerPatch[K];
+};
+
+export function getSettingsFieldValue(
+  values: SettingsPickerValues,
+  field: number,
+): { ok: true; label: string; displayValue: string } | { ok: false; error: string } {
+  const label = SETTINGS_FIELD_LABELS[field] ?? `Field ${field}`;
+
+  // Boolean fields — display as "on"/"off".
+  const BOOL_KEYS: ReadonlyArray<readonly [number, keyof SettingsPickerPatch]> = [
+    [2, 'titleAnimation'], [3, 'yolo'], [4, 'streamFleet'], [5, 'chime'],
+    [6, 'confirmExit'], [7, 'nextPrediction'], [8, 'featureMcp'],
+    [9, 'featurePlugins'], [10, 'featureMemory'], [11, 'featureSkills'],
+    [12, 'featureModelsRegistry'], [14, 'allowOutsideProjectRoot'],
+    [18, 'enhanceEnabled'], [20, 'indexOnStart'], [25, 'reasoningPreserve'],
+    [27, 'contextAutoCompact'], [33, 'debugStream'],
+  ];
+  for (const [f, key] of BOOL_KEYS) {
+    if (field !== f) continue;
+    return { ok: true, label, displayValue: values[key] ? 'on' : 'off' };
+  }
+
+  // Enum fields — display the raw value.
+  const ENUM_KEYS: ReadonlyArray<readonly [number, keyof SettingsPickerPatch]> = [
+    [0, 'mode'], [13, 'tokenSavingTier'], [19, 'enhanceLanguage'],
+    [23, 'reasoningMode'], [24, 'reasoningEffort'], [26, 'cacheTtl'],
+    [28, 'contextStrategy'], [29, 'contextMode'], [31, 'logLevel'],
+    [32, 'auditLevel'], [34, 'statuslineMode'], [35, 'configScope'],
+  ];
+  for (const [f, key] of ENUM_KEYS) {
+    if (field !== f) continue;
+    return { ok: true, label, displayValue: String(values[key]) };
+  }
+
+  // Preset fields — display via the format function.
+  const presetLabel = (n: number, zeroLabel: string): string => (n === 0 ? zeroLabel : String(n));
+  const PRESET_KEYS: ReadonlyArray<readonly [number, keyof SettingsPickerPatch, (n: number) => string]> = [
+    [1, 'delayMs', formatSettingsDelay],
+    [15, 'maxIterations', formatMaxIterations],
+    [16, 'autoProceedMaxIterations', formatMaxIterations],
+    [17, 'enhanceDelayMs', formatEnhanceDelay],
+    [21, 'multiDiffSummaryThreshold', formatMultiDiffSummaryThreshold],
+    [30, 'maxConcurrent', (n) => presetLabel(n, 'runtime default')],
+  ];
+  for (const [f, key, fmt] of PRESET_KEYS) {
+    if (field !== f) continue;
+    return { ok: true, label, displayValue: fmt(values[key] as number) };
+  }
+
+  // Text field (thinking word).
+  if (field === 22) {
+    return { ok: true, label, displayValue: values.thinkingWord };
+  }
+
+  return { ok: false, error: `Unknown settings field ${field}.` };
+}
+
 export function SettingsPicker({
   field,
   filter,

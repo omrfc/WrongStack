@@ -66,6 +66,7 @@ import { SessionsPanel } from './components/sessions-panel.js';
 import {
   SettingsPicker,
   THINKING_WORD_FIELD,
+  getSettingsFieldValue,
   resolveSettingsFieldValue,
   settingsPickerJumpByName,
   settingsPickerJumpField,
@@ -3076,6 +3077,51 @@ export function App({
       slashRegistry.unregister('settings');
     };
   }, [slashRegistry, getSettings, saveSettings, openSettings, dispatch]);
+
+  // Register the TUI-only `/settings-get` command — reads a setting's
+  // current value and displays it as a chat message without opening the
+  // picker. Counterpart to `/settings <chord> <value>`.
+  useEffect(() => {
+    const cmd = {
+      name: 'settings-get',
+      aliases: ['config-get', 'get'],
+      description: 'Read a setting value without opening the picker.',
+      argsHint: '<chord>',
+      help:
+        'Show the current value of a setting.\n\n' +
+        'Examples:\n' +
+        '  /settings-get yolo         → "YOLO mode: off"\n' +
+        '  /settings-get multi-diff   → "Multi-diff summary: 5"\n' +
+        '  /settings-get log-level    → "Log level: info"\n\n' +
+        'Available chords:\n  ' +
+        settingsPickerJumpNames().join('\n  '),
+      async run(args: string) {
+        const query = args.trim();
+        if (query === '') {
+          return {
+            message: 'Usage: /settings-get <chord>\nAvailable: ' + settingsPickerJumpNames().join(', '),
+          };
+        }
+        const field = settingsPickerJumpByName(query);
+        if (field === undefined) {
+          return {
+            message:
+              `Unknown settings row "${query}".\n` +
+              `Available chords:\n  ${settingsPickerJumpNames().join('\n  ')}`,
+          };
+        }
+        const result = getSettingsFieldValue(state.settingsPicker, field);
+        if (!result.ok) {
+          return { message: result.error };
+        }
+        return { message: `${result.label}: ${result.displayValue}` };
+      },
+    };
+    slashRegistry.register(cmd, 'tui', { official: true });
+    return () => {
+      slashRegistry.unregister('settings-get');
+    };
+  }, [slashRegistry, state.settingsPicker]);
 
   // Register the TUI-only `/statusline` command — opens the interactive
   // StatuslinePicker overlay. Arguments (item, on|off) are handled here too
