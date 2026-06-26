@@ -1,12 +1,15 @@
 import {
   Bot,
   Check,
+  ChevronDown,
+  ChevronRight,
   Loader2,
   Network,
   Rocket,
   Send,
   SlidersHorizontal,
   Sparkles,
+  Target,
   User,
   X,
 } from 'lucide-react';
@@ -50,6 +53,13 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
 
   const [goal, setGoal] = useState('');
   const [reply, setReply] = useState('');
+  // Tracks the "Start Interview" click until the first snapshot lands, so the
+  // goal screen gives immediate feedback instead of sitting there enabled.
+  const [submitting, setSubmitting] = useState(false);
+  // Collapse the (tall) decomposition graph to reclaim vertical space.
+  const [graphOpen, setGraphOpen] = useState(true);
+  // Collapse the implementation-plan card (can be long).
+  const [planOpen, setPlanOpen] = useState(true);
   // Run config (the whole-plan default model + fallback chain), applied at Start Run.
   const [runCfgOpen, setRunCfgOpen] = useState(false);
   const [runModel, setRunModel] = useState<string | undefined>(undefined);
@@ -84,6 +94,11 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
   const busy = snapshot?.busy ?? false;
   const phase = snapshot?.phase ?? 'idle';
   const started = Boolean(snapshot);
+
+  // Clear the submit spinner once the interview session actually exists.
+  useEffect(() => {
+    if (started) setSubmitting(false);
+  }, [started]);
   const lastQuestion = snapshot?.answers[snapshot.answers.length - 1]?.question ?? '';
   const canRun =
     !!snapshot &&
@@ -94,7 +109,8 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
 
   const startGoal = () => {
     const g = goal.trim();
-    if (!g || busy) return;
+    if (!g || busy || submitting) return;
+    setSubmitting(true);
     send({ type: 'sdd.spec.start', payload: { goal: g } });
   };
   const sendReply = () => {
@@ -273,8 +289,16 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
               placeholder="e.g. Add OAuth login (Google + GitHub) with session management"
               className="w-full resize-none rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:border-violet-500"
             />
-            <Button className="mt-3" onClick={startGoal} disabled={!goal.trim()}>
-              <Sparkles className="mr-1.5 h-4 w-4" /> Start Interview
+            <Button className="mt-3" onClick={startGoal} disabled={!goal.trim() || submitting}>
+              {submitting ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Starting interview…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-1.5 h-4 w-4" /> Start Interview
+                </>
+              )}
             </Button>
             <p className="mt-3 text-xs text-muted-foreground">
               An isolated agent interviews you to build a spec, decomposes it into a
@@ -285,21 +309,42 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
         ) : (
           // ── Conversation / review ──
           <div className="space-y-4">
-            {/* Decomposition reveal — the task graph as an animated DAG. */}
+            {/* Decomposition reveal — the task graph as an animated DAG.
+                Collapsible + capped height so it never crowds out the transcript. */}
             {hasGraph && (
               <div className="sdd-rise overflow-hidden rounded-lg border border-violet-500/20 bg-[#0a0d14]">
-                <div className="flex items-center gap-1.5 border-b border-white/5 px-3 py-1.5 text-[11px] font-medium text-violet-300">
+                <button
+                  type="button"
+                  onClick={() => setGraphOpen((o) => !o)}
+                  className="flex w-full items-center gap-1.5 border-b border-white/5 px-3 py-1.5 text-[11px] font-medium text-violet-300 hover:bg-white/5"
+                >
+                  {graphOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                   <Network className="h-3.5 w-3.5" />
                   Task graph · {snapshot?.taskCount} tasks, dependency-ordered
-                  <span className="ml-auto text-slate-500">drag to explore</span>
-                </div>
-                <div className="h-[42vh] min-h-[260px]">
-                  <SddFlowGraph tasks={flowTasks} columns={snapshot?.board?.columns ?? []} />
-                </div>
+                  <span className="ml-auto text-slate-500">{graphOpen ? 'drag to explore' : 'show'}</span>
+                </button>
+                {graphOpen && (
+                  <div className="h-[32vh] min-h-[200px]">
+                    <SddFlowGraph tasks={flowTasks} columns={snapshot?.board?.columns ?? []} />
+                  </div>
+                )}
               </div>
             )}
 
             <div className="mx-auto max-w-2xl space-y-3">
+              {/* ── Goal block — the operator's full prompt, leading the flow
+                  (the header title is only a short heading). ── */}
+              {snapshot?.goal && (
+                <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+                  <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <Target className="h-3 w-3" /> Goal
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+                    {snapshot.goal}
+                  </p>
+                </div>
+              )}
+
               {/* ── Interview transcript — full Q&A history ── */}
               {snapshot?.answers.length || (agentText && phase === 'questioning') || busy ? (
                 <div className="space-y-2.5">
@@ -346,10 +391,35 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
                 </div>
               )}
 
-              {/* Agent narration in review phases (plan text, not the raw spec JSON). */}
-              {agentText && phase !== 'questioning' && !snapshot?.spec && (
-                <ChatBubble role="assistant" text={agentText} />
+              {/* Implementation plan — rendered as a readable, collapsible card
+                  (raw task JSON stripped) instead of a wall-of-text bubble. */}
+              {agentText && (phase === 'implementation' || phase === 'task_review') && (
+                <div className="sdd-rise rounded-md border border-border bg-card">
+                  <button
+                    type="button"
+                    onClick={() => setPlanOpen((o) => !o)}
+                    className="flex w-full items-center gap-1.5 border-b border-border/60 px-3 py-2 text-sm font-semibold hover:bg-muted/40"
+                  >
+                    {planOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    <Sparkles className="h-3.5 w-3.5 text-violet-400" /> Implementation plan
+                  </button>
+                  {planOpen && (
+                    <div className="max-h-[40vh] overflow-auto px-3 py-2">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+                        {stripJsonBlocks(agentText)}
+                      </p>
+                    </div>
+                  )}
+                </div>
               )}
+
+              {/* Other review-phase narration (e.g. spec_review feedback before the
+                  spec card parses). */}
+              {agentText &&
+                phase !== 'questioning' &&
+                phase !== 'implementation' &&
+                phase !== 'task_review' &&
+                !snapshot?.spec && <ChatBubble role="assistant" text={agentText} />}
 
               {/* Approve button for review phases */}
               {(phase === 'spec_review' ||
@@ -394,6 +464,16 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
       )}
     </div>
   );
+}
+
+/**
+ * Strip fenced ```json … ``` blocks (the machine-readable task array) from the
+ * agent's plan text so the rendered plan stays prose-only and readable. Falls
+ * back to the original text if stripping would leave it empty.
+ */
+function stripJsonBlocks(text: string): string {
+  const stripped = text.replace(/```json[\s\S]*?```/gi, '').trim();
+  return stripped.length > 0 ? stripped : text.trim();
 }
 
 /** One transcript message — agent question (left) or the user's answer (right). */

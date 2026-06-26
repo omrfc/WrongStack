@@ -41,6 +41,8 @@ export interface SddInterviewSnapshot {
   sessionId: string;
   phase: AISpecPhase;
   title: string;
+  /** The operator's original goal prompt (verbatim). `title` is a short heading. */
+  goal: string;
   questionCount: number;
   minQuestions: number;
   maxQuestions: number;
@@ -234,6 +236,7 @@ export class SddInterviewDriver {
       sessionId: s.id,
       phase: s.phase,
       title: s.title,
+      goal: s.userIntent || s.title,
       questionCount: s.questionCount,
       minQuestions: this.minQuestions,
       maxQuestions: this.maxQuestions,

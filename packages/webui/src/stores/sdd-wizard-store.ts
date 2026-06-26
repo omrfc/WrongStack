@@ -13,6 +13,8 @@ export interface SddWizardSnapshot {
   sessionId: string;
   phase: SddWizardPhase;
   title: string;
+  /** Operator's original goal prompt (verbatim); `title` is a short heading. */
+  goal?: string;
   questionCount: number;
   minQuestions: number;
   maxQuestions: number;
