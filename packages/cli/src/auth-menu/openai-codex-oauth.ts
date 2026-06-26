@@ -39,11 +39,6 @@ import {
   nowIso,
   writeKeysBack,
 } from '../provider-config-utils.js';
-import {
-  fallbackCodexModelIds,
-  filterCurrentCodexModelIds,
-  isCodexCatalogModel,
-} from '../openai-codex-models.js';
 import type { AuthMenuDeps } from './types.js';
 
 // ── Codex OAuth constants (verified against the real Codex CLI) ─────────────
@@ -161,6 +156,47 @@ export function extractAccountId(token: string): string | null {
 }
 
 // ── Model discovery ──────────────────────────────────────────────────────────
+
+/**
+ * Recommended Codex models for ChatGPT sign-in. Live backend discovery
+ * wins; these values are only used when the backend/catalog cannot
+ * provide a list. Single source of truth — used both by OAuth login
+ * (resolveCodexModels → tier 3) and by the provider-boot synthesis
+ * path (wiring/provider.ts when the catalog is unavailable).
+ */
+export const FALLBACK_CODEX_MODELS: ReadonlyArray<{ id: string; name: string }> = [
+  { id: 'gpt-5.5', name: 'gpt-5.5' },
+  { id: 'gpt-5.4', name: 'gpt-5.4' },
+  { id: 'gpt-5.4-mini', name: 'gpt-5.4-mini' },
+  { id: 'gpt-5.3-codex-spark', name: 'gpt-5.3-codex-spark' },
+];
+
+/** Families in the models.dev catalog that indicate Codex / Responses API compatibility. */
+export const CODEX_CATALOG_FAMILIES = new Set(['gpt-codex', 'gpt-codex-spark']);
+
+export function fallbackCodexModelIds(): string[] {
+  return FALLBACK_CODEX_MODELS.map((m) => m.id);
+}
+
+export function fallbackCodexProviderModels(): Array<{ id: string; name: string }> {
+  return FALLBACK_CODEX_MODELS.map((m) => ({ id: m.id, name: m.name }));
+}
+
+/**
+ * Filter a list of available model ids down to the ones that are still
+ * current for ChatGPT sign-in (i.e. present in FALLBACK_CODEX_MODELS).
+ * Used by both OAuth login (to drop deprecated ids from the live /models
+ * response) and by the provider-boot synthesis (to pick current ids out
+ * of the models.dev catalog).
+ */
+export function filterCurrentCodexModelIds(ids: Iterable<string>): string[] {
+  const available = new Set(ids);
+  return FALLBACK_CODEX_MODELS.map((m) => m.id).filter((id) => available.has(id));
+}
+
+export function isCodexCatalogModel(model: { family?: string | undefined }): boolean {
+  return typeof model.family === 'string' && CODEX_CATALOG_FAMILIES.has(model.family);
+}
 
 /**
  * Resolve the list of available Codex models using a 3-tier fallback chain:

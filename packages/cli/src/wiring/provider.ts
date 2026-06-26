@@ -5,7 +5,7 @@ import {
   fallbackCodexProviderModels,
   filterCurrentCodexModelIds,
   isCodexCatalogModel,
-} from '../openai-codex-models.js';
+} from '../auth-menu/openai-codex-oauth.js';
 
 export interface ProviderSetupResult {
   resolvedProvider: ResolvedProvider | undefined;
