@@ -36,6 +36,14 @@ export class WrongStackWebSocketClient {
   private shouldReconnect = true;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private messageQueue: WSClientMessage[] = [];
+  // Cap on the offline-queue depth. Past this, send() drops the OLDEST
+  // queued message before appending the new one (FIFO drop). Bounds
+  // memory under long disconnects and prevents stale commands from
+  // flooding the server on reconnect -- a 50k-deep queue of stale
+  // user_messages re-firing on next open would just confuse the model
+  // and waste its context window. 1000 is a generous budget for a
+  // genuine reconnect window (typical reconnect <10s; <50 msg/s).
+  private static readonly MAX_QUEUED_MESSAGES = 1000;
   private pendingConfirms: Map<string, PendingConfirm> = new Map();
   private sessionId: string | null = null;
   /** Stored last close reason / error message so the UI can show "what
@@ -358,6 +366,23 @@ export class WrongStackWebSocketClient {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
+      // FIFO-drop oldest when full. Keeps the queue bounded under
+      // long disconnects and ensures the most recent user intent is
+      // preserved (vs. a flood of stale earlier messages on reconnect).
+      if (
+        this.messageQueue.length >= WrongStackWebSocketClient.MAX_QUEUED_MESSAGES
+      ) {
+        const dropped = this.messageQueue.shift();
+        if (dropped) {
+          console.warn(JSON.stringify({
+            level: 'warn',
+            event: 'ws_client.message_queue_full',
+            cap: WrongStackWebSocketClient.MAX_QUEUED_MESSAGES,
+            droppedType: dropped.type,
+            timestamp: new Date().toISOString(),
+          }));
+        }
+      }
       this.messageQueue.push(message);
     }
   }
@@ -754,6 +779,11 @@ export class WrongStackWebSocketClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    // Drop anything queued while disconnected. A subsequent connect()
+    // starts fresh -- re-firing stale user_messages or session.commands
+    // from before the disconnect would be confusing at best and buggy
+    // at worst (e.g. an old 'session.new' overriding the user's new one).
+    this.messageQueue.length = 0;
     this.ws?.close();
     this.ws = null;
     // C-2 fix: no client-side token storage to clear — the token lives
