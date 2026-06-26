@@ -65,7 +65,6 @@ export const Entry = React.memo(function Entry({
   termWidth,
   setSuggestions,
   autonomyMode,
-  autoSubmitCountdown,
   multiDiffSummaryThreshold,
 }: {
   entry: HistoryEntry;
@@ -74,8 +73,6 @@ export const Entry = React.memo(function Entry({
   setSuggestions?: ((steps: string[]) => void) | undefined;
   /** Current autonomy mode — when 'auto', first step shows an auto marker. */
   autonomyMode?: string | undefined;
-  /** Seconds remaining in the auto-submit countdown — shown as a live badge. */
-  autoSubmitCountdown?: number | null | undefined;
   /** User-tunable cutoff for the multi-file diff summary footer. Passes
    *  through to `formatMultiDiffSummary`; `undefined` means "use default". */
   multiDiffSummaryThreshold?: number | undefined;
@@ -183,15 +180,7 @@ export const Entry = React.memo(function Entry({
                       <Text color="cyan" dimColor>  auto</Text>
                     ) : null}
                     {autonomyMode === 'auto' && i === 0 ? (
-                      autoSubmitCountdown != null && autoSubmitCountdown > 0 ? (
-                        <Text color={
-                          autoSubmitCountdown > 20 ? 'green'
-                          : autoSubmitCountdown > 10 ? 'yellow'
-                          : 'red'
-                        }>{`  auto in ${autoSubmitCountdown}s`}</Text>
-                      ) : (
-                        <Text color="cyan">{'  ⏩'}</Text>
-                      )
+                      <Text color="cyan">{'  ⏩'}</Text>
                     ) : null}
                   </Text>
                 </Box>
@@ -203,38 +192,57 @@ export const Entry = React.memo(function Entry({
     }
     case 'tool': {
       const { glyph, color } = getToolVisual(entry.name);
-      const argSummary = formatToolArgs(entry.name, entry.input);
-      const outLines = formatToolOutput(
+      // Memoize all expensive tool-output formatting on the entry's
+      // immutable properties. Without this, the formatToolOutput /
+      // extractDiffPreview / extractMultiFileDiffs / formatToolVisualOutput
+      // calls re-parse the entire output on every terminal resize,
+      // even though the entry data never changes.
+      const {
+        argSummary,
+        outLines,
+        visualLines,
+        diff,
+        multiDiffs,
+        sizeChip,
+      } = useMemo(() => {
+        const argSummary = formatToolArgs(entry.name, entry.input);
+        const outLines = formatToolOutput(
+          entry.name,
+          entry.output,
+          entry.ok,
+          entry.outputBytes,
+          entry.outputLines,
+        );
+        const visualLines = formatToolVisualOutput(entry.name, entry.output, entry.ok, entry.input);
+        const diff = entry.ok ? extractDiffPreview(entry.name, entry.output, entry.input) : undefined;
+        const multiDiffs =
+          entry.ok && !diff && (entry.name === 'replace' || entry.name === 'diff' || entry.name === 'patch')
+            ? extractMultiFileDiffs(entry.name, entry.output, entry.input)
+            : undefined;
+        const sizeChip = (() => {
+          if (!entry.ok) return '';
+          const parts: string[] = [];
+          if (entry.outputLines !== undefined && entry.outputLines > 0) {
+            parts.push(`${entry.outputLines} L`);
+          }
+          if (entry.outputBytes && entry.outputBytes > 0) {
+            parts.push(fmtBytes(entry.outputBytes));
+          }
+          if (entry.outputTokens && entry.outputTokens > 0) {
+            parts.push(`≈${fmtTok(entry.outputTokens)} tok`);
+          }
+          return parts.join(' · ');
+        })();
+        return { argSummary, outLines, visualLines, diff, multiDiffs, sizeChip };
+      }, [
         entry.name,
         entry.output,
+        entry.input,
         entry.ok,
         entry.outputBytes,
         entry.outputLines,
-      );
-      const visualLines = formatToolVisualOutput(entry.name, entry.output, entry.ok, entry.input);
-      const diff = entry.ok ? extractDiffPreview(entry.name, entry.output, entry.input) : undefined;
-      // Multi-file diffs (`replace`, `diff`, `patch`) — render one labeled
-      // block per file when the per-file shape is available. Falls back to
-      // the single combined `diff` only when the per-file split isn't
-      // recoverable, so single-file tools keep their existing visual weight.
-      const multiDiffs =
-        entry.ok && !diff && (entry.name === 'replace' || entry.name === 'diff' || entry.name === 'patch')
-          ? extractMultiFileDiffs(entry.name, entry.output, entry.input)
-          : undefined;
-      const sizeChip = (() => {
-        if (!entry.ok) return '';
-        const parts: string[] = [];
-        if (entry.outputLines !== undefined && entry.outputLines > 0) {
-          parts.push(`${entry.outputLines} L`);
-        }
-        if (entry.outputBytes && entry.outputBytes > 0) {
-          parts.push(fmtBytes(entry.outputBytes));
-        }
-        if (entry.outputTokens && entry.outputTokens > 0) {
-          parts.push(`≈${fmtTok(entry.outputTokens)} tok`);
-        }
-        return parts.join(' · ');
-      })();
+        entry.outputTokens,
+      ]);
       return (
         <Box flexDirection="column">
           <Text>
