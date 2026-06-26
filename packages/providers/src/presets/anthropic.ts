@@ -7,7 +7,7 @@
  * `parseAnthropicStream` in `../anthropic.ts`, just split into a stateful
  * `parseStreamEvent` call instead of an async generator loop.
  */
-import type { ContentBlock, Message, ReasoningEffort, Request, StopReason, StreamEvent, Usage } from '@wrongstack/core';
+import type { Capabilities, ContentBlock, Message, ReasoningEffort, Request, StopReason, StreamEvent, Usage } from '@wrongstack/core';
 import { ProviderError, safeParse } from '@wrongstack/core';
 import { parseToolInput } from '../_tool-input.js';
 import { capabilitiesForFamily } from '../family-capabilities.js';
@@ -43,10 +43,16 @@ export const anthropicWireFormat = defineWireFormat<AnthropicStreamState>({
     'x-api-key': apiKey,
     'anthropic-version': DEFAULT_VERSION,
   }),
-  buildBody: (req: Request) => {
+  buildBody: (req: Request, ctx: { capabilities: Capabilities }) => {
+    // Anthropic's `max_tokens` is required. Pull from the caller's
+    // Request when set, otherwise the per-model ceiling the catalog
+    // populates via `withCatalogCapabilities` (e.g. 64K for Sonnet/Opus).
+    // The 8192 floor is the same safety net the rest of the system uses
+    // for unknown models.
+    const maxOutput = req.maxTokens ?? ctx.capabilities.maxOutput ?? 8192;
     const body: Record<string, unknown> = {
       model: req.model,
-      max_tokens: req.maxTokens,
+      max_tokens: maxOutput,
       messages: req.messages.map((m: Message) => ({
         role: m.role === 'system' ? 'user' : m.role,
         content: normalizeMessageContent(m),
@@ -73,7 +79,7 @@ export const anthropicWireFormat = defineWireFormat<AnthropicStreamState>({
       } else if (req.reasoning.enabled === true) {
         body['thinking'] = {
           type: 'enabled',
-          budget_tokens: deriveThinkingBudget(req.maxTokens, req.reasoning.effort),
+          budget_tokens: deriveThinkingBudget(maxOutput, req.reasoning.effort),
         };
       }
     }

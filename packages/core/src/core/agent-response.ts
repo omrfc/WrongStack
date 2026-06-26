@@ -51,11 +51,12 @@ export function createAgentResponseHandler(a: AgentInternals): AgentResponseHand
       messages: a.ctx.messages,
       tools: a.tools.list(),
       // Default to the provider's model-native output ceiling so subagents
-      // (Chimera, etc.) can run long reports up to the model's actual limit.
-      // 8192 is a conservative fallback for families that don't declare
-      // `maxOutput` — kept here so an unmigrated family can't accidentally
-      // ship without a cap.
-      maxTokens: a.ctx.provider.capabilities.maxOutput ?? 8192,
+      // (Chimera, etc.) can run long reports up to the model's actual
+      // limit. The provider adapter's `buildBody` substitutes its own
+      // fallback (`ctx.capabilities.maxOutput ?? 8192`) when this is
+      // absent — keeping the field optional at the wire layer is what
+      // lets the catalog-driven ceiling reach the API untouched.
+      maxTokens: a.ctx.provider.capabilities.maxOutput,
     };
     return a.pipelines.request.run(baseReq);
   }

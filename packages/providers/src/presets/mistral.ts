@@ -7,7 +7,7 @@
  * For exotic providers the same pattern still applies — only the
  * `parseStreamEvent` body changes.
  */
-import type { Request, StopReason, StreamEvent } from '@wrongstack/core';
+import type { Capabilities, Request, StopReason, StreamEvent } from '@wrongstack/core';
 import { safeParse } from '@wrongstack/core';
 import { parseToolInput } from '../_tool-input.js';
 import { capabilitiesForFamily } from '../family-capabilities.js';
@@ -35,11 +35,12 @@ export const mistralWireFormat = defineWireFormat<MistralStreamState>({
   defaultBaseUrl: 'https://api.mistral.ai/v1',
   buildUrl: (base) => `${base.replace(/\/+$/, '')}/chat/completions`,
   buildHeaders: (apiKey) => ({ authorization: `Bearer ${apiKey}` }),
-  buildBody: (req: Request) => {
+  buildBody: (req: Request, ctx: { capabilities: Capabilities }) => {
+    const maxOutput = req.maxTokens ?? ctx.capabilities.maxOutput ?? 8192;
     const body: Record<string, unknown> = {
       model: req.model,
       messages: messagesToOpenAI(stripCacheControl(req.system), req.messages),
-      max_tokens: req.maxTokens,
+      max_tokens: maxOutput,
       stream: true,
     };
     if (req.tools && req.tools.length > 0) {

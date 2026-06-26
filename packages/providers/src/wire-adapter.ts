@@ -114,7 +114,12 @@ export abstract class WireAdapter implements Provider {
   async *stream(req: Request, opts: { signal: AbortSignal }): AsyncIterable<StreamEvent> {
     const url = this.buildUrl(req);
     const headers = this.buildHeaders(req);
-    const body = this.buildBody(req);
+    // Subclasses with their own buildBody (anthropic, openai, openai-codex,
+    // openai-compatible, github-copilot) read this.capabilities here so
+    // the per-model `maxOutput` lands on the wire. WireFormatProvider's
+    // own override forwards the same context to the cfg-supplied
+    // buildBody.
+    const body = this.buildBody(req, { capabilities: this.capabilities });
 
     let httpRes: Response2;
     try {
@@ -318,8 +323,13 @@ export abstract class WireAdapter implements Provider {
     };
   }
 
-  /** Map Request fields to the wire request body. */
-  protected abstract buildBody(req: Request): Record<string, unknown>;
+  /** Map Request fields to the wire request body. Receives the
+   *  provider's resolved `Capabilities` so the body can use
+   *  `ctx.capabilities.maxOutput` when `req.maxTokens` is undefined. */
+  protected abstract buildBody(
+    req: Request,
+    ctx: { capabilities: Capabilities },
+  ): Record<string, unknown>;
 
   /** Translate wire SSE events into canonical StreamEvent[]. */
   protected abstract parseStream(

@@ -235,7 +235,10 @@ export class OpenAICodexProvider extends WireAdapter {
     return headers;
   }
 
-  protected override buildBody(req: Request): Record<string, unknown> {
+  protected override buildBody(
+    req: Request,
+    _ctx: { capabilities: Capabilities },
+  ): Record<string, unknown> {
     const instructions =
       req.system && req.system.length > 0
         ? req.system.map((b) => b.text).join('\n\n')

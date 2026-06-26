@@ -3,7 +3,7 @@
  * as `OpenAIProvider`; the per-message body is the loop body of
  * `parseOpenAIStream` split into a stateful step.
  */
-import type { ReasoningEffort, Request, ResponseFormat, StopReason, StreamEvent, Usage } from '@wrongstack/core';
+import type { Capabilities, ReasoningEffort, Request, ResponseFormat, StopReason, StreamEvent, Usage } from '@wrongstack/core';
 import { safeParse } from '@wrongstack/core';
 import { parseToolInput } from '../_tool-input.js';
 import { capabilitiesForFamily } from '../family-capabilities.js';
@@ -38,13 +38,14 @@ export const openaiWireFormat = defineWireFormat<OpenAIStreamState>({
     return `${b}/v1/chat/completions`;
   },
   buildHeaders: (apiKey) => ({ authorization: `Bearer ${apiKey}` }),
-  buildBody: (req: Request) => {
+  buildBody: (req: Request, ctx: { capabilities: Capabilities }) => {
+    const maxOutput = req.maxTokens ?? ctx.capabilities.maxOutput ?? 8192;
     const body: Record<string, unknown> = {
       model: req.model,
       messages: messagesToOpenAI(stripCacheControl(req.system), req.messages),
       // Real OpenAI requires `max_completion_tokens`; newer model families
       // (gpt-4o, o1/o3/o4) 400 on the deprecated `max_tokens`. See issue #10.
-      max_completion_tokens: req.maxTokens,
+      max_completion_tokens: maxOutput,
       stream: true,
       stream_options: { include_usage: true },
     };

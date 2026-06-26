@@ -42,8 +42,14 @@ export interface WireFormatConfig<S = Record<string, unknown>> {
   buildUrl(baseUrl: string, req: Request): string;
   /** Per-request headers. Default `content-type`/`accept` are provided already. */
   buildHeaders(apiKey: string, req: Request): Record<string, string>;
-  /** Map a canonical Request onto the provider's body shape. */
-  buildBody(req: Request): Record<string, unknown>;
+  /** Map a canonical Request onto the provider's body shape.
+   *  Receives the provider's resolved `Capabilities` so per-model fields
+   *  like `capabilities.maxOutput` can substitute for an absent
+   *  `req.maxTokens`. The catalog overlay in `withCatalogCapabilities`
+   *  means `ctx.capabilities` reflects the active model, not just the
+   *  family default. The `ctx` is required so callers always know
+   *  where to look for the model's ceiling. */
+  buildBody(req: Request, ctx: { capabilities: Capabilities }): Record<string, unknown>;
   /** Construct fresh per-stream state. Called once per `stream()` call. */
   createStreamState(fallbackModel: string): S;
   /**
@@ -97,8 +103,13 @@ export class WireFormatProvider<S = Record<string, unknown>> extends WireAdapter
     };
   }
 
-  protected override buildBody(req: Request): Record<string, unknown> {
-    return this.cfg.buildBody(req);
+  protected override buildBody(
+    req: Request,
+    ctx: { capabilities: Capabilities },
+  ): Record<string, unknown> {
+    // Forward the resolved capabilities so the preset can fall back from
+    // req.maxTokens to the catalog-populated ceiling.
+    return this.cfg.buildBody(req, ctx);
   }
 
   protected override parseStream(

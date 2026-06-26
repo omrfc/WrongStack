@@ -150,7 +150,16 @@ export interface Request {
   system?: TextBlock[] | undefined;
   messages: Message[];
   tools?: Tool[] | undefined;
-  maxTokens: number;
+  /**
+   * Cap on output tokens for this single response. Optional — when
+   * omitted, the provider adapter falls back to its own
+   * `capabilities.maxOutput` (which the catalog populates from
+   * `ModelsDevModel.limit.output`). If neither is available, the
+   * adapter applies a conservative 8192 safety net. Letting this stay
+   * undefined at the call site means callers like Chimera can hand the
+   * model its native output ceiling without hard-coding a number.
+   */
+  maxTokens?: number | undefined;
   temperature?: number | undefined;
   topP?: number | undefined;
   topK?: number | undefined;

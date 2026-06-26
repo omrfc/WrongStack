@@ -172,8 +172,11 @@ export class GitHubCopilotProvider extends WireFormatProvider<OpenAIStreamState>
    * rather than the newer `max_completion_tokens` that `openaiWireFormat`
    * sends. Override buildBody to fix the field name after the preset runs.
    */
-  protected override buildBody(req: Request): Record<string, unknown> {
-    const body = super.buildBody(req);
+  protected override buildBody(
+    req: Request,
+    ctx: { capabilities: Capabilities },
+  ): Record<string, unknown> {
+    const body = super.buildBody(req, ctx);
     // Rename max_completion_tokens → max_tokens for Copilot's API
     if ('max_completion_tokens' in body) {
       body['max_tokens'] = body['max_completion_tokens'];

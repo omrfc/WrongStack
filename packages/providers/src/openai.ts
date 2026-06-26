@@ -72,13 +72,17 @@ export class OpenAIProvider extends WireAdapter {
     return 'max_completion_tokens';
   }
 
-  protected override buildBody(req: Request): Record<string, unknown> {
+  protected override buildBody(
+    req: Request,
+    ctx: { capabilities: Capabilities },
+  ): Record<string, unknown> {
+    const maxOutput = req.maxTokens ?? ctx.capabilities.maxOutput ?? 8192;
     const body: Record<string, unknown> = {
       model: req.model,
       messages: messagesToOpenAI(this.stripCacheControl(req), req.messages, {
         ...this.opts.quirks,
       }),
-      [this.tokenLimitParam()]: req.maxTokens,
+      [this.tokenLimitParam()]: maxOutput,
       stream: true,
       stream_options: { include_usage: true },
     };

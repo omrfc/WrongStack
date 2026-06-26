@@ -100,8 +100,11 @@ export class OpenAICompatibleProvider extends OpenAIProvider {
     return 'max_tokens';
   }
 
-  protected override buildBody(req: Request): Record<string, unknown> {
-    const body = super.buildBody(req);
+  protected override buildBody(
+    req: Request,
+    ctx: { capabilities: Capabilities },
+  ): Record<string, unknown> {
+    const body = super.buildBody(req, ctx);
     applyThinkingParams(body, req, this.opts.quirks?.thinkingParam);
     // #14: the base builder only emits `reasoning_effort` for the values real
     // OpenAI accepts (none/low/medium/high); the broader internal levels —

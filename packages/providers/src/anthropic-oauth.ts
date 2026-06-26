@@ -229,8 +229,11 @@ export class AnthropicOAuthProvider extends WireFormatProvider<AnthropicStreamSt
     };
   }
 
-  protected override buildBody(req: Request): Record<string, unknown> {
-    const body = super.buildBody(req);
+  protected override buildBody(
+    req: Request,
+    ctx: { capabilities: Capabilities },
+  ): Record<string, unknown> {
+    const body = super.buildBody(req, ctx);
     // Prepend the required Claude Code identity block (unless already present).
     const existing = (body['system'] as { type: 'text'; text: string }[] | undefined) ?? [];
     const alreadyLed = existing[0]?.text?.startsWith(CLAUDE_CODE_SYSTEM_PROMPT) === true;

@@ -19,7 +19,7 @@
  * `createLocalLlmPreset` is the single source of truth — the three named
  * exports below are thin wrappers that pick the right defaults.
  */
-import type { Request, StopReason, StreamEvent } from '@wrongstack/core';
+import type { Capabilities, Request, StopReason, StreamEvent } from '@wrongstack/core';
 import { safeParse } from '@wrongstack/core';
 import { parseToolInput } from '../_tool-input.js';
 import { capabilitiesForFamily } from '../family-capabilities.js';
@@ -124,11 +124,12 @@ export function createLocalLlmPreset(opts: LocalLlmPresetOptions) {
       // is enabled. Use a placeholder if the caller didn't supply one.
       return { authorization: `Bearer ${apiKey || 'no-key'}` };
     },
-    buildBody: (req: Request) => {
+    buildBody: (req: Request, ctx: { capabilities: Capabilities }) => {
+      const maxOutput = req.maxTokens ?? ctx.capabilities.maxOutput ?? 8192;
       const body: Record<string, unknown> = {
         model: req.model,
         messages: messagesToOpenAI(req.system, req.messages),
-        max_tokens: req.maxTokens,
+        max_tokens: maxOutput,
         stream: true,
       };
       if (req.tools && req.tools.length > 0) {

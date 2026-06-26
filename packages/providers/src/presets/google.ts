@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
  * of `thoughtSignature` and forced `tool_use` stop reason on functionCall
  * turns.
  */
-import type { Message, Request, StopReason, StreamEvent, Tool, Usage } from '@wrongstack/core';
+import type { Capabilities, Message, Request, StopReason, StreamEvent, Tool, Usage } from '@wrongstack/core';
 import { compactToolDefinitionForWire, safeParse } from '@wrongstack/core';
 import { capabilitiesForFamily } from '../family-capabilities.js';
 import { normalizeGemini } from '../stop-reason.js';
@@ -46,10 +46,10 @@ export const googleWireFormat = defineWireFormat<GoogleStreamState>({
   buildUrl: (base, req) =>
     `${base}/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`,
   buildHeaders: (apiKey) => ({ 'x-goog-api-key': apiKey }),
-  buildBody: (req: Request) => {
+  buildBody: (req: Request, ctx: { capabilities: Capabilities }) => {
     const body: Record<string, unknown> = {
       contents: messagesToGemini(req.messages),
-      generationConfig: buildGenConfig(req),
+      generationConfig: buildGenConfig(req, ctx),
     };
     if (req.system && req.system.length > 0) {
       body['systemInstruction'] = {
@@ -141,8 +141,12 @@ export const googleWireFormat = defineWireFormat<GoogleStreamState>({
   },
 });
 
-function buildGenConfig(req: Request): Record<string, unknown> {
-  const cfg: Record<string, unknown> = { maxOutputTokens: req.maxTokens };
+function buildGenConfig(
+  req: Request,
+  ctx: { capabilities: Capabilities },
+): Record<string, unknown> {
+  const maxOutput = req.maxTokens ?? ctx.capabilities.maxOutput ?? 8192;
+  const cfg: Record<string, unknown> = { maxOutputTokens: maxOutput };
   if (req.temperature !== undefined) cfg['temperature'] = req.temperature;
   if (req.topP !== undefined) cfg['topP'] = req.topP;
   if (req.topK !== undefined) cfg['topK'] = req.topK;
