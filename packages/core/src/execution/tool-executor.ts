@@ -235,11 +235,15 @@ export class ToolExecutor {
 
       // L1-C: trace each tool execution. Span is a no-op unless an OTel
       // adapter or other Tracer is bound — zero overhead by default.
+      // Skip JSON.stringify for the common case (no dangerous capabilities)
+      // to avoid per-call serialization of a static empty array.
       const span = this.opts.tracer?.startSpan(`tool.${tool.name}`, {
         'tool.name': tool.name,
         'tool.mutating': tool.mutating,
         'tool.permission': tool.permission,
-        'tool.capabilities': JSON.stringify(tool.capabilities ?? []),
+        'tool.capabilities': toolCapsForAudit.length > 0
+          ? JSON.stringify(tool.capabilities ?? [])
+          : '[]',
         'tool.has_dangerous_capabilities': toolCapsForAudit.length > 0,
       });
       try {
