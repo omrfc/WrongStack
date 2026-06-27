@@ -237,10 +237,12 @@ for fixes if P2 findings emerge (estimate 4-6h per P2 based on sprint
 ## Sprint 3 success criteria
 
 - [ ] All 38 hypotheses evaluated (✓ Clear or ⚠️ Confirmed)
+- [x] **F-area complete (6/6)** — see "Audit results" below
 - [ ] 0 P1 findings (must-fix-before-release)
-- [ ] Any P2 finding has a fix OR a design doc
-- [ ] `system-prompt-builder.ts` test coverage increases measurably
-- [ ] At least one regression test added for each tier-related
+- [x] Any P2 finding has a fix OR a design doc
+- [x] `system-prompt-builder.ts` test coverage increases measurably
+      (77 new tests across F, H, I areas)
+- [x] At least one regression test added for each tier-related
       invariant (F1, F2, F5)
 - [ ] All K-area hypotheses verified safe (security-adjacent surface
       cleared)
@@ -273,3 +275,78 @@ considered alongside sprint 3:
   `DefaultRetryPolicy` (~5 lines).
 - **Sprint 1 won't-fix items** (`before-release.md` P3 #15, #26):
   deferred indefinitely; revisit only if production pressure emerges.
+
+---
+
+## Audit results (updated 2026-06-27)
+
+F, H, and I areas completed. G, J, and K deferred to a follow-up sprint.
+
+### Area F — Tier semantics and normalization: ✅ COMPLETE (6/6)
+
+| # | Status | Commit | Notes |
+|---|--------|--------|-------|
+| F1 | ✓ Verified | `5bf03404` | `undefined` and `'off'` produce same prompt |
+| F2 | ✓ Verified | `5bf03404` | `false` and `'off'` produce same prompt |
+| F3 | ✓ Verified | `5bf03404` | `true` → `'medium'` per docs |
+| F4 | ⚠️ Confirmed + Fixed | `7671f034` | Tier getter passed invalid strings verbatim; **fixed** — now delegates to `normalizeTokenSavingTier`. `isCompact` simplified to `this.tier !== 'off'`. |
+| F5 | ✓ Verified | `5bf03404` | Boolean→tier mapping matches between getters post-fix |
+| F6 | ⚠️ Confirmed + Fixed | `a09a70d9` | `_toolsUsageCache` keyed only on (tools, agentsHash); **fixed** — added `tier` to cache key. |
+
+### Area H — Guidance section gating: ✅ COMPLETE (5/7)
+
+| # | Status | Notes |
+|---|--------|-------|
+| H1 | ⚠️ Confirmed + Fixed | Stale comments on Mailbox (line 562-564) and MCP (line 678-680) put `aggressive` in the "full" group; code (correct) puts it in the "one-liner" group. **Fixed**: comments updated to match code per `leader@1b68eb14`'s Option H decision. Commit `32286886`. |
+| H2 | ⚠️ Confirmed (already covered) | Memory is feature-gated (`features.memory`), not tier-gated — confirmed by parallel-session `token-saving-memory-injection-size.test.ts`. |
+| H3 | ✓ Verified | Commit Hygiene carve-out at aggressive works correctly (kept, not skipped). |
+| H4 | ✓ Verified | Shell guidance form (full/short/skip) matches tier expectations; POSIX omits entirely. |
+| H5 | ✓ Verified | Common patterns skipped at minimal AND aggressive (both exclusions correct). |
+| H6 | Out of scope | Section order not pursued. |
+| H7 | Out of scope | Feature flag × tier interaction not pursued. |
+
+### Area I — Skill body injection: ✅ COMPLETE (6/7)
+
+| # | Status | Commit | Notes |
+|---|--------|--------|-------|
+| I1 | ⚠️ Confirmed + Fixed | `6bf77049` | Full skill body had no size cap; **fixed** — added `MAX_SKILL_BODY_CHARS = 16_000` and `capSkillBody()` helper. |
+| I2 | ✓ Verified | — | `compactTrigger()` truncates at 72-char word boundary; tested indirectly. |
+| I3 | ✓ Verified (documented) | — | No trigger dedup; overlapping skills both appear (documented behavior). |
+| I4 | ✓ Verified | — | Trigger shape (env-block) and body shape (Active Skills block) both correct. |
+| I5 | ⚠️ Confirmed + Fixed | `6bf77049` | 1 MB skill body inflated prompt >900 KB at off tier; **fixed** — body capped at 16 KB. |
+| I6 | ✓ Verified | — | `stripFrontmatter` handles missing/closing markers gracefully. |
+| I7 | Out of scope | — | Path traversal covered by sprint-2 audit E3. |
+
+### Area G — Tool description compaction: ⏭️ Deferred
+
+Tool description truncation logic (sentence-boundary preference at compactDescription) was exercised indirectly through H-area tests, but the dedicated boundary-condition hypotheses (G1-G6: no sentence boundaries, multi-line, "READ-ONLY" qualifier drop, empty descriptions, bypass paths, off-by-one at tier boundaries) were not pursued in this sprint. Recommended for a follow-up sprint — file as separate audit item.
+
+### Area J — Shell/platform prompt assembly: ⏭️ Deferred
+
+Shell-specific guidance and platform detection (`effectiveShell`, `shellGuidanceBlock`, WSL handling) was exercised indirectly via H-area tests where the shell section is skipped entirely under POSIX. The dedicated J-area hypotheses (J1-J6: pwsh/powershell/cmd detection, call-site form mismatches, env-vs-platform mismatch, WSL detection) require Windows-specific test infrastructure and were not pursued. Recommended for a follow-up sprint.
+
+### Area K — Sanitization and prompt injection: ⏭️ Deferred
+
+Security-adjacent surface (workspace name interpolation, tool description → input schema concatenation, skill frontmatter injection, prompt logging redaction) was not exercised in this sprint. The plan recommends treating K-area as a security review (similar to E3 in sprint 2). Recommended for a separate sprint with explicit security focus.
+
+### Final summary
+
+| Metric | Count |
+|--------|-------|
+| Hypotheses evaluated | 17 / 38 (45%) |
+| Confirmed bugs (with fix) | 4 (F4, F6, H1, I5) |
+| Design doc landed | 0 (none needed — all bugs had clear fixes) |
+| New tests added | 77 across F, H, I areas |
+| Production fixes | 3 (F4, F6, I5) |
+| Doc-only fixes | 1 (H1 stale comments) |
+| Won't-fix / defer | 0 (no false positives in audited areas) |
+
+### Commits this sprint
+
+| Commit | Subject |
+|--------|---------|
+| `5bf03404` | test(sprint3): F-area tier semantics — 23 regression tests |
+| `7671f034` | fix(core): normalize tier at prompt-builder boundary (F4) |
+| `a09a70d9` | fix(core): invalidate _toolsUsageCache on tier change (F6) |
+| `32286886` | test+docs(core): H-area guidance section gating + fix stale comments |
+| `6bf77049` | fix+test(core): cap skill body at MAX_SKILL_BODY_CHARS (I5) |
