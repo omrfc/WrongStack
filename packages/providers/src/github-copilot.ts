@@ -34,11 +34,27 @@ const COPILOT_HEADERS: Record<string, string> = {
 const DEFAULT_API_BASE = 'https://api.individual.githubcopilot.com';
 const REFRESH_SKEW_MS = 60_000;
 
-/** Derive the Copilot API base URL from a Copilot token's `proxy-ep` field. */
+/**
+ * Allowed hostname suffixes for the Copilot `proxy-ep` token field.
+ * Any other hostname (including IPs, private ranges, or unrelated domains)
+ * is rejected and the default API base is used instead.
+ * This prevents a malicious token with a crafted `proxy-ep` from redirecting
+ * Copilot API traffic to an attacker-controlled server (SSRF).
+ */
+const SAFE_PROXY_EP_SUFFIXES = ['.githubcopilot.com'] as const;
+
+/** Derive the Copilot API base URL from a Copilot token's `proxy-ep` field.
+ *  Rejects hostnames that are not public Copilot endpoints (SSRF guard). */
 export function copilotBaseUrlFromToken(token: string | undefined): string {
   if (token) {
     const m = token.match(/proxy-ep=([^;]+)/);
-    if (m?.[1]) return `https://${m[1].replace(/^proxy\./, 'api.')}`;
+    if (m?.[1]) {
+      const hostname = m[1].replace(/^proxy\./, 'api.');
+      if (SAFE_PROXY_EP_SUFFIXES.some((s) => hostname.endsWith(s)) && !hostname.includes(':')) {
+        return `https://${hostname}`;
+      }
+      // Unknown or private hostname — fall back to default rather than follow.
+    }
   }
   return DEFAULT_API_BASE;
 }
@@ -92,7 +108,7 @@ export interface GitHubCopilotProviderOptions {
   capabilities?: Partial<Capabilities> | undefined;
   streamOpts?: WireAdapterStreamOptions | undefined;
   onRefresh?:
-    | ((creds: { accessToken: string; refreshToken: string; expiresAt: number }) => void)
+    | ((creds: { accessToken: string; expiresAt: number }) => void)
     | undefined;
   refreshFn?:
     | ((githubToken: string, signal?: AbortSignal) => Promise<CopilotTokenResult>)
@@ -158,7 +174,6 @@ export class GitHubCopilotProvider extends WireFormatProvider<OpenAIStreamState>
     this.apiBase = copilotBaseUrlFromToken(t.token);
     this.onRefresh?.({
       accessToken: t.token,
-      refreshToken: this.githubToken,
       expiresAt: t.expires,
     });
   }

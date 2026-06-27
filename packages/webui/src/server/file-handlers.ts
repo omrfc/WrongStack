@@ -115,6 +115,19 @@ interface FilesWritePayload {
   content: string;
 }
 
+/** Guard: ensure msg is an object with a payload of the expected shape.
+ *  Throws TypeError if the shape is wrong so callers catch it explicitly. */
+function validatedPayload<T>(msg: unknown, label: string): T {
+  if (msg == null || typeof msg !== 'object') {
+    throw new TypeError(`Expected object for ${label}, got ${msg}`);
+  }
+  const payload = (msg as { payload?: unknown }).payload;
+  if (payload == null || typeof payload !== 'object') {
+    throw new TypeError(`Expected payload object for ${label}, got ${payload}`);
+  }
+  return payload as T;
+}
+
 export interface FilesWriteOptions {
   onWritten?: ((filePath: string) => void | Promise<void>) | undefined;
 }
@@ -243,7 +256,13 @@ export async function handleFilesRead(
   msg: unknown,
   projectRoot: string,
 ): Promise<void> {
-  const { filePath } = (msg as { payload: FilesReadPayload }).payload;
+  let filePath: string;
+  try {
+    ({ filePath } = validatedPayload<FilesReadPayload>(msg, 'files.read'));
+  } catch {
+    send(ws, { type: 'files.read', payload: { filePath: '', content: '', error: 'Malformed request' } });
+    return;
+  }
 
   // Path traversal guard: resolve and verify both lexically AND via
   // realpath() that the file stays inside the canonical project root.
@@ -280,7 +299,14 @@ export async function handleFilesWrite(
   projectRoot: string,
   opts: FilesWriteOptions = {},
 ): Promise<void> {
-  const { filePath, content } = (msg as { payload: FilesWritePayload }).payload;
+  let filePath: string;
+  let content: string;
+  try {
+    ({ filePath, content } = validatedPayload<FilesWritePayload>(msg, 'files.write'));
+  } catch {
+    send(ws, { type: 'files.written', payload: { filePath: '', success: false, error: 'Malformed request' } });
+    return;
+  }
 
   // Path traversal guard: resolve and verify both lexically AND via
   // realpath() that the parent directory stays inside the canonical

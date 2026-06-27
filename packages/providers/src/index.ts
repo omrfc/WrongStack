@@ -104,7 +104,8 @@ export interface BuildFactoriesOptions {
 /** Rotated-token payload handed to the OAuth persister after a refresh. */
 export interface OAuthRefreshedTokens {
   accessToken: string;
-  refreshToken: string;
+  /** Refresh token — not present for all OAuth families (e.g. GitHub Copilot). Callers who need it already hold it. */
+  refreshToken?: string | undefined;
   expiresAt: number;
   /** ChatGPT account id (codex only); undefined for other OAuth families. */
   accountId?: string | undefined;

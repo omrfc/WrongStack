@@ -105,7 +105,7 @@ describe('GitHubCopilotProvider token refresh', () => {
     expect(captured.url).toBe('https://api.business.githubcopilot.com/chat/completions');
     expect(captured.init?.headers?.['authorization']).toBe(`Bearer ${newToken}`);
     expect(onRefresh).toHaveBeenCalledWith(
-      expect.objectContaining({ accessToken: newToken, refreshToken: 'gho_x' }),
+      expect.objectContaining({ accessToken: newToken }),
     );
   });
 
