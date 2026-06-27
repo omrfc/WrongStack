@@ -92,6 +92,14 @@ type ProbeResult = ProbeSuccess | ProbeFailure;
 
 const PROBE_TIMEOUT_MS = 5_000;
 const PROBE_CACHE_MS = 5_000;
+/**
+ * Cap on simultaneous catalog probes. Each probe is an external
+ * subprocess; an uncapped `Promise.all(catalog.map(probe))` scales
+ * with catalog size and is the main cold-start cost when listing
+ * available agents. 4 is enough to overlap I/O on a quiet box while
+ * staying well under typical fd / process-table limits.
+ */
+const MAX_PARALLEL_PROBES = 4;
 
 export interface EnsembleRegistryOptions {
   /** Override the catalog (mostly for tests). */
@@ -100,6 +108,39 @@ export interface EnsembleRegistryOptions {
   probeTimeoutMs?: number;
   /** Inject a custom probe function (used by tests). */
   probeFn?: (descriptor: ACPAgentDescriptor) => Promise<ProbeResult>;
+}
+
+/**
+ * Run `worker` against each item with at most `limit` in flight at a
+ * time. Preserves input order in the output array — every output slot
+ * corresponds to the input at the same index. Errors propagate through
+ * `Promise.all` semantics (the first rejection rejects the whole call),
+ * matching the original `Promise.all(map(worker))` contract that
+ * `list()` previously had.
+ */
+async function probeWithBound<T, R>(
+  items: readonly T[],
+  worker: (item: T) => Promise<R>,
+  limit: number,
+): Promise<R[]> {
+  const safeLimit = Math.max(1, Math.min(limit, items.length));
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(safeLimit, items.length);
+  const runners: Promise<void>[] = [];
+  for (let i = 0; i < workerCount; i++) {
+    runners.push(
+      (async () => {
+        while (true) {
+          const current = nextIndex++;
+          if (current >= items.length) return;
+          results[current] = await worker(items[current]!);
+        }
+      })(),
+    );
+  }
+  await Promise.all(runners);
+  return results;
 }
 
 /**
@@ -236,13 +277,21 @@ export class EnsembleRegistry {
   /**
    * Probe every catalog entry in parallel and return the detection
    * results. Results are cached for `PROBE_CACHE_MS`.
+   *
+   * Probes are dispatched with bounded concurrency (`MAX_PARALLEL_PROBES`)
+   * so cold-start lists do not spawn `catalog.length` subprocesses at
+   * once — which is especially wasteful on Windows shells and on hosts
+   * with large agent catalogs. The output order still matches
+   * `this.catalog` so callers can index by position.
    */
   async list(): Promise<readonly DetectedAgent[]> {
     if (this.cache && Date.now() - this.cache.at < PROBE_CACHE_MS) {
       return this.cache.result;
     }
-    const result = await Promise.all(
-      this.catalog.map((d) => this.detect(d)),
+    const result = await probeWithBound(
+      this.catalog,
+      (d) => this.detect(d),
+      MAX_PARALLEL_PROBES,
     );
     this.cache = { at: Date.now(), result };
     return result;

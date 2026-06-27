@@ -33,6 +33,13 @@ import {
   makeACPSubagentRunnerWithStop,
   type ACPSubagentRunnerOptions,
 } from './acp-subagent-runner.js';
+import type { ACPProgressEvent } from '../client/acp-session.js';
+
+/** Live per-agent progress callback for an ensemble run. */
+export type EnsembleProgressHandler = (
+  agentId: string,
+  event: ACPProgressEvent,
+) => void;
 
 /**
  * Per-agent outcome from an ensemble run.
@@ -108,6 +115,58 @@ export interface EnsembleRunnerOptions {
    * `SubagentRunContext.signal` they receive.
    */
   signal?: AbortSignal | undefined;
+  /**
+   * Live progress callback. Invoked for every streamed update from every
+   * agent, tagged with the agent id so the caller can render interleaved
+   * progress (e.g. `[gemini-cli] edit foo.ts`).
+   */
+  onProgress?: EnsembleProgressHandler | undefined;
+  /**
+   * Maximum number of agents to launch concurrently. Defaults to
+   * `DEFAULT_MAX_CONCURRENCY` (4). Set to 1 for serial execution;
+   * values larger than the runnable count are clamped down. Bounded
+   * fan-out keeps simultaneous ACP subprocess / WebSocket counts
+   * manageable when an ensemble has many members.
+   */
+  maxConcurrency?: number | undefined;
+}
+
+/** Default cap on simultaneously-running agents in an ensemble. */
+const DEFAULT_MAX_CONCURRENCY = 4;
+
+/**
+ * Map each input through `worker` with at most `limit` tasks in flight.
+ * The output array preserves input order. Each worker is expected to
+ * resolve (not throw) — `runEnsemble`'s runnable workers wrap their
+ * own logic so they never reject, matching the original
+ * `Promise.allSettled` semantics where rejection was effectively
+ * impossible. Bounded concurrency caps simultaneous ACP subprocess /
+ * WebSocket counts in large ensembles.
+ */
+async function mapBound<T, R>(
+  items: readonly T[],
+  worker: (item: T, index: number) => Promise<R>,
+  limit: number,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  if (items.length === 0) return results;
+  const safeLimit = Math.max(1, Math.min(limit, items.length));
+  let nextIndex = 0;
+  const workerCount = Math.min(safeLimit, items.length);
+  const runners: Promise<void>[] = [];
+  for (let w = 0; w < workerCount; w++) {
+    runners.push(
+      (async () => {
+        while (true) {
+          const current = nextIndex++;
+          if (current >= items.length) return;
+          results[current] = await worker(items[current]!, current);
+        }
+      })(),
+    );
+  }
+  await Promise.all(runners);
+  return results;
 }
 
 /**
@@ -155,12 +214,14 @@ async function runOne(
   task: string,
   timeoutMs: number,
   signal: AbortSignal | undefined,
+  onProgress: EnsembleProgressHandler | undefined,
 ): Promise<Omit<EnsembleAgentResult, 'agentId'>> {
   const startedAt = Date.now();
   try {
     const { runner, stop } = await makeACPSubagentRunnerWithStop({
       ...cmd,
       timeoutMs,
+      ...(onProgress ? { onProgress: (event) => onProgress(agentId, event) } : {}),
     });
     try {
       // SubagentRunner signature: (task, ctx) => Promise<{result, iterations, toolCalls}>.
@@ -296,10 +357,19 @@ export async function runEnsemble(opts: EnsembleRunnerOptions): Promise<Ensemble
     runnable.push({ id, cmd });
   }
 
-  // 4. Fan out the runnable set. AllSettled so one failure doesn't
-  //    poison the others.
-  await Promise.allSettled(
-    runnable.map(async ({ id, cmd }) => {
+  // 4. Fan out the runnable set with bounded concurrency so a large
+  //    ensemble does not spawn `runnable.length` ACP subprocesses at
+  //    once. `runOne` already catches every error internally and
+  //    resolves, so `Promise.all` semantics are correct here —
+  //    identical to the original `Promise.allSettled` contract because
+  //    no worker ever rejects.
+  const concurrency = Math.max(
+    1,
+    opts.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
+  );
+  await mapBound(
+    runnable,
+    async ({ id, cmd }) => {
       // Honor parent abort BEFORE doing anything expensive.
       if (opts.signal?.aborted) {
         setResult(results, id, {
@@ -309,9 +379,10 @@ export async function runEnsemble(opts: EnsembleRunnerOptions): Promise<Ensemble
         });
         return;
       }
-      const outcome = await runOne(id, cmd, opts.task, timeoutMs, opts.signal);
+      const outcome = await runOne(id, cmd, opts.task, timeoutMs, opts.signal, opts.onProgress);
       setResult(results, id, outcome);
-    }),
+    },
+    concurrency,
   );
 
   // 5. Build the summary.
