@@ -163,8 +163,8 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
   private _lastBuildTools?: Tool[] | undefined;
   /** Cached rendered online agents string, keyed by content fingerprint. */
   private _lastOnlineAgents?: { hash: string; text: string } | undefined;
-  /** Cached full buildToolUsage output — keyed by tools array ref + agents fingerprint. */
-  private _toolsUsageCache?: { toolsRef: readonly Tool[]; agentsHash: string; text: string } | undefined;
+  /** Cached full buildToolUsage output — keyed by tools array ref + agents fingerprint + tier. */
+  private _toolsUsageCache?: { toolsRef: readonly Tool[]; agentsHash: string; tier: string; text: string } | undefined;
   constructor(private readonly opts: DefaultSystemPromptBuilderOptions = {}) {}
 
   /**
@@ -388,12 +388,18 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
     // Cache: tools array is stable (same reference) until a registry mutation
     // thanks to B2 (ToolRegistry snapshot). Online agents are keyed by content
     // fingerprint — the mailbox rebuilds the array on every status check, so
-    // reference equality would always miss. When both match the previous build,
-    // the full output is identical — return the cached string.
+    // reference equality would always miss. When all three keys match the
+    // previous build, the full output is identical — return the cached
+    // string. Including `tier` in the key ensures that mutating
+    // `opts.tokenSavingMode` between builds (rare but supported via the
+    // `private readonly opts` design) recomputes the prompt with the
+    // new tier's truncation limits and tier-gated content.
     const agentsHash = this.agentsFingerprint(ctx.onlineAgents);
+    const tier = this.tier;
     if (
       this._toolsUsageCache?.toolsRef === tools &&
-      this._toolsUsageCache?.agentsHash === agentsHash
+      this._toolsUsageCache?.agentsHash === agentsHash &&
+      this._toolsUsageCache?.tier === tier
     ) {
       return this._toolsUsageCache.text;
     }
@@ -756,9 +762,10 @@ summarize it, and let the tool result hold only the summary.`);
     }
 
     // Store cache — keyed by tools reference (B2 snapshot) + agents content
-    // fingerprint, so it auto-invalidates when tools change or agents join/leave.
+    // fingerprint + tier, so it auto-invalidates when tools change, agents
+    // join/leave, or the token-saving tier changes.
     const text = lines.join('\n');
-    this._toolsUsageCache = { toolsRef: tools, agentsHash, text };
+    this._toolsUsageCache = { toolsRef: tools, agentsHash, tier, text };
     return text;
   }
 

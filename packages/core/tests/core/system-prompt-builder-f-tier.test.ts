@@ -324,6 +324,84 @@ describe('DefaultSystemPromptBuilder — F-area tier semantics', () => {
       expect(num).toBe(off);
     });
   });
+
+  describe('F6 — tier change takes effect on next build', () => {
+    // Sprint 3 audit F6: when the user runs /settings token-saving
+    // mid-session, does the next system prompt reflect the new tier?
+    //
+    // Current behavior (before fix):
+    //   - The `tier` getter reads `this.opts.tokenSavingMode` on every
+    //     call, so fresh tier values ARE seen.
+    //   - But `_toolsUsageCache` (system-prompt-builder.ts:394-399)
+    //     keys only on `(tools, agentsHash)`. When the same ToolRegistry
+    //     snapshot is passed to two build() calls (the normal case),
+    //     the cached text from the first call is returned without
+    //     re-checking the tier — so the prompt appears stale.
+    //
+    // In production this is currently masked by the design choice
+    // that tokenSavingMode is "boot-only" (cli-main.ts:2828-2831
+    // comments explicitly say "need a restart"). The prompt-builder
+    // opts.tokenSavingMode is set once at boot, never mutated.
+    //
+    // However, the *capability* to mutate opts.tokenSavingMode is
+    // exposed (private readonly blocks opts reassignment, not its
+    // properties). Any caller that DOES mutate it should see the new
+    // tier on next build. The cache currently breaks that promise.
+    //
+    // Fix: add tier to the _toolsUsageCache key.
+
+    it('tier change with FRESH tools array: prompt changes (already works)', async () => {
+      // This is the baseline — when tools array differs, the cache
+      // misses and the new tier is used. This already passes.
+      const opts = { todayIso: '2026-06-27', tokenSavingMode: 'off' as 'off' | 'minimal' | 'light' | 'medium' | 'aggressive' };
+      const b = new DefaultSystemPromptBuilder(opts);
+      const t1 = [mkTool('alpha', 'Reads files. Use this tool to inspect files.')];
+      const t2 = [mkTool('alpha', 'Reads files. Use this tool to inspect files.')];
+      const p1 = (await b.build({ cwd: tmp, projectRoot: tmp, tools: t1 }))
+        .map((bl) => bl.text).join('');
+      opts.tokenSavingMode = 'aggressive';
+      const p2 = (await b.build({ cwd: tmp, projectRoot: tmp, tools: t2 }))
+        .map((bl) => bl.text).join('');
+      expect(p1).not.toBe(p2);
+    });
+
+    it('tier change with SAME tools array: prompt changes (currently fails — cache miss)', async () => {
+      // This is the F6 bug: with the same tools array reference,
+      // _toolsUsageCache returns the cached text from the first
+      // build, ignoring the tier change. After the fix (adding
+      // tier to the cache key), this test passes.
+      const opts = { todayIso: '2026-06-27', tokenSavingMode: 'off' as 'off' | 'minimal' | 'light' | 'medium' | 'aggressive' };
+      const b = new DefaultSystemPromptBuilder(opts);
+      const tools = [mkTool('alpha', 'Reads files. Use this tool to inspect files.')];
+      const p1 = (await b.build({ cwd: tmp, projectRoot: tmp, tools }))
+        .map((bl) => bl.text).join('');
+      opts.tokenSavingMode = 'aggressive';
+      const p2 = (await b.build({ cwd: tmp, projectRoot: tmp, tools }))
+        .map((bl) => bl.text).join('');
+      // After fix: p1 !== p2 because tier changed and cache key
+      // includes tier. Before fix: p1 === p2 (cached).
+      expect(p1).not.toBe(p2);
+    });
+
+    it('tier change with same tools array: tool description truncation differs (currently fails)', async () => {
+      // Stronger assertion than prompt-string inequality: with
+      // long-enough descriptions, the prompt at off (80-char limit)
+      // includes more characters than at aggressive (70-char limit).
+      // After the fix, the second build() with the new tier
+      // produces the tighter-truncation prompt.
+      const longDesc = 'Reads the contents of a file at the given absolute path. Returns the file content as a string with line numbers preserved. The path must be absolute and point to an existing file. If the file does not exist, returns an error.';
+      const opts = { todayIso: '2026-06-27', tokenSavingMode: 'off' as 'off' | 'minimal' | 'light' | 'medium' | 'aggressive' };
+      const b = new DefaultSystemPromptBuilder(opts);
+      const tools = [mkTool('alpha', longDesc)];
+      const p1 = (await b.build({ cwd: tmp, projectRoot: tmp, tools }))
+        .map((bl) => bl.text).join('');
+      opts.tokenSavingMode = 'aggressive';
+      const p2 = (await b.build({ cwd: tmp, projectRoot: tmp, tools }))
+        .map((bl) => bl.text).join('');
+      // After fix: aggressive (70 char limit) truncates more than off (80 char limit).
+      expect(p2.length).toBeLessThan(p1.length);
+    });
+  });
 });
 
 /**
