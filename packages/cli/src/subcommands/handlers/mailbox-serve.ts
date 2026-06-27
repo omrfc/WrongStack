@@ -113,7 +113,10 @@ async function startServer(deps: SubcommandDeps): Promise<number> {
   const host = typeof flags['host'] === 'string' ? flags['host'] : DEFAULT_HOST;
   const portRaw = typeof flags['port'] === 'string' ? Number.parseInt(flags['port'], 10) : DEFAULT_PORT;
   const strictPort = flags['strict-port'] === true;
-  if (!Number.isInteger(portRaw) || portRaw <= 0 || portRaw > 65535) {
+  // `--port 0` is valid and means "let the OS assign a free port" — the
+  // same thing the non-strict default does. Reject only NaN, negative,
+  // or out-of-range ports.
+  if (!Number.isInteger(portRaw) || portRaw < 0 || portRaw > 65535) {
     deps.renderer.writeError(`Invalid --port: ${String(flags['port'])}\n`);
     return 1;
   }

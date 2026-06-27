@@ -19,7 +19,7 @@ let tmpProject: string;
 let serverPromise: Promise<number>; // resolves to the bound port
 let token: string;
 let baseUrl: string;
-let serverChild: { kill: (sig: NodeJS.Signals) => void } | null = null;
+let serverChild: import('node:child_process').ChildProcess | null = null;
 
 async function readToken(projectDir: string): Promise<string> {
   const tokenPath = path.join(projectDir, '.mailbox.token');
@@ -92,10 +92,18 @@ beforeAll(async () => {
   // spawn `wstack mailbox serve` as a subprocess (mirroring how a real
   // user runs it).
   const { spawn } = await import('node:child_process');
-  const cliEntry = process.argv[1];
+  const { fileURLToPath } = await import('node:url');
+  // Spawn the BUILT CLI entry under the current node binary. Using
+  // process.argv[1] would spawn the vitest runner (the bridge would
+  // never start — it exits 1 on the unknown args); the integration test
+  // needs the real `wstack` entry, which is the package's compiled dist
+  // bin. Spawning a `.js` path directly throws EFTYPE on Windows, so we
+  // always go through process.execPath. (Run `pnpm --filter @wrongstack/cli
+  // build` first if dist is missing.)
+  const cliEntry = fileURLToPath(new URL('../dist/index.js', import.meta.url));
   const child = spawn(
-    cliEntry,
-    ['mailbox', 'serve', '--host', '127.0.0.1', '--port', '0'],
+    process.execPath,
+    [cliEntry, 'mailbox', 'serve', '--host', '127.0.0.1', '--port', '0'],
     { cwd: tmpProject, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   serverChild = child;
@@ -134,9 +142,25 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  if (serverChild) serverChild.kill('SIGINT');
+  // Wait for the bridge child to actually exit before removing its temp
+  // dir — on Windows the killed process can still hold file handles on
+  // the mailbox JSONL for a moment, and rmdir then fails with EBUSY.
+  if (serverChild) {
+    const child = serverChild;
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, 3_000);
+      child.once('exit', () => { clearTimeout(t); resolve(); });
+      child.kill('SIGINT');
+    });
+  }
   if (process.env['WRONGSTACK_HOME']) {
-    await fs.rm(process.env['WRONGSTACK_HOME'], { recursive: true, force: true });
+    // maxRetries/retryDelay ride out any lingering Windows file lock.
+    await fs.rm(process.env['WRONGSTACK_HOME'], {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
     delete process.env['WRONGSTACK_HOME'];
   }
 });
