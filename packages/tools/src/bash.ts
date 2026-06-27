@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import * as os from 'node:os';
-import type { Tool, ToolStreamEvent } from '@wrongstack/core';
+import type { Context, Tool, ToolStreamEvent } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
 import { createOutputSpool, spoolNote } from './_output-spool.js';
 import { normalizeCommandOutput } from './_util.js';
@@ -607,6 +607,39 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         if (typeof pid === 'number') registry.kill(pid, { force: true });
         else killWithTimeout(child, 2000);
       }
+    }
+  },
+
+  /**
+   * Tool-level teardown fired by `ToolExecutor.runToolCleanup()` when the
+   * tool's run is aborted/timeout'd. The generator's `finally` block above
+   * already force-kills the direct child, but that only runs if the
+   * executor closes the async iterator (via `iter.return()`). When the
+   * executor tears down without iterating — or a re-entrant abort races
+   * with the generator — a bash-spawned process tree can survive in the
+   * ProcessRegistry with `killed === false`, continuing to write files,
+   * consume CPU, or hold inherited stdio pipes open for the rest of the
+   * session.
+   *
+   * This is the defensive layer the executor calls via `tool.cleanup()`
+   * (see `types/tool.ts`): kill every bash-owned process still tracked
+   * for this session that hasn't exited yet. `registry.kill()` already
+   * handles process-group / taskkill tree-kill and the SIGTERM→SIGKILL
+   * grace window, so this just scopes the registry's existing kill path
+   * to "this session's runaway bash children". Idempotent — a process
+   * that already exited is skipped by `kill()` (it returns false), and a
+   * `protected` infrastructure process (dev server the user intentionally
+   * backgrounded) is left alone by design.
+   */
+  async cleanup(_input: BashInput, ctx: Context): Promise<void> {
+    const registry = getProcessRegistry();
+    const sessionId = ctx.session?.id;
+    if (!sessionId) return;
+    for (const entry of registry.bySession(sessionId)) {
+      if (entry.name !== 'bash') continue; // leave exec-spawned children alone
+      if (entry.child.exitCode !== null) continue; // already reaped
+      if (entry.protected) continue; // intentionally-backgrounded infra
+      registry.kill(entry.pid, { force: true });
     }
   },
 };
