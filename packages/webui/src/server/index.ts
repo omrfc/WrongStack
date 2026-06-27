@@ -74,6 +74,7 @@ import {
   handlePromptsContent,
   handlePromptsFavorite,
   handlePromptsCreate,
+  handlePromptsUsed,
 } from './prompts-handlers.js';
 import {
   handleDesignList,
@@ -94,6 +95,7 @@ import {
   DefaultSessionStore,
   DefaultSkillLoader,
   DefaultPromptLoader,
+  PromptUsageStore,
   DefaultSystemPromptBuilder,
   DefaultTokenCounter,
   AnnotationsStore,
@@ -365,6 +367,7 @@ export {
   handlePromptsContent,
   handlePromptsFavorite,
   handlePromptsCreate,
+  handlePromptsUsed,
 } from './prompts-handlers.js';
 // Design Studio handlers — shared so the CLI's embedded server reaches parity.
 export {
@@ -816,6 +819,8 @@ export async function startWebUI(
     }
   })();
   const promptLoader = new DefaultPromptLoader({ paths: wpaths, bundledDir: bundledPromptsDir });
+  const promptUsage = new PromptUsageStore(wpaths.promptUsage);
+  const promptsCtx = { promptLoader, promptUsage };
   const systemPromptBuilder = new DefaultSystemPromptBuilder({
     memoryStore,
     skillLoader,
@@ -2139,19 +2144,22 @@ export async function startWebUI(
 
       // Prompt library — shared handlers (prompts-handlers.ts).
       case 'prompts.list':
-        await handlePromptsList(ws, { promptLoader });
+        await handlePromptsList(ws, promptsCtx);
         break;
       case 'prompts.search':
-        await handlePromptsSearch(ws, { promptLoader }, msg);
+        await handlePromptsSearch(ws, promptsCtx, msg);
         break;
       case 'prompts.content':
-        await handlePromptsContent(ws, { promptLoader }, msg);
+        await handlePromptsContent(ws, promptsCtx, msg);
         break;
       case 'prompts.favorite':
-        await handlePromptsFavorite(ws, { promptLoader }, msg);
+        await handlePromptsFavorite(ws, promptsCtx, msg);
         break;
       case 'prompts.create':
-        await handlePromptsCreate(ws, { promptLoader }, msg);
+        await handlePromptsCreate(ws, promptsCtx, msg);
+        break;
+      case 'prompts.used':
+        await handlePromptsUsed(ws, promptsCtx, msg);
         break;
 
       // Design Studio — shared handlers (design-handlers.ts). agentMeta is the

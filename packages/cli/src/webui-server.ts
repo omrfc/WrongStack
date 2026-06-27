@@ -61,6 +61,7 @@ import {
   DefaultSecretScrubber,
   GlobalMailbox,
   projectHash,
+  PromptUsageStore,
   resolveProjectDir,
   resolveWstackPaths,
   TOKENS,
@@ -120,6 +121,7 @@ import {
   handlePromptsContent,
   handlePromptsFavorite,
   handlePromptsCreate,
+  handlePromptsUsed,
   type DesignContext,
   handleDesignList,
   handleDesignMaterialize,
@@ -1529,6 +1531,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // standalone server. Absent promptLoader ⇒ handlers respond "unavailable".
   const promptsCtx: PromptsContext = {
     promptLoader: opts.promptLoader,
+    promptUsage: new PromptUsageStore(path.join(wstackGlobalRoot(), 'prompt-usage.json')),
   };
 
   // Design Studio context — same project root, live agent ctx so design.use
@@ -2216,6 +2219,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     'prompts.content': (msg, ws) => handlePromptsContent(ws, promptsCtx, msg),
     'prompts.favorite': (msg, ws) => handlePromptsFavorite(ws, promptsCtx, msg),
     'prompts.create': (msg, ws) => handlePromptsCreate(ws, promptsCtx, msg),
+    'prompts.used': (msg, ws) => handlePromptsUsed(ws, promptsCtx, msg),
 
     // ── Design Studio ──
     'design.list': (_msg, ws) => handleDesignList(ws, designCtx),

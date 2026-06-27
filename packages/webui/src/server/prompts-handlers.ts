@@ -16,12 +16,14 @@
  * input as an ordinary user turn.
  */
 
-import type { PromptEntry, PromptLoader } from '@wrongstack/core';
+import type { PromptEntry, PromptLoader, PromptUsageStore } from '@wrongstack/core';
 import { errMessage, send } from './ws-utils.js';
 
 export interface PromptsContext {
   /** Backs all prompt ops. Absent ⇒ feature unavailable. */
   promptLoader: PromptLoader | undefined;
+  /** Records per-slug insert counts (shared with CLI `/prompt recent`). */
+  promptUsage?: PromptUsageStore | undefined;
 }
 
 /** Project-relative, content-free metadata for list/search results. */
@@ -211,6 +213,21 @@ export async function handlePromptsCreate(
     send(ws, { type: 'prompts.created', payload: { success: true, slug } });
   } catch (err) {
     send(ws, { type: 'prompts.created', payload: { success: false, error: errMessage(err) } });
+  }
+}
+
+/** Record that a prompt was inserted (best-effort; feeds CLI `/prompt recent`). */
+export async function handlePromptsUsed(ws: WSLike, ctx: PromptsContext, msg: unknown): Promise<void> {
+  const slug = (msg as { payload?: { slug?: string } }).payload?.slug;
+  if (!ctx.promptUsage || !slug) {
+    send(ws, { type: 'prompts.used', payload: { success: false } });
+    return;
+  }
+  try {
+    await ctx.promptUsage.record(slug);
+    send(ws, { type: 'prompts.used', payload: { success: true, slug } });
+  } catch {
+    send(ws, { type: 'prompts.used', payload: { success: false } });
   }
 }
 

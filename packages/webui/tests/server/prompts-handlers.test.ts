@@ -16,6 +16,7 @@ import {
   handlePromptsFavorite,
   handlePromptsList,
   handlePromptsSearch,
+  handlePromptsUsed,
   type PromptsContext,
 } from '../../src/server/prompts-handlers.js';
 import type { WSServerMessage } from '../../src/types.js';
@@ -146,6 +147,23 @@ describe('handlePromptsFavorite', () => {
       success: true,
       favorite: true,
     });
+  });
+});
+
+describe('handlePromptsUsed', () => {
+  it('records usage via the usage store', async () => {
+    const { ws, messages } = openWs();
+    const recorded: string[] = [];
+    const promptUsage = { record: async (slug: string) => recorded.push(slug) } as never;
+    await handlePromptsUsed(ws, { promptLoader: fakeLoader([]), promptUsage }, { payload: { slug: 'x' } });
+    expect(recorded).toEqual(['x']);
+    expect(payloadOf(messages, 'prompts.used')).toMatchObject({ success: true, slug: 'x' });
+  });
+
+  it('reports failure when no usage store is wired', async () => {
+    const { ws, messages } = openWs();
+    await handlePromptsUsed(ws, { promptLoader: fakeLoader([]) }, { payload: { slug: 'x' } });
+    expect(payloadOf(messages, 'prompts.used')).toMatchObject({ success: false });
   });
 });
 

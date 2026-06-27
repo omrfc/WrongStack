@@ -1,4 +1,4 @@
-import { DefaultPromptLoader, expectDefined, projectSlug } from '@wrongstack/core';
+import { DefaultPromptLoader, PromptUsageStore, expectDefined, projectSlug } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
@@ -955,6 +955,7 @@ export function App({
   // Lazily-built prompt loader for the TUI `/prompt` visual picker (declared
   // here; the opener that uses `dispatch` lives after useReducer).
   const promptLoaderRef = useRef<DefaultPromptLoader | null>(null);
+  const promptUsageRef = useRef<PromptUsageStore | null>(null);
 
   // Read the single canonical goal.json — the per-project file under
   // ~/.wrongstack/projects/<slug>/ (resolveWstackPaths → projectGoal), the SAME
@@ -1142,10 +1143,9 @@ export function App({
       } catch {
         bundledDir = undefined;
       }
-      promptLoaderRef.current = new DefaultPromptLoader({
-        paths: resolveWstackPaths({ projectRoot }),
-        bundledDir,
-      });
+      const paths = resolveWstackPaths({ projectRoot });
+      promptLoaderRef.current = new DefaultPromptLoader({ paths, bundledDir });
+      promptUsageRef.current = new PromptUsageStore(paths.promptUsage);
     }
     return promptLoaderRef.current;
   };
@@ -4409,7 +4409,10 @@ export function App({
         );
         const entry = filtered[state.promptPicker.selected];
         dispatch({ type: 'promptPickerClose' });
-        if (entry) dispatch({ type: 'setBuffer', buffer: entry.content, cursor: entry.content.length });
+        if (entry) {
+          dispatch({ type: 'setBuffer', buffer: entry.content, cursor: entry.content.length });
+          void promptUsageRef.current?.record(entry.slug).catch(() => {});
+        }
         return;
       }
       return;

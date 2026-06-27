@@ -1058,6 +1058,7 @@ export type WSClientMessage =
   | { type: 'prompts.search'; payload: { query?: string | undefined; category?: string | undefined } }
   | { type: 'prompts.content'; payload: { slug: string } }
   | { type: 'prompts.favorite'; payload: { slug: string; favorite: boolean } }
+  | { type: 'prompts.used'; payload: { slug: string } }
   | {
       type: 'prompts.create';
       payload: {

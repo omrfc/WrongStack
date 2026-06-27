@@ -128,8 +128,9 @@ export function PromptLibraryModal() {
 
   const doInsert = useCallback(() => {
     if (!selected || !content) return;
+    client?.send({ type: 'prompts.used', payload: { slug: selected.slug } });
     requestPromptInsert(render(content, varValues));
-  }, [selected, content, varValues, requestPromptInsert]);
+  }, [selected, content, varValues, requestPromptInsert, client]);
 
   const toggleFavorite = useCallback(
     (p: PromptMeta) => {
