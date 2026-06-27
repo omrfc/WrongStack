@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPromptsPlugin } from '../../src/plugins/prompts-plugin.js';
 import { DefaultPromptLoader } from '../../src/execution/prompt-loader.js';
 import { DefaultPromptStore } from '../../src/storage/prompt-store.js';
+import { PromptUsageStore } from '../../src/storage/prompt-usage-store.js';
 import type { Context } from '../../src/index.js';
 import type { SlashCommand } from '../../src/index.js';
 
@@ -164,11 +165,12 @@ describe('/prompts add structured flags', () => {
 });
 
 describe('/prompt and /prompt-gen', () => {
-  async function withLoaderCommands(): Promise<{ search: SlashCommand; gen: SlashCommand; loader: DefaultPromptLoader }> {
+  async function withLoaderCommands(): Promise<{ search: SlashCommand; gen: SlashCommand; loader: DefaultPromptLoader; usage: PromptUsageStore }> {
     // Point the loader's user layer at the same dir the store writes to.
     const loader = new DefaultPromptLoader({
       paths: { globalPrompts: dir, inProjectPrompts: path.join(dir, '__noproject') } as never,
     });
+    const usage = new PromptUsageStore(path.join(dir, 'prompt-usage.json'));
     // seed a user-layer prompt with a variable
     await store.save(
       store.createNew('Deploy Helper', 'Deploy {{service}} now', ['devops'], {
@@ -179,8 +181,8 @@ describe('/prompt and /prompt-gen', () => {
     );
     loader.invalidateCache();
     const { api, registered } = makeApi();
-    createPromptsPlugin({ store, loader }).setup!(api);
-    return { search: registered[1]!, gen: registered[2]!, loader };
+    createPromptsPlugin({ store, loader, usage }).setup!(api);
+    return { search: registered[1]!, gen: registered[2]!, loader, usage };
   }
 
   it('/prompt with a query returns ranked results', async () => {
@@ -201,6 +203,16 @@ describe('/prompt and /prompt-gen', () => {
     const { search } = await withLoaderCommands();
     const out = await search.run!('insert deploy-helper service=api', ctx());
     expect(out.runText).toBe('Deploy api now');
+  });
+
+  it('/prompt insert records usage and /prompt recent surfaces it', async () => {
+    const { search, usage } = await withLoaderCommands();
+    expect((await search.run!('recent', ctx())).message).toContain('No prompt usage yet');
+    await search.run!('insert deploy-helper service=api', ctx());
+    expect((await usage.get('deploy-helper'))?.count).toBe(1);
+    const recent = await search.run!('recent', ctx());
+    expect(recent.message).toContain('Deploy Helper');
+    expect(recent.message).toContain('×1');
   });
 
   it('/prompt favorites lists only starred prompts', async () => {

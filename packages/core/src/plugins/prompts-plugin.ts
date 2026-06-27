@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { DefaultPromptLoader, renderPrompt } from '../execution/prompt-loader.js';
 import { DefaultPromptStore, migratePromptEntry } from '../storage/prompt-store.js';
+import { PromptUsageStore } from '../storage/prompt-usage-store.js';
 import type { PromptEntry, PromptLoader, PromptVariable } from '../types/prompt.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
 import { expectDefined } from '../utils/expect-defined.js';
@@ -11,6 +12,7 @@ import type { SlashCommand, Context } from '../index.js';
 interface PromptsPluginOptions {
   store?: DefaultPromptStore | undefined;
   loader?: PromptLoader | undefined;
+  usage?: PromptUsageStore | undefined;
   paths?: WstackPaths | undefined;
 }
 
@@ -29,6 +31,7 @@ interface PromptsPluginOptions {
 export function createPromptsPlugin(opts?: PromptsPluginOptions): Plugin {
   let store: DefaultPromptStore | null = null;
   let loader: PromptLoader | null = null;
+  let usage: PromptUsageStore | null = null;
 
   return {
     name: 'wstack-prompts',
@@ -52,8 +55,10 @@ export function createPromptsPlugin(opts?: PromptsPluginOptions): Plugin {
             })
           : null);
 
+      usage = opts?.usage ?? (paths ? new PromptUsageStore(paths.promptUsage) : null);
+
       api.slashCommands.register(buildPromptsCommand(() => store, () => loader));
-      api.slashCommands.register(buildPromptSearchCommand(() => loader));
+      api.slashCommands.register(buildPromptSearchCommand(() => loader, () => usage));
       api.slashCommands.register(buildPromptGenCommand(() => loader));
       api.log.info('[prompts] loaded — /prompts, /prompt, /prompt-gen available');
     },
@@ -284,11 +289,14 @@ function buildPromptsCommand(
 
 // ── /prompt — search the merged library and insert ────────────────────────────
 
-function buildPromptSearchCommand(getLoader: () => PromptLoader | null): SlashCommand {
+function buildPromptSearchCommand(
+  getLoader: () => PromptLoader | null,
+  getUsage: () => PromptUsageStore | null,
+): SlashCommand {
   return {
     name: 'prompt',
     description: 'Search the prompt library and insert one: /prompt <query> | /prompt insert <slug>',
-    argsHint: '<query> | insert <slug> [var=value …]',
+    argsHint: '<query> | insert <slug> [var=value …] | recent | favorites',
     async run(args: string) {
       const loader = getLoader();
       if (!loader) return { message: 'Prompt library not available.' };
@@ -312,8 +320,32 @@ function buildPromptSearchCommand(getLoader: () => PromptLoader | null): SlashCo
             message: `"${entry.title}" needs values for: ${missing.join(', ')}\n${hint}\n\nRe-run: /prompt insert ${entry.slug} ${missing.map((m) => `${m}=…`).join(' ')}`,
           };
         }
-        // Inject the rendered prompt as the next user turn.
+        // Record usage (best-effort) then inject the rendered prompt as the next turn.
+        try {
+          await getUsage()?.record(entry.slug);
+        } catch {
+          // usage tracking is non-essential
+        }
         return { message: `Inserted "${entry.title}".`, runText: text };
+      }
+
+      // /prompt recent — most-recently-inserted prompts
+      if (trimmed === 'recent' || trimmed === 'popular') {
+        const u = getUsage();
+        if (!u) return { message: 'Usage tracking not available.' };
+        const top = trimmed === 'popular' ? await u.top(15) : await u.recent(15);
+        if (top.length === 0) {
+          return { message: 'No prompt usage yet. Insert one with /prompt insert <slug>.' };
+        }
+        const lines: string[] = [];
+        for (const { slug, usage } of top) {
+          const e = await loader.find(slug);
+          const title = e?.title ?? slug;
+          lines.push(`  ${e ? sourceGlyph(e) : '•'} ${title}  ${dim(slug)}  ${dim(`×${usage.count}`)}`);
+        }
+        return {
+          message: `${trimmed === 'popular' ? 'Most-used' : 'Recent'} prompts:\n${lines.join('\n')}\n\nInsert: /prompt insert <slug>`,
+        };
       }
 
       // /prompt favorites — list starred prompts only
@@ -338,7 +370,7 @@ function buildPromptSearchCommand(getLoader: () => PromptLoader | null): SlashCo
             `Prompt library: ${total} prompts.`,
             catLine,
             '',
-            'Search: /prompt <query>   ·   Favorites: /prompt favorites   ·   Insert: /prompt insert <slug>',
+            'Search: /prompt <query>   ·   Recent: /prompt recent   ·   Favorites: /prompt favorites   ·   Insert: /prompt insert <slug>',
           ].join('\n'),
         };
       }

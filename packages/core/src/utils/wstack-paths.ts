@@ -33,6 +33,8 @@ export interface WstackPaths {
   globalDesignKits: string;
   /** ~/.wrongstack/prompts — user-global prompt library. */
   globalPrompts: string;
+  /** ~/.wrongstack/prompt-usage.json — per-slug insert counts (recent/popular). */
+  promptUsage: string;
   /** ~/.wrongstack/cache — fetched data (models.dev, etc.). */
   cacheDir: string;
   /** ~/.wrongstack/cache/models.dev.json */
@@ -166,6 +168,7 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
     globalSkills: path.join(globalRoot, 'skills'),
     globalDesignKits: path.join(globalRoot, 'design-kits'),
     globalPrompts: path.join(globalRoot, 'prompts'),
+    promptUsage: path.join(globalRoot, 'prompt-usage.json'),
     cacheDir: path.join(globalRoot, 'cache'),
     modelsCache: path.join(globalRoot, 'cache', 'models.dev.json'),
     modelsOverlayCache: path.join(globalRoot, 'cache', 'models-overlay.json'),

@@ -160,6 +160,7 @@ export {
   type PromptStore,
   type PromptEntry,
 } from './prompt-store.js';
+export { PromptUsageStore, type PromptUsage } from './prompt-usage-store.js';
 export {
   CloudSync,
   type SyncResult,
