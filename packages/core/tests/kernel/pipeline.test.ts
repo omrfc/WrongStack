@@ -182,6 +182,59 @@ describe('Pipeline', () => {
       expect(await p.run(0)).toBe(1);
       expect(calls).toEqual(['a', 'b']);
     });
+
+    it('swallow path emits a structured warning when a logger is set (P2 #7)', async () => {
+      const warnings: { msg: string; ctx?: unknown }[] = [];
+      const p = new Pipeline<number>();
+      p.use({
+        name: 'bad-plugin',
+        owner: 'third-party',
+        handler: async () => {
+          throw new Error('plugin blew up');
+        },
+      });
+      p.setErrorHandler(() => 'swallow');
+      p.setLogger({
+        warn: (msg, ctx) => warnings.push({ msg, ctx }),
+      });
+      await p.run(42);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].msg).toBe('pipeline.error');
+      expect(warnings[0].ctx).toMatchObject({
+        middleware: 'bad-plugin',
+        owner: 'third-party',
+        error: 'plugin blew up',
+      });
+    });
+
+    it('swallow path is silent when no logger is set (backward compatible)', async () => {
+      const p = new Pipeline<number>();
+      p.use({
+        name: 'silent-crash',
+        handler: async () => {
+          throw new Error('no logger');
+        },
+      });
+      p.setErrorHandler(() => 'swallow');
+      // No setLogger call — the swallow path must still work, just silently.
+      // (Pre-P2-#7 behavior, preserved for callers that haven't wired a logger.)
+      expect(await p.run(7)).toBe(7);
+    });
+
+    it('rethrow path does NOT log (only swallow logs)', async () => {
+      const warnings: { msg: string; ctx?: unknown }[] = [];
+      const p = new Pipeline<number>();
+      p.use({
+        name: 'crash',
+        handler: async () => {
+          throw new Error('rethrown');
+        },
+      });
+      p.setErrorHandler(() => 'rethrow');
+      p.setLogger({ warn: (msg, ctx) => warnings.push({ msg, ctx }) });
+      await expect(p.run(0)).rejects.toThrow('rethrown');
+      expect(warnings).toHaveLength(0);
+    });
   });
 
   describe('asReadonly', () => {

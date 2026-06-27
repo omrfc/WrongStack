@@ -51,6 +51,14 @@ export interface ReadonlyPipeline<T> {
 export class Pipeline<T> {
   private readonly chain: Middleware<T>[] = [];
   private errorHandler?: PipelineErrorHandler | undefined;
+  /**
+   * Optional operational logger. When set, the `swallow` error-boundary path
+   * emits a structured warning so a swallowed middleware crash is never
+   * completely silent (P2 #7, before-release.md). Without a logger, the
+   * swallow path still works but the crash is invisible — host code should
+   * always wire one.
+   */
+  private logger?: { warn: (msg: string, ctx?: unknown) => void | undefined } | undefined;
 
   /**
    * Install an error boundary. When a middleware throws or rejects, the
@@ -63,6 +71,17 @@ export class Pipeline<T> {
    */
   setErrorHandler(handler: PipelineErrorHandler | undefined): this {
     this.errorHandler = handler;
+    return this;
+  }
+
+  /**
+   * Set the operational logger used by the swallow error-boundary path.
+   * Without this, a swallowed middleware crash is completely silent.
+   */
+  setLogger(
+    logger: { warn: (msg: string, ctx?: unknown) => void | undefined } | undefined,
+  ): this {
+    this.logger = logger;
     return this;
   }
 
@@ -180,6 +199,14 @@ export class Pipeline<T> {
         // Swallow: continue with the value that was about to flow into this
         // middleware. Subsequent middleware after the crashed one is skipped
         // — error boundary is "skip the broken layer", not "skip the rest".
+        // P2 #7 (before-release.md): emit a structured warning so a swallowed
+        // crash is never completely silent. Plugin authors debugging a
+        // silently-skipped middleware would otherwise have no signal.
+        this.logger?.warn('pipeline.error', {
+          middleware: mw.name,
+          owner: mw.owner,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return value;
       }
     };
