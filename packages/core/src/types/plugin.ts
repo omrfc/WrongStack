@@ -181,6 +181,13 @@ export interface PluginCapabilities {
    * read-only tools, but not `fs.write` or `shell.arbitrary` tools.
    */
   toolMutateCapabilities?: string[] | undefined;
+  /**
+   * Will register in-process lifecycle hooks via `api.registerHook()`. When
+   * false (or omitted by a non-official plugin), the loader either logs a
+   * warning or throws — see `LoadPluginsOptions.enforceCapabilities`.
+   * Official plugins are not gated.
+   */
+  hooks?: boolean | undefined;
 }
 
 /**

@@ -33,7 +33,10 @@ export class HookRegistry {
     return () => this.remove(entry);
   }
 
-  /** Register a single shell hook. Returns an unsubscribe function. */
+  /**
+   * Register a single shell hook. The hook is owned by the runtime (no plugin
+   * name) — it survives plugin uninstalls. Returns an unsubscribe function.
+   */
   registerShell(event: HookEvent, hook: ShellHook): () => void {
     const entry: HookEntry = {
       kind: 'shell',
@@ -64,6 +67,44 @@ export class HookRegistry {
   /** True when any entry is registered for the event. */
   has(event: HookEvent): boolean {
     return this.entries.some((e) => e.event === event);
+  }
+
+  /** Every entry currently registered (across all events). */
+  all(): readonly HookEntry[] {
+    return this.entries.slice();
+  }
+
+  /**
+   * Drop every in-process hook whose `owner` matches. Used by the plugin
+   * loader during teardown as a belt-and-braces backstop for the per-call
+   * unsubscribe functions pushed onto `pluginCleanupFns` — if a plugin
+   * `setup()` throws partway through after registering some hooks, the
+   * remaining unsubscribes may never run, and the registry would otherwise
+   * hold dangling references to a torn-down plugin's closures.
+   *
+   * Returns the number of hooks actually removed (useful for tests).
+   * Shell hooks are owned by the runtime, not a plugin, so they're never
+   * drained by owner.
+   */
+  drainByOwner(owner: string): number {
+    let removed = 0;
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      const e = this.entries[i];
+      if (e && e.kind === 'inprocess' && e.owner === owner) {
+        this.entries.splice(i, 1);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /** Count of in-process hooks currently registered by `owner`. */
+  countByOwner(owner: string): number {
+    let n = 0;
+    for (const e of this.entries) {
+      if (e.kind === 'inprocess' && e.owner === owner) n++;
+    }
+    return n;
   }
 
   /** Drop every registered hook (used in teardown / tests). */

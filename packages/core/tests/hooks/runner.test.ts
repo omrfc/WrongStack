@@ -108,3 +108,66 @@ describe('HookRunner — failures and gating', () => {
     expect(r.block).toBeUndefined();
   });
 });
+
+describe('HookRegistry — owner-scoped teardown', () => {
+  it('tracks owner via registerInProcess', () => {
+    const reg = new HookRegistry();
+    reg.registerInProcess('PreToolUse', '*', () => undefined, 'plugin-a');
+    reg.registerInProcess('PreToolUse', '*', () => undefined, 'plugin-b');
+    expect(reg.countByOwner('plugin-a')).toBe(1);
+    expect(reg.countByOwner('plugin-b')).toBe(1);
+    expect(reg.countByOwner('plugin-c')).toBe(0);
+  });
+
+  it('drainByOwner removes only the targeted plugin hooks', () => {
+    const reg = new HookRegistry();
+    reg.registerInProcess('PreToolUse', '*', () => undefined, 'plugin-a');
+    reg.registerInProcess('PostToolUse', '*', () => undefined, 'plugin-a');
+    reg.registerInProcess('PreToolUse', '*', () => undefined, 'plugin-b');
+    reg.registerShell('PreToolUse', { command: 'echo hi' });
+
+    const removed = reg.drainByOwner('plugin-a');
+    expect(removed).toBe(2);
+    expect(reg.countByOwner('plugin-a')).toBe(0);
+    expect(reg.countByOwner('plugin-b')).toBe(1);
+    // Shell hooks survive drainByOwner — they're owned by the runtime.
+    expect(reg.has('PreToolUse')).toBe(true);
+  });
+
+  it('drainByOwner returns 0 when nothing matches', () => {
+    const reg = new HookRegistry();
+    expect(reg.drainByOwner('nobody')).toBe(0);
+  });
+
+  it('per-call unsubscribe still works alongside drainByOwner', () => {
+    const reg = new HookRegistry();
+    const off = reg.registerInProcess('PreToolUse', '*', () => undefined, 'plugin-a');
+    expect(reg.countByOwner('plugin-a')).toBe(1);
+    off();
+    expect(reg.countByOwner('plugin-a')).toBe(0);
+    // Drain is a no-op on an already-empty owner.
+    expect(reg.drainByOwner('plugin-a')).toBe(0);
+  });
+
+  it('all() returns a snapshot copy', () => {
+    const reg = new HookRegistry();
+    reg.registerInProcess('PreToolUse', '*', () => undefined, 'a');
+    reg.registerInProcess('PostToolUse', '*', () => undefined, 'b');
+    const snap = reg.all();
+    expect(snap).toHaveLength(2);
+    // Mutating the returned array must not affect the registry.
+    snap.length = 0;
+    expect(reg.all()).toHaveLength(2);
+  });
+
+  it('list() filters by event and preserves registration order', () => {
+    const reg = new HookRegistry();
+    reg.registerInProcess('PreToolUse', 'Bash', () => undefined, 'x');
+    reg.registerInProcess('PreToolUse', 'Edit', () => undefined, 'y');
+    reg.registerInProcess('PostToolUse', '*', () => undefined, 'z');
+    const pre = reg.list('PreToolUse');
+    expect(pre).toHaveLength(2);
+    expect((pre[0] as { owner?: string }).owner).toBe('x');
+    expect((pre[1] as { owner?: string }).owner).toBe('y');
+  });
+});

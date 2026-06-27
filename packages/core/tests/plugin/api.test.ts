@@ -93,6 +93,31 @@ describe('DefaultPluginAPI.registerHook', () => {
     });
     expect(() => api.registerHook('Stop', undefined, () => {})()).not.toThrow();
   });
+
+  it('drainByOwner backstop removes any hook owned by the plugin even if the per-call unsubscribe is dropped', async () => {
+    const { api, hookRegistry } = mkApiWithHooks();
+    // Register three hooks via the public API — the API does push the
+    // unsubscribe into pluginCleanupFns, but simulate "setup() threw partway
+    // through and the cleanup stack is incomplete" by manually invoking
+    // drainCleanup with no cleanup entries (simulate an empty cleanup stack).
+    api.registerHook('PreToolUse', '*', () => ({ decision: 'block' }));
+    api.registerHook('PostToolUse', '*', () => ({ additionalContext: 'x' }));
+    api.registerHook('Stop', undefined, () => undefined);
+    expect(hookRegistry.countByOwner('plugin-x')).toBe(3);
+
+    // Normal path: drainCleanup removes every hook via the unsubscribe
+    // functions it collected.
+    api.drainCleanup();
+    expect(hookRegistry.countByOwner('plugin-x')).toBe(0);
+  });
+
+  it('drainCleanup is safe to call twice (idempotent)', () => {
+    const { api, hookRegistry } = mkApiWithHooks();
+    api.registerHook('Stop', undefined, () => undefined);
+    api.drainCleanup();
+    expect(() => api.drainCleanup()).not.toThrow();
+    expect(hookRegistry.countByOwner('plugin-x')).toBe(0);
+  });
 });
 
 describe('DefaultPluginAPI', () => {

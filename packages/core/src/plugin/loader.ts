@@ -430,6 +430,36 @@ function wrapApiForCapabilityCheck(
             return Reflect.get(target, prop, receiver);
           },
         });
+  // Wrap registerHook — same pattern as the other subsystems. A plugin that
+  // declared `hooks: false` (or one that never declared any capabilities
+  // at all and is therefore non-official) gets warned/throws on registerHook.
+  // Per-hook matchers and payloads are unchanged; only the call is gated.
+  const wrappedHooks =
+    caps.hooks !== false
+      ? api
+      : new Proxy(api, {
+          get(target, prop, receiver) {
+            if (prop === 'registerHook') {
+              return (
+                event: unknown,
+                matcher: unknown,
+                hook: unknown,
+              ) => {
+                const ev = typeof event === 'string' ? event : '<unknown>';
+                const m = typeof matcher === 'string' ? matcher : '*';
+                violate('hooks', `registerHook(${ev}, ${m})`);
+                return (
+                  target.registerHook as (
+                    e: unknown,
+                    m: unknown,
+                    h: unknown,
+                  ) => unknown
+                )(event, matcher, hook);
+              };
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        });
 
   return new Proxy(api, {
     get(target, prop, receiver) {
@@ -442,6 +472,11 @@ function wrapApiForCapabilityCheck(
           return wrappedSlash;
         case 'mcp':
           return wrappedMcp;
+        case 'registerHook':
+          // The hooks gate wraps the API itself (because registerHook is on
+          // the API, not on a sub-registry). Forward to wrappedHooks so the
+          // capability check fires.
+          return (wrappedHooks as unknown as Record<PropertyKey, unknown>)[prop];
         default:
           return Reflect.get(target, prop, receiver);
       }

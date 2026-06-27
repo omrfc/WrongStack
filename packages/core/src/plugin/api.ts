@@ -230,6 +230,11 @@ export class DefaultPluginAPI implements PluginAPI {
         /* best-effort */
       }
     }
+    // Belt-and-braces: drain any hooks this plugin still owns. If `setup()`
+    // threw partway through, the unsubscribe functions above may not cover
+    // every registered hook (the push happens *after* registerInProcess
+    // returns). Sweeping by owner guarantees no closure outlives its plugin.
+    if (this.hookRegistry) this.hookRegistry.drainByOwner(this.ownerName);
   }
 
   registerSystemPromptContributor(c: SystemPromptContributor): () => void {
