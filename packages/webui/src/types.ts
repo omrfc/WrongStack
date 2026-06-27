@@ -617,6 +617,7 @@ export interface WSStatsGet {
     messages: number;
     readFiles: number;
     tools: number;
+    sideEffectCount?: number | undefined;
     elapsedMs: number;
   };
 }

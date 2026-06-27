@@ -2287,6 +2287,7 @@ export async function startWebUI(
             messages: context.messages.length,
             readFiles: context.readFiles.size,
             tools: toolRegistry.list().length,
+            sideEffectCount: context.sideEffects?.length ?? 0,
             elapsedMs: Date.now() - sessionStartedAt,
           },
         });

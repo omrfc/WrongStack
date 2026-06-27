@@ -67,7 +67,7 @@ export function handleDiagGet(msg: WSServerMessage) {
 }
 
 export function handleStatsGet(msg: WSServerMessage) {
-  const p = msg.payload as { sessionId: string; provider: string; model: string; usage: { input: number; output: number; cacheRead?: number | undefined; cacheWrite?: number | undefined }; cache: { readTokens: number; writeTokens: number; hitRatio: number } | null; cost: number; messages: number; readFiles: number; tools: number; elapsedMs: number };
+  const p = msg.payload as { sessionId: string; provider: string; model: string; usage: { input: number; output: number; cacheRead?: number | undefined; cacheWrite?: number | undefined }; cache: { readTokens: number; writeTokens: number; hitRatio: number } | null; cost: number; messages: number; readFiles: number; tools: number; sideEffectCount?: number | undefined; elapsedMs: number };
   const elapsedSec = Math.floor(p.elapsedMs / 1000);
   const elapsed = elapsedSec < 60 ? `${elapsedSec}s` : elapsedSec < 3600 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${Math.floor(elapsedSec / 3600)}h ${Math.floor((elapsedSec % 3600) / 60)}m`;
   useChatStore.getState().addMessage({ role: 'assistant', content: [
@@ -75,8 +75,9 @@ export function handleStatsGet(msg: WSServerMessage) {
     `**Session:** \`${p.sessionId}\``, `**Provider/Model:** \`${p.provider}\` / \`${p.model}\``, `**Elapsed:** ${elapsed}`, '',
     `**Usage:** ${p.usage.input.toLocaleString()} in · ${p.usage.output.toLocaleString()} out`,
     ...(p.cache && p.cache.readTokens > 0 ? [`**Cache:** ${p.cache.readTokens.toLocaleString()} read · ${p.cache.writeTokens.toLocaleString()} write · hit ratio ${(p.cache.hitRatio * 100).toFixed(1)}%`] : []),
-    `**Cost:** $${p.cost.toFixed(4)}`, '',
+    `**Cost:** ${p.cost.toFixed(4)}`, '',
     `**Messages:** ${p.messages}  ·  **Files read:** ${p.readFiles}  ·  **Tools available:** ${p.tools}`,
+    ...(p.sideEffectCount ? [`**Side effects:** ⚠ ${p.sideEffectCount}`] : []),
   ].join('\n') });
 }
 
