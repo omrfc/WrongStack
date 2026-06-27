@@ -32,8 +32,8 @@ agent) how to talk to it.
 
 ## What this skill assumes
 
-Since commit `46427ea4` (feat/mailbox-daemon), every WrongStack CLI
-surface (REPL/TUI/eternal-autonomy) **auto-bootstraps** the mailbox
+Since commit `46427ea4` (feat/mailbox-daemon), every WrongStack
+surface (REPL/TUI/WebUI/eternal-autonomy) **auto-bootstraps** the mailbox
 bridge on startup. The first surface to come up for a given project
 joins an existing instance or spawns a fresh `wstack mailbox serve`
 child process; a second surface on the same project joins the first's
@@ -81,9 +81,11 @@ they're no longer required for the common case.
 ## Connection model
 
 Single bearer token in `Authorization: Bearer <token>` on every
-request. The token is rotated every time the bridge starts; read it
-freshly from the token file or accept it from the user — never hardcode
-it into prompts or committed code.
+request. The token is regenerated on every fresh bridge (cold) start —
+a surface that *joins* an already-running bridge reuses the live token,
+but once that bridge dies the next start mints a new one. So always read
+it freshly from the token file (or accept it from the user); never
+hardcode it into prompts or committed code, and re-read it after a 401.
 
 If you're working with explicit env vars:
 
@@ -181,8 +183,8 @@ every subsequent route call.
  *      `url` + `token` fields).
  *   3. <projectDir>/.mailbox.token         (the token file, in case
  *      the URL is set in env but the token isn't, or vice versa).
- *   4. Spawn `wstack mailbox serve` via spawnSync with a 5 s timeout
- *      and re-read the lock file. Used as a last resort when no
+ *   4. Spawn `wstack mailbox serve` via async `spawn` + unref, then
+ *      poll the lock file for up to 5 s. Used as a last resort when no
  *      WrongStack surface is running yet.
  *
  * Throws only when ALL three fail (no env vars, no lock file, no
@@ -222,16 +224,26 @@ async function mbWithBootstrap(
   }
 
   // 4. Last resort — spawn `wstack mailbox serve` ourselves.
+  //    Use async `spawn` + unref, NOT `spawnSync`: the bridge is a
+  //    long-lived server that never exits, so `spawnSync` would block
+  //    this agent forever. On Windows `wstack` is a `.cmd` shim, so
+  //    `shell:true` is required to resolve it on PATH; `detached` is
+  //    POSIX-only (on win32 it pops a visible console window).
   if (url === undefined || token === undefined) {
     try {
-      const { spawnSync } = await import('node:child_process');
-      const result = spawnSync('wstack', ['mailbox', 'serve'], {
+      const { spawn } = await import('node:child_process');
+      const isWin = process.platform === 'win32';
+      const child = spawn('wstack', ['mailbox', 'serve'], {
         cwd: projectDir,
-        detached: true,
+        detached: !isWin,
         stdio: 'ignore',
         windowsHide: true,
+        shell: isWin,
       });
-      if (result.error) throw result.error;
+      // Spawn errors (e.g. wstack not on PATH) surface via the
+      // poll-timeout below rather than crashing the agent.
+      child.on('error', () => undefined);
+      child.unref();
       // Poll for the lock file for up to 5 s.
       const deadline = Date.now() + 5_000;
       while (Date.now() < deadline) {

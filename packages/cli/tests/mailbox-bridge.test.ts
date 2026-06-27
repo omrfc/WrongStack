@@ -93,9 +93,13 @@ beforeAll(async () => {
   // user runs it).
   const { spawn } = await import('node:child_process');
   const cliEntry = process.argv[1];
+  // Launch via the running node binary with the CLI entry as the script
+  // argument. Spawning `cliEntry` directly relies on a POSIX shebang and
+  // throws EFTYPE on Windows (a `.js` is not an executable there); going
+  // through process.execPath is the cross-platform equivalent.
   const child = spawn(
-    cliEntry,
-    ['mailbox', 'serve', '--host', '127.0.0.1', '--port', '0'],
+    process.execPath,
+    [cliEntry, 'mailbox', 'serve', '--host', '127.0.0.1', '--port', '0'],
     { cwd: tmpProject, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   serverChild = child;

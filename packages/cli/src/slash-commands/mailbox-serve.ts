@@ -76,15 +76,32 @@ export function buildMailboxServeCommand(opts: SlashCommandContext): SlashComman
       // source) also work. Falls back to `wstack` on PATH for installed
       // copies.
       const cliEntry = process.argv[1];
-      const wstackCmd = cliEntry && /wstack|wrongstack|index\.(js|ts)$/.test(cliEntry)
-        ? cliEntry
-        : 'wstack';
+      const isWin = process.platform === 'win32';
+      // Re-launch our own JS entry under the SAME node binary —
+      // `spawn(scriptPath)` cannot execute a `.js` directly on Windows
+      // (it throws EFTYPE). Fall back to `wstack` on PATH (a `.cmd` shim
+      // on Windows, hence `shell:true`) for installed copies.
+      let wstackCmd: string;
+      let spawnArgs: string[];
+      let useShell = false;
+      if (cliEntry && /wstack|wrongstack|index\.(js|ts|mjs|cjs)$/.test(cliEntry)) {
+        wstackCmd = process.execPath;
+        spawnArgs = [cliEntry, 'mailbox', 'serve', ...flags];
+      } else {
+        wstackCmd = 'wstack';
+        spawnArgs = ['mailbox', 'serve', ...flags];
+        useShell = isWin;
+      }
 
-      const child = spawn(wstackCmd, ['mailbox', 'serve', ...flags], {
+      const child = spawn(wstackCmd, spawnArgs, {
         cwd,
-        detached: true,
+        // POSIX-only: own process group so the bridge outlives the REPL.
+        // On win32 `detached` opens a visible console window (project
+        // convention forbids it); the child survives parent exit anyway.
+        detached: !isWin,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        shell: useShell,
         env: process.env,
       });
       child.unref();
@@ -129,7 +146,7 @@ export function buildMailboxServeCommand(opts: SlashCommandContext): SlashComman
       r.write('Mailbox bridge spawned in the background.\n');
       if (child.pid !== undefined) r.write(`  PID:        ${child.pid}\n`);
       r.write(`  Project:    ${projectDir}\n`);
-      r.write(`  Token file: ${tokenPath} (mode 0600, rotated per start)\n`);
+      r.write(`  Token file: ${tokenPath} (mode 0600; reused if a bridge is already running, freshly minted otherwise)\n`);
       r.write(`  PID file:   ${pidFile}\n`);
       if (banner) {
         r.write('\n--- bridge startup banner ---\n');
