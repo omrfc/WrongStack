@@ -235,29 +235,93 @@ describe('DefaultSystemPromptBuilder — F-area tier semantics', () => {
     });
   });
 
-  describe('F-extra — invalid tier strings (documented as a follow-up)', () => {
-    // The `tier` getter at system-prompt-builder.ts:182-187 returns
-    // any string verbatim. `normalizeTokenSavingTier` in
-    // packages/core/src/types/config.ts:112-125 validates against a
-    // Set and falls back to 'off' for unknown values.
+  describe('F-extra — invalid tier strings (now normalized at boundary)', () => {
+    // The `tier` getter at system-prompt-builder.ts:182-189 now
+    // delegates to `normalizeTokenSavingTier` from
+    // packages/core/src/types/config.ts:112-125. Invalid strings
+    // are coerced to 'off' at the prompt-builder boundary,
+    // matching the behavior of cli-main.ts:916, cli-main.ts:1444,
+    // and execution.ts:1037 (which also normalize before
+    // consuming the tier).
     //
-    // Observable effect: invalid strings like 'MINIMAL' (uppercase)
-    // or 'foo' produce prompts that match neither the expected
-    // tier-mapped peer nor 'off'. The tests below document this
-    // divergence so future readers know the two normalizers don't
-    // agree. If/when the prompt-builder's `tier` getter is updated
-    // to call `normalizeTokenSavingTier`, these tests will need to
-    // be inverted (assert equality to 'off').
-    it('uppercase "MINIMAL" does NOT match lowercase "minimal" (documented divergence)', async () => {
+    // These tests pin the normalization at the boundary so any
+    // future regression that bypasses normalizeTokenSavingTier fails
+    // loudly.
+    //
+    // Important: invalid strings map to 'off' (NOT to lowercase
+    // 'minimal' or 'medium'). A user typo `'MINIMAL'` should NOT
+    // // accidentally trigger compact behavior — that would be a
+    // // silent surprise.
+
+    it('uppercase "MINIMAL" matches "off" (normalized at boundary)', async () => {
       const upper = await promptAt('MINIMAL' as 'off');
-      const lower = await promptAt('minimal');
-      expect(upper).not.toBe(lower);
+      const off = await promptAt('off');
+      expect(upper).toBe(off);
     });
 
-    it('unknown tier "foo" does NOT match "off" (documented divergence)', async () => {
+    it('unknown tier "foo" matches "off" (normalized at boundary)', async () => {
       const foo = await promptAt('foo' as 'off');
       const off = await promptAt('off');
-      expect(foo).not.toBe(off);
+      expect(foo).toBe(off);
+    });
+
+    it('isCompact agrees with tier after normalization (no silent surprises)', async () => {
+      // For invalid input, isCompact must return false because
+      // tier is 'off'. Previously, isCompact would return true
+      // for any string except 'off', disagreeing with the
+      // normalized tier.
+      const b = new DefaultSystemPromptBuilder({
+        todayIso: '2026-06-27',
+        tokenSavingMode: 'MINIMAL' as 'off',
+      });
+      const off = new DefaultSystemPromptBuilder({
+        todayIso: '2026-06-27',
+        tokenSavingMode: 'off',
+      });
+      const pa = await b.build({ cwd: tmp, projectRoot: tmp, tools: FIXTURE_TOOLS });
+      const pb = await off.build({ cwd: tmp, projectRoot: tmp, tools: FIXTURE_TOOLS });
+      expect(pa.map((bl) => bl.text).join('\n')).toBe(pb.map((bl) => bl.text).join('\n'));
+    });
+  });
+
+  describe('F4 — invalid tier strings from upstream paths', () => {
+    // Sprint 3 audit traced the input paths that reach
+    // DefaultSystemPromptBuilder. Three paths exist:
+    //
+    //   (a) CLI flag --token-saving-tier
+    //       → boot.ts:200 normalizes via normalizeTokenSavingTier ✓
+    //
+    //   (b) Slash command /settings token-saving <tier>
+    //       → settings.ts:520 validates against a hardcoded list ✓
+    //
+    //   (c) Config file .wrongstack/config.json
+    //       → config-loader.ts: no normalization ✗
+    //       → cli-main.ts:337 passes raw value to prompt-builder ✗
+    //
+    // Path (c) means a user writing `"tokenSavingMode": "MINIMAL"` (a
+    // typo for "minimal") reaches the prompt-builder. The fix puts
+    // normalization at the prompt-builder boundary so path (c) is
+    // also safe without per-caller effort.
+    //
+    // The tests below pin this behavior. If a future refactor
+    // bypasses normalizeTokenSavingTier, they will fail.
+
+    it('uppercase "MINIMAL" produces the same prompt as "off"', async () => {
+      const upper = await promptAt('MINIMAL' as 'off');
+      const off = await promptAt('off');
+      expect(upper).toBe(off);
+    });
+
+    it('unknown tier "foo" produces the same prompt as "off"', async () => {
+      const foo = await promptAt('foo' as 'off');
+      const off = await promptAt('off');
+      expect(foo).toBe(off);
+    });
+
+    it('numeric "1" produces the same prompt as "off"', async () => {
+      const num = await promptAt('1' as unknown as 'off');
+      const off = await promptAt('off');
+      expect(num).toBe(off);
     });
   });
 });

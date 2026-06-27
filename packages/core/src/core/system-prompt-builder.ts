@@ -16,6 +16,7 @@ import type {
 } from '../types/system-prompt.js';
 import type { MailboxAgentStatus } from '../coordination/mailbox-types.js';
 import type { TokenSavingTier } from '../types/config.js';
+import { normalizeTokenSavingTier } from '../types/config.js';
 import type { Tool } from '../types/tool.js';
 
 export const LAYER_1_IDENTITY = DEFAULT_PROMPT;
@@ -170,20 +171,23 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
    * Normalizes `tokenSavingMode` to a boolean for backward-compatible boolean checks.
    * - `undefined` / `false` / `'off'` → false
    * - `true` / any tier string other than `'off'` → true
+   *
+   * Note: invalid tier strings (e.g. "MINIMAL") are coerced to 'off'
+   * by `normalizeTokenSavingTier` via the `tier` getter, so isCompact
+   * correctly returns false for them — preventing isCompact/tier
+   * disagreement on bad input.
    */
   private get isCompact(): boolean {
-    const val = this.opts.tokenSavingMode;
-    if (!val) return false;
-    if (typeof val === 'boolean') return val;
-    return val !== 'off';
+    return this.tier !== 'off';
   }
 
   /** Exposes the normalized `TokenSavingTier` for tier-aware guidance decisions. */
   private get tier(): TokenSavingTier {
-    const val = this.opts.tokenSavingMode;
-    if (typeof val === 'string') return val;
-    if (val === true) return 'medium';
-    return 'off';
+    // Delegate to the canonical normalizer so invalid strings
+    // (e.g. "MINIMAL" from a user typo in .wrongstack/config.json)
+    // are coerced to 'off' instead of flowing through verbatim.
+    // See packages/core/src/types/config.ts:112-125.
+    return normalizeTokenSavingTier(this.opts.tokenSavingMode);
   }
 
   /**
