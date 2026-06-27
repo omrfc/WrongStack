@@ -621,6 +621,20 @@ export interface WSStatsGet {
   };
 }
 
+export interface WSSideEffects {
+  type: 'side_effects';
+  payload: {
+    sideEffects: Array<{
+      toolUseId: string;
+      toolName: string;
+      ts: string;
+      input: Record<string, unknown>;
+      outcome?: string | undefined;
+      risk: string;
+    }>;
+  };
+}
+
 export interface WSSessionsList {
   type: 'sessions.list';
   payload: {

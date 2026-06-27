@@ -1,4 +1,5 @@
-import { type SessionHistoryEntry, useChatStore, useConfigStore, useFleetStore, useHistoryStore, useSessionStore, useSpecsStore, useSddBoardStore, useSddWizardStore } from '@/stores';
+import { type SessionHistoryEntry, useChatStore, useConfigStore, useFleetStore, useHistoryStore, useSessionStore, useSpecsStore, useSddBoardStore, useSddWizardStore, useSideEffectStore } from '@/stores';
+import type { SideEffectEntry } from '@/stores';
 import type { WSServerMessage } from '@/types';
 
 // Chat domain handlers extracted to chat-handlers.ts
@@ -156,6 +157,10 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
   'skills.list': handleSkillsList,
   'diag.get': handleDiagGet,
   'stats.get': handleStatsGet,
+  'side_effects': (msg: WSServerMessage) => {
+    const p = msg.payload as { sideEffects?: SideEffectEntry[] };
+    useSideEffectStore.getState().setSideEffects(p.sideEffects ?? []);
+  },
   'todos.updated': handleTodosUpdated,
   // The standalone server broadcasts `todos.cleared` on clear (the CLI server
   // sends `todos.updated` with an empty list); handle both so the worklist

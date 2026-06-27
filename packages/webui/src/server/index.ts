@@ -2293,6 +2293,25 @@ export async function startWebUI(
         break;
       }
 
+      case 'side_effects.list': {
+        // P2 #5 Phase 4: return the in-memory side-effect audit trail.
+        const sideEffects = context.sideEffects ?? [];
+        send(ws, {
+          type: 'side_effects',
+          payload: {
+            sideEffects: sideEffects.slice(-50).map((se) => ({
+              toolUseId: se.toolUseId,
+              toolName: se.toolName,
+              ts: se.ts,
+              input: se.input,
+              outcome: se.outcome,
+              risk: se.risk,
+            })),
+          },
+        });
+        break;
+      }
+
       case 'process.list': {
         await handleProcessList(ws);
         break;

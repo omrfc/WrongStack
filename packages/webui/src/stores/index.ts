@@ -20,6 +20,7 @@ export type { Activity } from './ui-store.js';
 export { useMailboxStore, selectUnreadCount } from './mailbox-store.js';
 export { useGitInfoStore } from './git-info-store.js';
 export type { GitInfo } from './git-info-store.js';
+export { useSideEffectStore, type SideEffectEntry } from './side-effect-store.js';
 export { useGitChangesStore } from './git-changes-store.js';
 export type { GitChangedFile, GitDiffContent } from './git-changes-store.js';
 export type { MailboxMessage, MailboxAgent } from './mailbox-store.js';
