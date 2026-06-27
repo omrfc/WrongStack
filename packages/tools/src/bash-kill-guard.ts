@@ -14,7 +14,10 @@
  * - Windows equivalents: taskkill
  */
 
+import * as os from 'node:os';
 import { getPersistentProcessRegistry, type PersistentProcessEntry } from './process-registry-persistent.js';
+
+const isWin = os.platform() === 'win32';
 
 export interface KillCommand {
   pid?: number;
@@ -65,17 +68,25 @@ function extractKillCommand(command: string): string | null {
 function isKillRelatedCommand(cmd: string): boolean {
   const normalized = cmd.toLowerCase().replace(/\s+/g, ' ').trim();
 
+  // P3 #25 (before-release.md): filter by platform so each platform only
+  // checks the kill commands it can actually encounter. On Windows, POSIX
+  // kill/pkill/killall are dead code (they don't exist on cmd.exe/pwsh); on
+  // POSIX, taskkill/tskill are dead code. This lets a single test suite
+  // pass on both platforms without platform-conditional assertions.
+  if (isWin) {
+    // Windows taskkill
+    if (/^taskkill\s/i.test(normalized)) return true;
+    // Windows tskill
+    if (/^tskill\s/i.test(normalized)) return true;
+    return false;
+  }
+
+  // POSIX
   // Direct kill commands
   if (/^kill(\s|$)/.test(normalized)) return true;
 
   // Name-based kills
   if (/^(pkill|killall|pgrep|skill)\s/.test(normalized)) return true;
-
-  // Windows taskkill
-  if (/^taskkill\s/i.test(normalized)) return true;
-
-  // Windows tskill
-  if (/^tskill\s/i.test(normalized)) return true;
 
   // Process-related commands that might target specific PIDs
   if (/^\/proc\/\d+\/(?:kill|fd)/.test(normalized)) return true;
@@ -89,6 +100,42 @@ function isKillRelatedCommand(cmd: string): boolean {
 export function parseKillCommand(command: string): KillCommand | null {
   const normalized = command.replace(/\s+/g, ' ').trim();
 
+  // P3 #25 (before-release.md): skip parsing commands that don't exist on
+  // the current platform. On Windows, kill/pkill/killall/pgrep are dead
+  // branches; on POSIX, taskkill/tskill are dead branches. Filtering them
+  // out here (not just in isKillRelatedCommand) avoids the regex match cost
+  // and makes the test suite platform-independent.
+  if (isWin) {
+    // taskkill /PID 1234 or taskkill /F /PID 1234
+    const taskkillMatch = normalized.match(/^taskkill\s+(?:\/[a-zA-Z]+\s+)*\/PID\s+(\d+)/i);
+    if (taskkillMatch?.[1]) {
+      const pidStr = taskkillMatch[1];
+      return {
+        pid: parseInt(pidStr, 10),
+        signal: normalized.includes('/F') ? 'FORCE' : 'TERM',
+        isGroupKill: false,
+        isAllKill: false,
+        originalCommand: command,
+      };
+    }
+
+    // tskill PID
+    const tskillMatch = normalized.match(/^tskill\s+(\d+)/i);
+    if (tskillMatch?.[1]) {
+      const pidStr = tskillMatch[1];
+      return {
+        pid: parseInt(pidStr, 10),
+        signal: 'TERM',
+        isGroupKill: false,
+        isAllKill: false,
+        originalCommand: command,
+      };
+    }
+
+    return null;
+  }
+
+  // POSIX
   // Simple: kill -9 12345 or kill 12345
   const simpleMatch = normalized.match(/^kill\s+(?:(-[a-zA-Z]+)\s+)?(\d+|-?\d+)$/);
   if (simpleMatch) {
@@ -140,32 +187,6 @@ export function parseKillCommand(command: string): KillCommand | null {
   if (pgrepMatch) {
     // pgrep by itself isn't dangerous, but log it
     return null;
-  }
-
-  // taskkill /PID 1234 or taskkill /F /PID 1234
-  const taskkillMatch = normalized.match(/^taskkill\s+(?:\/[a-zA-Z]+\s+)*\/PID\s+(\d+)/i);
-  if (taskkillMatch?.[1]) {
-    const pidStr = taskkillMatch[1];
-    return {
-      pid: parseInt(pidStr, 10),
-      signal: normalized.includes('/F') ? 'FORCE' : 'TERM',
-      isGroupKill: false,
-      isAllKill: false,
-      originalCommand: command,
-    };
-  }
-
-  // tskill PID
-  const tskillMatch = normalized.match(/^tskill\s+(\d+)/i);
-  if (tskillMatch?.[1]) {
-    const pidStr = tskillMatch[1];
-    return {
-      pid: parseInt(pidStr, 10),
-      signal: 'TERM',
-      isGroupKill: false,
-      isAllKill: false,
-      originalCommand: command,
-    };
   }
 
   return null;
