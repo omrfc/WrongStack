@@ -342,7 +342,7 @@ ECONNREFUSED, never hangs.
 
 ---
 
-### B6. Worktree Isolation Cleanup on Failure — ⚠️ Confirmed (P2)
+### B6. Worktree Isolation Cleanup on Failure — ✅ Done (commit `a89ea935`)
 
 **What**: If a subagent crashes, is its worktree branch cleaned up or
 orphaned?
@@ -392,9 +392,9 @@ subagent crash).
 | B3 | FleetBus event ordering | — | ✓ Clear |
 | B4 | DAG cycle detector self-ref | — | ✓ Clear |
 | B5 | Mailbox bridge token rotation | — | ✓ Clear |
-| B6 | Worktree isolation cleanup on failure | P2 | ⚠️ Confirmed |
+| B6 | Worktree isolation cleanup on failure | P2 | ✅ Done (`a89ea935`) |
 
-**Result**: 5 clear, 1 confirmed (P2 — orphaned worktrees after crash).
+**Result**: 5 clear, 1 fixed (P2 — orphaned worktrees; `cleanupStale()` on boot, commit `a89ea935`).
 The coordination layer is well-structured: synchronous event ordering
 in the single-threaded event loop prevents race conditions, the
 director state checkpoint is crash-safe via atomic writes, and the
@@ -672,7 +672,7 @@ get clamped to the new maximum.
 
 ---
 
-### D4. WebUI Optimistic Update Rollback — ⚠️ Confirmed (P3)
+### D4. WebUI Optimistic Update Rollback — ✅ Done (commit `49af75b7`)
 
 **What**: Chat send creates an optimistic entry — if the WS round-trip
 fails, is the entry removed or stranded?
@@ -738,11 +738,11 @@ elapsed chip change, and Ink handles this without scrolling.
 | D1 | Reducer action batching | — | ✓ Clear |
 | D2 | WS reconnection state recovery | — | ✓ Clear |
 | D3 | Scroll position after compaction | — | ✓ Clear |
-| D4 | Optimistic update rollback | P3 | ⚠️ Confirmed (nice-to-have) |
+| D4 | Optimistic update rollback | P3 | ✅ Done (`49af75b7`) |
 | D5 | Ink live-region leak | — | ✓ Clear |
 
-**Result**: 4 clear, 1 confirmed (P3 — optimistic entry has no `failed`
-flag, but UX is acceptable with error reply following the message).
+**Result**: 4 clear, 1 fixed (P3 — `status` field on `ChatMessage`,
+commit `49af75b7`).
 
 ---
 
@@ -920,14 +920,14 @@ auto-checkpoints by default.
 
 ## Sprint 2 Audit — Final Summary
 
-| Area | Total | Clear | P2 | P3 | P1 |
-|------|-------|-------|----|----|-----|
-| A — Provider & Streaming | 6 | 5 | 1 | 0 | 0 |
-| B — Coordination & Fleet | 6 | 5 | 1 | 0 | 0 |
-| C — Storage & Persistence | 6 | 6 | 0 | 0 | 0 |
-| D — TUI/WebUI State | 5 | 4 | 0 | 1 | 0 |
-| E — Cross-cutting | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **28** | **25** | **2** | **1** | **0** |
+| Area | Total | Clear | Done (P2) | Done (P3) | Design Doc | P1 |
+|------|-------|-------|-----------|-----------|------------|-----|
+| A — Provider & Streaming | 6 | 5 | 0 | 0 | 1 (A3) | 0 |
+| B — Coordination & Fleet | 6 | 5 | 1 (B6) | 0 | 0 | 0 |
+| C — Storage & Persistence | 6 | 6 | 0 | 0 | 0 | 0 |
+| D — TUI/WebUI State | 5 | 4 | 0 | 1 (D4) | 0 | 0 |
+| E — Cross-cutting | 5 | 5 | 0 | 0 | 0 | 0 |
+| **Total** | **28** | **25** | **1** | **1** | **1** | **0** |
 
 **Verdict**: The codebase is in excellent shape. No P1 issues found
 across 28 potential findings. Three confirmed items (2 P2, 1 P3) are
@@ -938,3 +938,6 @@ security vulnerabilities, data loss, or reliability risks.
 - **A3 (P2)**: Provider retry amplification under concurrent 429s — design doc landed at `docs/design-provider-health-gate.md`; implementation pending prioritization.
 - **B6 (P2)**: Orphaned worktrees after subagent crash — ✅ fixed in `a89ea935` (`cleanupStale()` on boot).
 - **D4 (P3)**: WebUI optimistic update has no `failed` flag — ✅ fixed in `49af75b7` (`status` field on `ChatMessage`).
+
+**Full report**: see `docs/sprint2-audit-final-report.md` for per-finding
+detail, commit list, follow-ups, and release-readiness verdict.
