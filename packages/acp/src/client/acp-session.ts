@@ -518,11 +518,11 @@ export class ACPSession {
   /**
    * Set a configuration option for a session.
    */
-  async setConfigOption(sessionId: SessionId, configOptionId: string, value: string): Promise<void> {
+  async setConfigOption(sessionId: SessionId, configId: string, value: string): Promise<void> {
     if (this.closed) throw new ACPSessionError('closed', 'session is closed');
     const id = this.allocId();
     const result = await this.sendRequest(id, 'session/set_config_option', {
-      sessionId, configOptionId, value,
+      sessionId, configId, value,
     });
     if (isJsonRpcError(result)) {
       throw new ACPSessionError('prompt_failed', `session/set_config_option failed: ${result.message}`, result);

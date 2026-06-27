@@ -355,7 +355,7 @@ export class ACPProtocolHandler {
     await this.transport.send(toWire({
       jsonrpc: '2.0',
       id,
-      result: {},
+      result: { configOptions: [...this.configOptions] },
     }));
     return false;
   }
@@ -501,11 +501,15 @@ export class ACPProtocolHandler {
     const p = (params ?? {}) as { sessionId?: unknown };
     const sessionId = typeof p.sessionId === 'string' ? p.sessionId : null;
 
-    if (!sessionId || !this.sessions.has(sessionId)) {
+    if (!sessionId) {
       await this.sendError(id, -32000, `session not found: ${sessionId}`);
       return false;
     }
 
+    if (!this.sessions.has(sessionId)) {
+      await this.transport.send(toWire({ jsonrpc: '2.0', id, result: {} }));
+      return false;
+    }
     const session = this.sessions.get(sessionId)!;
     session.abort.abort();
     this.sessions.delete(sessionId);
@@ -630,14 +634,14 @@ export class ACPProtocolHandler {
   }
 
   private async handleSetConfigOption(id: string | number, params: unknown): Promise<boolean> {
-    const p = (params ?? {}) as { sessionId?: unknown; configOptionId?: unknown; value?: unknown };
+    const p = (params ?? {}) as { sessionId?: unknown; configId?: unknown; value?: unknown };
     const sessionId = typeof p.sessionId === 'string' ? p.sessionId : null;
-    const optionId = typeof p.configOptionId === 'string' ? p.configOptionId : null;
+    const optionId = typeof p.configId === 'string' ? p.configId : null;
     const value = typeof p.value === 'string' ? p.value : null;
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
     const option = optionId ? this.configOptions.find((o) => o.id === optionId) : undefined;
     if (!session || !option || value === null || !option.options.some((o) => o.value === value)) {
-      await this.sendError(id, -32602, 'invalid sessionId, configOptionId, or value');
+      await this.sendError(id, -32602, 'invalid sessionId, configId, or value');
       return false;
     }
     option.currentValue = value;
