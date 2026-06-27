@@ -58,7 +58,12 @@ function makeTimedAgent(opts: {
 describe('delegate timeout pre-emption (proactive extend)', () => {
   it('negotiates an extension BEFORE the deadline while the subagent makes progress', async () => {
     const negotiations: Array<{ used: number; limit: number }> = [];
-    const timeoutMs = 120;
+    // The pre-empt arms at `timeoutMs * TIMEOUT_PREEMPT_FRACTION` (0.85), so the
+    // lead margin before the deadline is only `(1 - 0.85) * timeoutMs`. Keep the
+    // window wide enough that this margin (~90ms here) dwarfs realistic setTimeout
+    // skew under full-suite CPU load — a tight 120ms window left just 18ms and
+    // flaked (`used` landed past the deadline when the timer fired late).
+    const timeoutMs = 600;
 
     const factory = async () => {
       const events = new EventBus();
