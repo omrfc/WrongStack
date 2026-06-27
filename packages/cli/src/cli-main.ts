@@ -2435,6 +2435,20 @@ export async function main(argv: string[]): Promise<number> {
               `${color.bold('Recent errors')} (last ${errorRing.length}):`,
               ...errorRing.map((e) => `  [${e.ts}] ${e.phase} ${e.code} — ${e.message}`),
             ];
+      // P2 #5 Phase 4: side-effect audit timeline from the in-memory list.
+      const sideEffects = context.sideEffects ?? [];
+      const sideEffectSection =
+        sideEffects.length === 0
+          ? []
+          : [
+              '',
+              `${color.bold('Side effects')} (last ${sideEffects.length}):`,
+              ...sideEffects.slice(-20).map((se) => {
+                const time = se.ts.slice(11, 19);
+                const detail = se.outcome ? ` → ${se.outcome}` : '';
+                return `  ${time}  ${se.toolName.padEnd(8)} ${se.risk.padEnd(7)} ${se.input['command'] ?? se.input['url'] ?? se.input['packages'] ?? JSON.stringify(se.input).slice(0, 60)}${detail}`;
+              }),
+            ];
       // Read current provider from the ConfigStore so /diag always shows
       // the live value, even if /model swapped it mid-session (L1-B).
       const liveCfg = configStore.get();
@@ -2456,10 +2470,11 @@ export async function main(argv: string[]): Promise<number> {
         liveFamily ? `  family:       ${liveFamily}` : null,
         `  projectRoot:  ${projectRoot}`,
         `  tokens:       in ${u.input}  out ${u.output}  cacheR ${u.cacheRead ?? 0}`,
-        `  cost:         $${cost.total.toFixed(4)}`,
+        `  cost:         ${cost.total.toFixed(4)}`,
         `  tools:        ${toolRegistry.list().length}`,
         `  mcpServers:   ${mcpRegistry.list().length}`,
         ...errSection,
+        ...sideEffectSection,
       ]
         .filter((line): line is string => line !== null)
         .join('\n');

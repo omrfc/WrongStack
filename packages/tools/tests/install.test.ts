@@ -21,15 +21,25 @@ vi.mock('../src/_spawn-stream.js', () => ({
   }) as never as () => AsyncGenerator<ToolProgressEvent, SpawnStreamResult>,
 }));
 
-const makeCtx = (overrides?: Record<string, unknown>) =>
-  ({
+const makeCtx = (overrides?: Record<string, unknown>) => {
+  const ctx = {
     cwd: '/fake',
     tools: [],
     projectRoot: '/fake',
     agentId: 'leader',
     agentName: 'Leader',
+    sideEffects: [] as unknown[],
+    session: {
+      id: 'test',
+      append: async () => undefined,
+      recordFileChange: () => {},
+      recordSideEffect: () => {},
+    },
     ...overrides,
-  }) as any;
+  } as any;
+  ctx.recordSideEffect = (se: unknown) => ctx.sideEffects.push(se);
+  return ctx;
+};
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('installTool', () => {

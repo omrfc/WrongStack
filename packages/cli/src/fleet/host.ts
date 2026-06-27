@@ -789,6 +789,7 @@ export class MultiAgentHost {
           flush: () => parentSession.flush(),
           close: async () => {},
           recordFileChange: () => {},
+          recordSideEffect: () => {},
           writeCheckpoint: async () => {},
           writeFileSnapshot: async () => {},
           truncateToCheckpoint: async () => 0,
