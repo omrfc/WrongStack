@@ -32,6 +32,7 @@ import {
   ACPProtocolHandler,
   type RunTurn,
   type RunTurnResult,
+  type SessionPersistence,
 } from './protocol-handler.js';
 import { StdioTransport } from './stdio-transport.js';
 
@@ -49,6 +50,22 @@ export interface WrongStackACPServerOptions {
   host?: string | undefined;
   /** Emit the pre-v1 startup marker on stdio. Defaults to false. */
   legacyStartupMarker?: boolean | undefined;
+  /**
+   * Conversation-history source for `session/load` replay. Pass
+   * `makeACPServerAgentTurn(...).replay` here so a reconnecting client
+   * gets prior turns streamed back.
+   */
+  replayFor?: ((sessionId: string) => Array<{ sessionUpdate: string; content: unknown }>) | undefined;
+  /**
+   * Cold-load seed hook. Pass `makeACPServerAgentTurn(...).seed` so a
+   * restored session's Agent resumes the model context, not just the UI.
+   */
+  seedFor?: ((sessionId: string, history: Array<{ sessionUpdate: string; content: unknown }>) => void) | undefined;
+  /**
+   * Durable session store. When set, sessions + history are persisted and
+   * restored across restarts for `session/load`. Pass an `ACPSessionStore`.
+   */
+  store?: SessionPersistence | undefined;
 }
 
 export class WrongStackACPServer {
@@ -68,6 +85,9 @@ export class WrongStackACPServer {
       defaultCwd: opts.defaultCwd ?? process.cwd(),
       runTurn,
       agentName: opts.agentName,
+      ...(opts.replayFor ? { replayFor: opts.replayFor } : {}),
+      ...(opts.seedFor ? { seedFor: opts.seedFor } : {}),
+      ...(opts.store ? { store: opts.store } : {}),
     });
   }
 
@@ -154,18 +174,23 @@ export class WrongStackACPServer {
         return;
       }
 
-      // Process the message and return the response
-      // For HTTP transport, we buffer notifications and return them
-      // inline with the response (Streamable HTTP pattern).
+      // Process the message and return the response. For HTTP transport we
+      // must NOT let the handler write to stdout — instead we intercept
+      // `transport.send` and capture the JSON-RPC response + any buffered
+      // notifications, then return them inline (Streamable HTTP pattern).
       const notifications: unknown[] = [];
+      let response: ACPMessage | null = null;
       const originalSend = this.transport.send.bind(this.transport);
       this.transport.send = async (m: ACPMessage) => {
-        // If it's a notification (session/update), buffer it
-        if (m.method === 'session/update' && m.id === undefined) {
+        if (m.id !== undefined && (m.result !== undefined || m.error !== undefined)) {
+          // The JSON-RPC response to this request — capture, don't write
+          // to stdout (which is meaningless over HTTP).
+          response = m;
+        } else if (m.method === 'session/update') {
           notifications.push(m.params);
         } else {
-          // Responses go to the original send
-          await originalSend(m);
+          // Any other server-initiated notification — buffer it too.
+          notifications.push(m);
         }
       };
 
@@ -175,15 +200,11 @@ export class WrongStackACPServer {
         this.transport.send = originalSend;
       }
 
-      // Get the response that was sent
-      const sent = this.transport as { lastSent?: unknown };
-      const lastResponse = (sent as { lastResponse?: unknown }).lastResponse;
-
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      const responseBody = {
-        result: lastResponse,
-        notifications,
-      };
+      const responseBody =
+        response !== null
+          ? { ...(response as ACPMessage), notifications }
+          : { notifications };
       res.end(JSON.stringify(responseBody));
     });
 

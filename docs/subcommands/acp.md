@@ -2,7 +2,9 @@
 
 WrongStack as an ACP-compatible agent (server) and as a driver of external
 ACP agents (client). See [ACP Ensemble Architecture](../acp-ensemble.md) for
-the top-level design; this page is the CLI surface reference.
+the top-level design; this page is the CLI surface reference. To connect a
+real editor (Zed, JetBrains, …) and verify each capability, see the
+[ACP editor integration guide](../acp-editor-integration.md).
 
 ## Usage
 

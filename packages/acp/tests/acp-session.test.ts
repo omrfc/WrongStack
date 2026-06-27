@@ -157,6 +157,57 @@ describe('ACPSession', () => {
     await session.close();
   });
 
+  it('captures tool calls, diffs and thoughts, and streams them via onProgress', async () => {
+    const session = await startSession();
+    const t = lastTransport();
+
+    const events: string[] = [];
+    const promptP = session.prompt(
+      [textContent('do it')],
+      new AbortController().signal,
+      (e) => events.push(e.type),
+    );
+
+    await new Promise((r) => setImmediate(r));
+    const newMsg = t.sent.find((m) => m.method === 'session/new');
+    t.respond(newMsg!.id!, 'session/new', { sessionId: 'sess_abc' });
+    await new Promise((r) => setImmediate(r));
+    const promptMsg = t.sent.find((m) => m.method === 'session/prompt');
+
+    const update = (u: unknown) =>
+      t.emit({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: { sessionId: 'sess_abc', update: u },
+      } as never as ACPMessage);
+
+    update({ sessionUpdate: 'thought_chunk', content: { type: 'text', text: 'hmm' } });
+    update({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'tc1',
+      title: 'edit a.ts',
+      kind: 'edit',
+      status: 'in_progress',
+      content: [{ type: 'diff', path: 'a.ts', oldText: null, newText: 'new' }],
+    });
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'tc1', status: 'completed' });
+    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } });
+    t.respond(promptMsg!.id!, 'session/prompt', { stopReason: 'end_turn' });
+
+    const result = await promptP;
+    expect(result.text).toBe('done');
+    expect(result.thoughts).toBe('hmm');
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]).toMatchObject({ toolCallId: 'tc1', status: 'completed' });
+    expect(result.diffs).toEqual([{ path: 'a.ts', oldText: null, newText: 'new' }]);
+    // Live progress fired for thought, tool_call, diff, tool_call_update, message.
+    expect(events).toEqual(
+      expect.arrayContaining(['thought', 'tool_call', 'diff', 'tool_call_update', 'message']),
+    );
+
+    await session.close();
+  });
+
   it('returns stopReason=cancelled and a session/cancel notification when aborted', async () => {
     const session = await startSession();
     const t = lastTransport();

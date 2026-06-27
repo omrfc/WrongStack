@@ -38,15 +38,17 @@
  * it. On abort, the adapter maps the resulting `AbortError` to
  * `{stopReason: 'cancelled'}`.
  */
-import type { Agent } from '@wrongstack/core';
+import type { Agent, AgentInput } from '@wrongstack/core';
 import type {
   ContentBlock,
   PlanEntry,
   StopReason,
+  ToolKind,
   UsageCost,
 } from '../types/acp-v1.js';
 import type {
   RunTurn,
+  RunTurnApi,
   RunTurnResult,
 } from './protocol-handler.js';
 
@@ -56,8 +58,18 @@ export interface ACPServerAgentTurnOptions {
    * Called once per session on the first `session/prompt` turn.
    * The factory must isolate each agent — sharing one agent
    * across sessions would defeat v1's session-isolation model.
+   *
+   * `api` (when provided) is the client-callback surface: ask the client
+   * for permission, and use the client's filesystem/terminal when it
+   * advertises those capabilities. A factory that wires it builds a
+   * client-backed permission policy and ACP-backed fs/terminal tools
+   * instead of silently auto-approving against the local disk.
    */
-  agentFor: (sessionId: string, cwd: string) => Promise<Agent> | Agent;
+  agentFor: (
+    sessionId: string,
+    cwd: string,
+    api?: RunTurnApi,
+  ) => Promise<Agent> | Agent;
   /**
    * Hard wall-clock cap for one turn. The agent's own provider
    * timeout is layered under this; this cap is a safety belt.
@@ -66,25 +78,64 @@ export interface ACPServerAgentTurnOptions {
   timeoutMs?: number | undefined;
 }
 
+/** A recorded conversation turn, replayable on `session/load`. */
+export interface SessionReplayUpdate {
+  sessionUpdate: 'user_message_chunk' | 'agent_message_chunk';
+  content: { type: 'text'; text: string };
+}
+
+/**
+ * A `RunTurn` that also exposes the recorded per-session history so the
+ * server can replay it on `session/load`.
+ */
+export interface ACPServerAgentTurn {
+  (input: Parameters<RunTurn>[0], emit: Parameters<RunTurn>[1], api?: Parameters<RunTurn>[2]): Promise<RunTurnResult>;
+  /** Recorded user/agent text turns for a session, in order. */
+  replay(sessionId: string): SessionReplayUpdate[];
+  /**
+   * Seed a session's history (from a durable store on cold `session/load`)
+   * so `replay()` returns it AND the next-created `Agent` for the session is
+   * primed with the prior conversation as model context — not just the
+   * client UI. Call before the first post-load `session/prompt`.
+   */
+  seed(sessionId: string, history: ReadonlyArray<{ sessionUpdate: string; content: unknown }>): void;
+}
+
 /**
  * Build a `RunTurn` that owns per-session `Agent` instances and
  * delegates each turn to the appropriate agent. The returned
  * function is reusable across sessions — the agents are kept in a
- * Map keyed by `sessionId`.
+ * Map keyed by `sessionId`. It also records each turn's user/agent
+ * text so the server can replay history on `session/load` (see
+ * `.replay(sessionId)`).
  */
 export function makeACPServerAgentTurn(
   opts: ACPServerAgentTurnOptions,
-): RunTurn {
+): ACPServerAgentTurn {
   const agents = new Map<string, Agent>();
   const timeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  const history = new Map<string, SessionReplayUpdate[]>();
+  // Sessions restored from a durable store whose freshly-created Agent must
+  // be primed with the prior conversation before its first turn runs.
+  const pendingSeed = new Set<string>();
   const timeoutMs = opts.timeoutMs ?? 5 * 60_000;
 
-  return async (input, emit): Promise<RunTurnResult> => {
+  const turn = async (
+    input: Parameters<RunTurn>[0],
+    emit: Parameters<RunTurn>[1],
+    api?: Parameters<RunTurn>[2],
+  ): Promise<RunTurnResult> => {
     // Lazily create an agent for this session on the first turn.
     let agent = agents.get(input.sessionId);
     if (!agent) {
-      agent = await opts.agentFor(input.sessionId, process.cwd());
+      agent = await opts.agentFor(input.sessionId, process.cwd(), api);
       agents.set(input.sessionId, agent);
+      // Cold-load priming: re-feed the restored conversation into the new
+      // agent's context so the MODEL resumes (not just the client UI).
+      if (pendingSeed.has(input.sessionId)) {
+        pendingSeed.delete(input.sessionId);
+        seedAgentContext(agent, history.get(input.sessionId) ?? []);
+      }
     }
 
     // Per-turn safety belt: even if the agent ignores the parent
@@ -96,9 +147,46 @@ export function makeACPServerAgentTurn(
     }, timeoutMs);
     timeouts.set(input.sessionId, timer);
 
+    // Stream the core agent's tool activity to the ACP client as
+    // tool_call / tool_call_update notifications so editors (Zed,
+    // JetBrains, …) render live tool cards + statuses instead of seeing
+    // a silent gap until the final text. We subscribe for the duration
+    // of this turn and detach in the finally block.
+    const unsub: Array<() => void> = [];
+    // Real `Agent` always exposes `.events`; guard for Agent-like fakes.
+    const bus = (agent as { events?: { on?: typeof agent.events.on } }).events;
+    if (bus?.on) {
+      unsub.push(
+        bus.on('tool.started', (e) => {
+          emit({
+            sessionUpdate: 'tool_call',
+            toolCallId: e.id,
+            title: toolTitle(e.name, e.input),
+            kind: toolNameToKind(e.name),
+            status: 'in_progress',
+            ...(isRecord(e.input) ? { rawInput: e.input } : {}),
+          });
+        }),
+        bus.on('tool.executed', (e) => {
+          emit({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: e.id ?? e.name,
+            status: e.ok ? 'completed' : 'failed',
+            ...(e.output !== undefined
+              ? {
+                  content: [
+                    { type: 'content', content: { type: 'text', text: e.output } },
+                  ],
+                }
+              : {}),
+          });
+        }),
+      );
+    }
+
     try {
-      const userMessage = promptToText(input.prompt);
-      const result = await agent.run(userMessage, { signal: input.signal });
+      const userInput = promptToAgentInput(input.prompt);
+      const result = await agent.run(userInput, { signal: input.signal });
 
       // Stream the agent's final text back
       const text = extractText(result);
@@ -108,6 +196,17 @@ export function makeACPServerAgentTurn(
           content: { type: 'text', text },
         });
       }
+
+      // Record the turn so `session/load` can replay the conversation.
+      const userText = promptToText(input.prompt);
+      const hist = history.get(input.sessionId) ?? [];
+      if (userText) {
+        hist.push({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: userText } });
+      }
+      if (text) {
+        hist.push({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
+      }
+      if (hist.length > 0) history.set(input.sessionId, hist);
 
       // Emit plan if the agent provided one
       const plan = extractPlan(result);
@@ -140,8 +239,109 @@ export function makeACPServerAgentTurn(
     } finally {
       clearTimeout(timer);
       timeouts.delete(input.sessionId);
+      for (const u of unsub) u();
     }
   };
+
+  const replay = (sessionId: string): SessionReplayUpdate[] =>
+    history.get(sessionId) ?? [];
+
+  const seed = (
+    sessionId: string,
+    incoming: ReadonlyArray<{ sessionUpdate: string; content: unknown }>,
+  ): void => {
+    if (incoming.length === 0) return;
+    history.set(sessionId, [...incoming] as SessionReplayUpdate[]);
+    pendingSeed.add(sessionId);
+  };
+
+  return Object.assign(turn, { replay, seed });
+}
+
+/**
+ * Prime a freshly-created agent's conversation state with restored history.
+ * Each recorded user/agent chunk becomes a `user`/`assistant` message so the
+ * model continues the prior conversation instead of starting blank.
+ */
+function seedAgentContext(
+  agent: Agent,
+  history: ReadonlyArray<{ sessionUpdate: string; content: unknown }>,
+): void {
+  const state = (agent as { ctx?: { state?: { appendMessage?: (m: unknown) => void } } }).ctx?.state;
+  if (!state?.appendMessage) return;
+  for (const u of history) {
+    const text = (u.content as { text?: unknown } | undefined)?.text;
+    if (typeof text !== 'string' || text.length === 0) continue;
+    const role = u.sessionUpdate === 'user_message_chunk' ? 'user' : 'assistant';
+    state.appendMessage({ role, content: text });
+  }
+}
+
+/** Map a WrongStack tool name to the closest ACP ToolKind for UI grouping. */
+function toolNameToKind(name: string): ToolKind {
+  const n = name.toLowerCase();
+  if (n.includes('read') || n.includes('cat')) return 'read';
+  if (n.includes('write') || n.includes('edit') || n.includes('apply') || n.includes('patch')) return 'edit';
+  if (n.includes('delete') || n.includes('rm')) return 'delete';
+  if (n.includes('move') || n.includes('rename') || n.includes('mv')) return 'move';
+  if (n.includes('grep') || n.includes('glob') || n.includes('search') || n.includes('find')) return 'search';
+  if (n.includes('bash') || n.includes('shell') || n.includes('exec') || n.includes('run') || n.includes('terminal')) return 'execute';
+  if (n.includes('fetch') || n.includes('http') || n.includes('web') || n.includes('url')) return 'fetch';
+  if (n.includes('think') || n.includes('plan')) return 'think';
+  return 'other';
+}
+
+/** A short, human-readable title for a tool call card. */
+function toolTitle(name: string, input: unknown): string {
+  if (isRecord(input)) {
+    const path = input.path ?? input.file ?? input.filePath ?? input.pattern ?? input.command;
+    if (typeof path === 'string' && path.length > 0) {
+      return `${name}: ${path.length > 80 ? `${path.slice(0, 77)}…` : path}`;
+    }
+  }
+  return name;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Convert an ACP `ContentBlock[]` prompt into a core `AgentInput`.
+ *
+ * When the prompt is all text we return a plain string (the common,
+ * cheapest path). When it carries images we build a multimodal
+ * `ContentBlock[]` the provider can pass to a vision-capable model.
+ * Audio and resource blocks have no core representation yet, so they're
+ * recorded as bracketed text placeholders alongside the other content.
+ */
+function promptToAgentInput(blocks: readonly ContentBlock[]): AgentInput {
+  const hasImage = blocks.some((b) => b.type === 'image');
+  if (!hasImage) {
+    return promptToText(blocks);
+  }
+  const out: AgentInput = [];
+  for (const b of blocks) {
+    if (b.type === 'text') {
+      out.push({ type: 'text', text: b.text });
+    } else if (b.type === 'image') {
+      out.push({
+        type: 'image',
+        source: { type: 'base64', media_type: b.mimeType, data: b.data },
+      });
+    } else if (b.type === 'audio') {
+      out.push({ type: 'text', text: `[audio: ${b.mimeType}]` });
+    } else if (b.type === 'resource') {
+      const text =
+        'text' in b.resource && typeof b.resource.text === 'string'
+          ? b.resource.text
+          : `[embedded resource: ${b.resource.uri}]`;
+      out.push({ type: 'text', text });
+    } else if (b.type === 'resource_link') {
+      out.push({ type: 'text', text: `[resource link: ${b.uri}]` });
+    }
+  }
+  return out;
 }
 
 /**

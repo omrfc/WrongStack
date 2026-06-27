@@ -37,13 +37,13 @@ export type PermissionPolicy = (
  * Real WrongStack permission UIs replace this; the contract is the
  * `PermissionPolicy` function type, not the implementation.
  */
-export const defaultPermissionPolicy: PermissionPolicy = async (req) => {
-  if (req.signal.aborted) return { outcome: 'cancelled' };
-
-  const ranked = [...req.options].sort((a, b) => {
+function pickAllow(
+  options: readonly PermissionOption[],
+): RequestPermissionOutcome {
+  const ranked = [...options].sort((a, b) => {
     const score = (k: PermissionOption['kind']): number => {
-      if (k === 'allow_always') return 0;
-      if (k === 'allow_once') return 1;
+      if (k === 'allow_once') return 0; // prefer once over always — least standing grant
+      if (k === 'allow_always') return 1;
       if (k === 'reject_once') return 2;
       return 3;
     };
@@ -54,4 +54,66 @@ export const defaultPermissionPolicy: PermissionPolicy = async (req) => {
     return { outcome: 'cancelled' };
   }
   return { outcome: 'selected', optionId: chosen.optionId };
+}
+
+function pickReject(
+  options: readonly PermissionOption[],
+): RequestPermissionOutcome {
+  const reject = options.find(
+    (o) => o.kind === 'reject_once' || o.kind === 'reject_always',
+  );
+  return reject ? { outcome: 'selected', optionId: reject.optionId } : { outcome: 'cancelled' };
+}
+
+/**
+ * Tool kinds considered side-effect-free (safe to auto-approve even in a
+ * non-interactive run). Everything else (edit/delete/move/execute) mutates
+ * the workspace or runs commands and should be gated by a real policy.
+ */
+const READ_ONLY_KINDS = new Set(['read', 'search', 'fetch', 'think']);
+
+/**
+ * Default policy: auto-approve the least-standing allow option.
+ *
+ * ⚠️ This auto-approves EVERY tool call, including file writes and shell
+ * commands. It exists so non-interactive contexts (CLI `acp spawn`,
+ * the Director fan-out) work without a human in the loop. Interactive
+ * surfaces (TUI/WebUI) MUST inject a policy that surfaces the request to
+ * the user — pass `permissionPolicy` to `ACPSession` / the subagent runner.
+ * For untrusted agents prefer {@link readOnlyPermissionPolicy}.
+ */
+export const defaultPermissionPolicy: PermissionPolicy = async (req) => {
+  if (req.signal.aborted) return { outcome: 'cancelled' };
+  return pickAllow(req.options);
 };
+
+/**
+ * Safe-by-default policy: auto-approve only side-effect-free tool calls
+ * (read/search/fetch/think); reject anything that would write files or
+ * run commands. Use this when driving an untrusted external agent and no
+ * interactive surface is available to ask the user.
+ */
+export const readOnlyPermissionPolicy: PermissionPolicy = async (req) => {
+  if (req.signal.aborted) return { outcome: 'cancelled' };
+  const kind = req.toolCall.kind;
+  if (kind && READ_ONLY_KINDS.has(kind)) {
+    return pickAllow(req.options);
+  }
+  return pickReject(req.options);
+};
+
+/**
+ * Build a policy from a yes/no decision function. The decider receives the
+ * tool call (title + kind + rawInput) and returns whether to allow it.
+ * This is the seam an interactive host (TUI/WebUI confirm prompt, trust
+ * store, exec-allowlist) plugs into.
+ */
+export function makePermissionPolicy(
+  decide: (req: PermissionRequest) => boolean | Promise<boolean>,
+): PermissionPolicy {
+  return async (req) => {
+    if (req.signal.aborted) return { outcome: 'cancelled' };
+    const allow = await decide(req);
+    return allow ? pickAllow(req.options) : pickReject(req.options);
+  };
+}

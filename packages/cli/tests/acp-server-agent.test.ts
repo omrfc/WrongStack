@@ -42,6 +42,7 @@ vi.mock('@wrongstack/runtime', () => ({
 }));
 
 import { AcpServerConfigError, buildAcpServerAgentFactory } from '../src/acp-server-agent.js';
+import type { RunTurnApi } from '@wrongstack/acp/agent';
 import type { SubcommandDeps } from '../src/subcommands/index.js';
 
 function makeStubProvider(): Provider {
@@ -133,6 +134,75 @@ describe('buildAcpServerAgentFactory', () => {
     expect(a1.ctx).not.toBe(a2.ctx);
     // The configured model flows through to the context.
     expect(a1.ctx.model).toBe('test-model');
+  });
+
+  it('wires ACP-backed fs/terminal tools when the client advertises capabilities', async () => {
+    const provider = makeStubProvider();
+    const providerRegistry = { has: () => true } as never as ProviderRegistry;
+    mockSetupProvider.mockResolvedValue({
+      provider,
+      providerRegistry,
+      resolvedProvider: {} as ResolvedProvider,
+    });
+
+    const reads: Array<{ path: string }> = [];
+    const writes: Array<{ path: string; content: string }> = [];
+    const terminals: Array<{ command: string; args?: string[] }> = [];
+    const api: RunTurnApi = {
+      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      requestPermission: async () => ({ outcome: 'selected', optionId: 'allow_once' }),
+      readTextFile: async (p) => {
+        reads.push({ path: p.path });
+        return 'line one\nline two';
+      },
+      writeTextFile: async (p) => {
+        writes.push(p);
+      },
+      runTerminal: async (p) => {
+        terminals.push({ command: p.command, ...(p.args ? { args: p.args } : {}) });
+        return { output: 'terminal output', exitCode: 0 };
+      },
+    };
+
+    const agentFor = buildAcpServerAgentFactory(makeDeps());
+    const agent = await agentFor('sess-acp', '/tmp', api);
+
+    const readTool = agent.tools.get('read');
+    const readOut = (await readTool!.execute({ path: 'a.ts' }, agent.ctx)) as { text: string };
+    expect(reads[0]).toMatchObject({ path: 'a.ts' });
+    expect(readOut.text).toContain('line one');
+
+    const writeTool = agent.tools.get('write');
+    await writeTool!.execute({ path: 'b.ts', content: 'hello' }, agent.ctx);
+    expect(writes[0]).toMatchObject({ path: 'b.ts', content: 'hello' });
+
+    const bashTool = agent.tools.get('bash');
+    const bashOut = (await bashTool!.execute({ command: 'echo hi' }, agent.ctx)) as {
+      stdout: string;
+      exit_code: number | null;
+    };
+    expect(terminals[0]?.command).toBe('sh');
+    expect(bashOut.stdout).toBe('terminal output');
+    expect(bashOut.exit_code).toBe(0);
+  });
+
+  it('keeps local builtin tools when the client advertises no fs/terminal', async () => {
+    const provider = makeStubProvider();
+    mockSetupProvider.mockResolvedValue({
+      provider,
+      providerRegistry: { has: () => true } as never as ProviderRegistry,
+      resolvedProvider: {} as ResolvedProvider,
+    });
+    const api: RunTurnApi = {
+      clientCapabilities: {},
+      requestPermission: async () => ({ outcome: 'cancelled' }),
+      readTextFile: async () => '',
+      writeTextFile: async () => {},
+      runTerminal: async () => ({ output: '', exitCode: 0 }),
+    };
+    const agent = await buildAcpServerAgentFactory(makeDeps())('s', '/tmp', api);
+    // The builtin read tool is still the local one (its capabilities include fs.read).
+    expect(agent.tools.get('read')?.capabilities).toContain('fs.read');
   });
 
   it('memoizes the provider boot so repeated sessions reuse one setup call', async () => {

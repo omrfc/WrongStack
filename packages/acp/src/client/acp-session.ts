@@ -8,11 +8,16 @@
  * Spec: https://agentclientprotocol.com/protocol/v1/overview
  * Design: see ./acp-session.design.md in this directory.
  */
-import { ClientTransport } from '../agent/stdio-transport.js';
+import { ClientTransport, type ACPClientTransport } from '../agent/stdio-transport.js';
 import type { ACPMessage } from '../types/acp-messages.js';
+import {
+  WebSocketClientTransport,
+  type WebSocketClientTransportOptions,
+} from './websocket-transport.js';
 import {
   ACP_PROTOCOL_VERSION,
   type AgentCapabilities,
+  type AnySessionUpdate,
   type AuthMethod,
   type ContentBlock,
   type McpServer,
@@ -20,7 +25,10 @@ import {
   type SessionId,
   type SessionInfo,
   type StopReason,
+  type ToolCallContent,
+  type ToolCallStatus,
   type ToolCallUpdateNotification,
+  type ToolKind,
   type UsageCost,
 } from '../types/acp-v1.js';
 import { FileServer, FsError } from './file-server.js';
@@ -59,13 +67,65 @@ export interface ACPSessionOptions {
   mcpServers?: McpServer[] | undefined;
 }
 
+/**
+ * A captured file diff emitted by the agent during a turn (via a tool
+ * call's `diff` content). `oldText: null` means the file was created.
+ */
+export interface ACPCapturedDiff {
+  path: string;
+  oldText: string | null;
+  newText: string;
+}
+
+/**
+ * A captured tool call the agent ran during a turn. We collapse the
+ * `tool_call` + subsequent `tool_call_update` notifications for the same
+ * `toolCallId` into one record carrying its latest status.
+ */
+export interface ACPCapturedToolCall {
+  toolCallId: string;
+  title: string;
+  kind?: ToolKind | undefined;
+  status: ToolCallStatus;
+  /** Terminal/command output or text content surfaced by the tool, if any. */
+  rawOutput?: Record<string, unknown> | undefined;
+  rawInput?: Record<string, unknown> | undefined;
+}
+
 export interface ACPSessionRunResult {
   text: string;
   stopReason: StopReason;
   hasText: boolean;
   usage?: { used: number; size: number; cost?: UsageCost | undefined } | undefined;
   plan?: PlanEntry[] | undefined;
+  /** Tool calls the agent ran this turn (deduped by toolCallId). */
+  toolCalls: ACPCapturedToolCall[];
+  /** File diffs the agent produced this turn. */
+  diffs: ACPCapturedDiff[];
+  /** Agent "thinking" text emitted via thought_chunk, concatenated. */
+  thoughts: string;
 }
+
+/**
+ * Live progress callback. Invoked for every `session/update` notification
+ * the agent streams during a `prompt()` turn, in arrival order, BEFORE the
+ * turn resolves. Lets the host render tool activity / text deltas / diffs
+ * as they happen instead of waiting for the buffered final result.
+ *
+ * The raw `update` (the discriminated `session/update` payload) is passed
+ * through verbatim so callers can switch on `update.sessionUpdate`.
+ */
+export type ACPProgressHandler = (event: ACPProgressEvent) => void;
+
+export type ACPProgressEvent =
+  | { type: 'message'; text: string }
+  | { type: 'thought'; text: string }
+  | { type: 'tool_call'; toolCall: ACPCapturedToolCall }
+  | { type: 'tool_call_update'; toolCall: ACPCapturedToolCall }
+  | { type: 'diff'; diff: ACPCapturedDiff }
+  | { type: 'plan'; entries: PlanEntry[] }
+  | { type: 'usage'; usage: { used: number; size: number; cost?: UsageCost | undefined } }
+  | { type: 'raw'; update: AnySessionUpdate };
 
 export type ACPSessionErrorKind =
   | 'spawn_failed'
@@ -117,7 +177,7 @@ function isJsonRpcError(v: unknown): v is JsonRpcError {
 }
 
 export class ACPSession {
-  private readonly transport: ClientTransport;
+  private readonly transport: ACPClientTransport;
   private readonly fileServer: FileServer;
   private readonly terminalServer: TerminalServer;
   private readonly permissionPolicy: PermissionPolicy;
@@ -136,8 +196,10 @@ export class ACPSession {
   private agentCapabilities: AgentCapabilities = {};
   private agentInfo: { name: string; title?: string | undefined; version: string } | null = null;
   private authMethods: AuthMethod[] = [];
+  /** Protocol version negotiated with the agent during initialize. */
+  private negotiatedVersion: number = ACP_PROTOCOL_VERSION;
 
-  private constructor(opts: ACPSessionOptions, transport: ClientTransport) {
+  private constructor(opts: ACPSessionOptions, transport: ACPClientTransport) {
     this.opts = opts;
     this.transport = transport;
     this.timeoutMs = opts.timeoutMs ?? 5 * 60_000;
@@ -188,6 +250,11 @@ export class ACPSession {
     return this.sessionId;
   }
 
+  /** Protocol version negotiated during initialize. */
+  getNegotiatedVersion(): number {
+    return this.negotiatedVersion;
+  }
+
   // ──────────────────────────────────────────────────────────────────────
   // Lifecycle — start
   // ──────────────────────────────────────────────────────────────────────
@@ -206,11 +273,45 @@ export class ACPSession {
     if (opts.env !== undefined) transportOpts.env = opts.env;
     if (opts.cwd !== undefined) transportOpts.cwd = opts.cwd;
     const transport = new ClientTransport(transportOpts);
+    return ACPSession.attach(opts, transport, `failed to spawn ${opts.command}`);
+  }
+
+  /**
+   * Connect to a REMOTE ACP agent over a WebSocket instead of spawning a
+   * local subprocess. `opts.command` is ignored for the wire (a label is
+   * still useful for `role`); everything else (projectRoot sandbox for
+   * fs/terminal, timeouts, permission policy, MCP servers) applies the same.
+   */
+  static async connectWebSocket(
+    wsOpts: WebSocketClientTransportOptions,
+    opts: ACPSessionOptions,
+  ): Promise<ACPSession> {
+    const transport = new WebSocketClientTransport(wsOpts);
+    return ACPSession.attach(opts, transport, `failed to connect to ${wsOpts.url}`);
+  }
+
+  /**
+   * Connect using a caller-supplied transport. Lets advanced callers plug
+   * in their own wire (SDK streams, in-process pipes, test doubles).
+   */
+  static async connect(
+    transport: ACPClientTransport,
+    opts: ACPSessionOptions,
+  ): Promise<ACPSession> {
+    return ACPSession.attach(opts, transport, 'failed to connect transport');
+  }
+
+  /** Shared connect path: start the transport, install dispatch, handshake. */
+  private static async attach(
+    opts: ACPSessionOptions,
+    transport: ACPClientTransport,
+    spawnErrLabel: string,
+  ): Promise<ACPSession> {
     try {
       await transport.start();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new ACPSessionError('spawn_failed', `failed to spawn ${opts.command}: ${msg}`, err);
+      throw new ACPSessionError('spawn_failed', `${spawnErrLabel}: ${msg}`, err);
     }
 
     const session = new ACPSession(opts, transport);
@@ -259,12 +360,19 @@ export class ACPSession {
       agentInfo?: { name: string; title?: string | undefined; version: string };
       authMethods?: AuthMethod[];
     };
-    if (r.protocolVersion !== ACP_PROTOCOL_VERSION) {
+    // Negotiation per spec: the client advertises its latest supported
+    // version; the agent replies with the version both will use — the
+    // client's if the agent supports it, otherwise the agent's own latest.
+    // We therefore accept any version <= ours (we can speak it) and only
+    // reject a version HIGHER than we support (the agent demands a protocol
+    // we don't implement). Equal is the common path.
+    if (r.protocolVersion > ACP_PROTOCOL_VERSION) {
       throw new ACPSessionError(
         'unsupported_capability',
-        `agent speaks protocolVersion=${r.protocolVersion}, client speaks ${ACP_PROTOCOL_VERSION}`,
+        `agent requires protocolVersion=${r.protocolVersion}, client supports up to ${ACP_PROTOCOL_VERSION}`,
       );
     }
+    this.negotiatedVersion = r.protocolVersion;
     // Store agent metadata
     this.agentCapabilities = r.agentCapabilities ?? {};
     this.agentInfo = r.agentInfo ?? null;
@@ -600,7 +708,11 @@ export class ACPSession {
    * The result is the same shape as a normal turn, with
    * `stopReason === 'cancelled'`.
    */
-  async prompt(blocks: ContentBlock[], signal: AbortSignal): Promise<ACPSessionRunResult> {
+  async prompt(
+    blocks: ContentBlock[],
+    signal: AbortSignal,
+    onProgress?: ACPProgressHandler,
+  ): Promise<ACPSessionRunResult> {
     if (this.closed) {
       throw new ACPSessionError('closed', 'session is closed');
     }
@@ -611,7 +723,7 @@ export class ACPSession {
     // Pre-aborted signals short-circuit BEFORE we create a session
     // and before any wire activity.
     if (signal.aborted) {
-      return { text: '', stopReason: 'cancelled', hasText: false };
+      return emptyRunResult('cancelled');
     }
 
     if (!this.sessionId) {
@@ -619,6 +731,7 @@ export class ACPSession {
     }
 
     this.resetScratch();
+    this.progressHandler = onProgress ?? null;
 
     const promptId = this.allocId();
     const turnPromise = this.sendRequest(
@@ -656,6 +769,7 @@ export class ACPSession {
       throw new ACPSessionError('prompt_failed', `session/prompt failed: ${msg}`, err);
     } finally {
       signal.removeEventListener('abort', onAbort);
+      this.progressHandler = null;
     }
 
     this.state = 'done';
@@ -670,6 +784,9 @@ export class ACPSession {
       hasText: finalText.length > 0,
       usage: this.scratch.usage,
       plan: this.scratch.plan,
+      toolCalls: [...this.scratch.toolCalls.values()],
+      diffs: this.scratch.diffs,
+      thoughts: this.scratch.thoughts,
     };
   }
 
@@ -889,31 +1006,48 @@ export class ACPSession {
     const update = (msg as { params?: { update?: unknown } }).params?.update;
     if (typeof update !== 'object' || update === null) return;
     const u = update as { sessionUpdate?: string; [k: string]: unknown };
+    // Always surface the raw update so callers that want full fidelity
+    // (forwarding to an event bus, etc.) never lose a notification.
+    this.emitProgress({ type: 'raw', update: u as AnySessionUpdate });
     switch (u.sessionUpdate) {
       case 'agent_message_chunk': {
         const text = extractText(u.content);
-        if (text) this.accumulatedText(text);
+        if (text) {
+          this.scratch.text += text;
+          this.emitProgress({ type: 'message', text });
+        }
         return;
       }
-      case 'thought_chunk':
+      case 'thought_chunk': {
+        const text = extractText(u.content);
+        if (text) {
+          this.scratch.thoughts += text;
+          this.emitProgress({ type: 'thought', text });
+        }
         return;
+      }
       case 'tool_call':
-      case 'tool_call_update':
+      case 'tool_call_update': {
+        this.captureToolCall(u, u.sessionUpdate === 'tool_call');
         return;
+      }
       case 'plan':
         if (Array.isArray(u.entries)) {
-          this.accumulatedPlan(u.entries as PlanEntry[]);
+          this.scratch.plan = u.entries as PlanEntry[];
+          this.emitProgress({ type: 'plan', entries: u.entries as PlanEntry[] });
         }
         return;
       case 'usage_update':
         if (typeof u.used === 'number' && typeof u.size === 'number') {
-          this.accumulatedUsage({
+          const usage = {
             used: u.used,
             size: u.size,
             ...(typeof u.cost === 'object' && u.cost !== null
               ? { cost: u.cost as UsageCost }
               : {}),
-          });
+          };
+          this.scratch.usage = usage;
+          this.emitProgress({ type: 'usage', usage });
         }
         return;
       case 'available_commands_update':
@@ -929,25 +1063,82 @@ export class ACPSession {
     }
   }
 
+  /**
+   * Fold a `tool_call` / `tool_call_update` notification into the scratch
+   * tool-call map (deduped by toolCallId), extract any `diff` content into
+   * the diffs list, and emit live progress.
+   */
+  private captureToolCall(
+    u: { [k: string]: unknown },
+    isNew: boolean,
+  ): void {
+    const toolCallId = typeof u.toolCallId === 'string' ? u.toolCallId : '';
+    if (!toolCallId) return;
+    const prev = this.scratch.toolCalls.get(toolCallId);
+    const record: ACPCapturedToolCall = {
+      toolCallId,
+      title:
+        typeof u.title === 'string'
+          ? u.title
+          : (prev?.title ?? toolCallId),
+      kind: (typeof u.kind === 'string' ? (u.kind as ToolKind) : prev?.kind),
+      status:
+        typeof u.status === 'string'
+          ? (u.status as ToolCallStatus)
+          : (prev?.status ?? (isNew ? 'pending' : 'in_progress')),
+      rawInput:
+        isRecord(u.rawInput) ? u.rawInput : prev?.rawInput,
+      rawOutput:
+        isRecord(u.rawOutput) ? u.rawOutput : prev?.rawOutput,
+    };
+    this.scratch.toolCalls.set(toolCallId, record);
+
+    // Pull any diff content out of the tool call so the host can show
+    // what changed. The agent sends diffs as ToolCallContent of type 'diff'.
+    if (Array.isArray(u.content)) {
+      for (const c of u.content as ToolCallContent[]) {
+        if (c && typeof c === 'object' && c.type === 'diff') {
+          const diff: ACPCapturedDiff = {
+            path: c.path,
+            oldText: c.oldText,
+            newText: c.newText,
+          };
+          this.scratch.diffs.push(diff);
+          this.emitProgress({ type: 'diff', diff });
+        }
+      }
+    }
+
+    this.emitProgress({
+      type: isNew ? 'tool_call' : 'tool_call_update',
+      toolCall: record,
+    });
+  }
+
+  private emitProgress(event: ACPProgressEvent): void {
+    if (!this.progressHandler) return;
+    try {
+      this.progressHandler(event);
+    } catch {
+      // A faulty host handler must never break the wire pump.
+    }
+  }
+
+  /** Live progress handler installed for the duration of a `prompt()` turn. */
+  private progressHandler: ACPProgressHandler | null = null;
+
   // Per-prompt scratch state
   private scratch: {
     text: string;
+    thoughts: string;
     plan?: PlanEntry[];
     usage?: { used: number; size: number; cost?: UsageCost | undefined };
-  } = { text: '' };
-
-  private accumulatedText(chunk: string): void {
-    this.scratch.text += chunk;
-  }
-  private accumulatedPlan(entries: PlanEntry[]): void {
-    this.scratch.plan = entries;
-  }
-  private accumulatedUsage(u: { used: number; size: number; cost?: UsageCost | undefined }): void {
-    this.scratch.usage = u;
-  }
+    toolCalls: Map<string, ACPCapturedToolCall>;
+    diffs: ACPCapturedDiff[];
+  } = { text: '', thoughts: '', toolCalls: new Map(), diffs: [] };
 
   private resetScratch(): void {
-    this.scratch = { text: '' };
+    this.scratch = { text: '', thoughts: '', toolCalls: new Map(), diffs: [] };
   }
 
   private async handlePermissionRequest(msg: ACPMessage): Promise<void> {
@@ -1108,7 +1299,36 @@ export function audioContent(mimeType: string, data: string): ContentBlock {
 
 function extractText(block: unknown): string {
   if (typeof block !== 'object' || block === null) return '';
-  const b = block as { type?: string; text?: unknown };
+  const b = block as {
+    type?: string;
+    text?: unknown;
+    resource?: { text?: unknown };
+  };
   if (b.type === 'text' && typeof b.text === 'string') return b.text;
+  // Embedded text resources carry their content under `resource.text`.
+  if (
+    b.type === 'resource' &&
+    b.resource &&
+    typeof b.resource === 'object' &&
+    typeof b.resource.text === 'string'
+  ) {
+    return b.resource.text;
+  }
   return '';
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** A fully-populated empty run result (used for pre-aborted short-circuits). */
+function emptyRunResult(stopReason: StopReason): ACPSessionRunResult {
+  return {
+    text: '',
+    stopReason,
+    hasText: false,
+    toolCalls: [],
+    diffs: [],
+    thoughts: '',
+  };
 }

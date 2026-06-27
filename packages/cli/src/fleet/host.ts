@@ -5,7 +5,7 @@ import * as path from 'node:path';
  * factory is created lazily on the first `/spawn` so users who never use
  * subagents don't pay the construction cost.
  */
-import { ACP_AGENT_COMMANDS, makeACPSubagentRunner } from '@wrongstack/acp';
+import { ACP_AGENT_COMMANDS, findAgentDescriptor, makeACPSubagentRunner } from '@wrongstack/acp';
 import type { BrainArbiter, SubagentRunner, TextBlock } from '@wrongstack/core';
 import {
   Agent,
@@ -975,7 +975,21 @@ export class MultiAgentHost {
       this.acpRunnerAccessOrder.push(subagentId);
       return cached;
     }
-    const cmd = ACP_AGENT_COMMANDS[subagentId];
+    // Prefer the legacy command map, then fall back to the 12-entry
+    // catalog so Director-spawned agents (claude-code, codex-cli,
+    // opencode, cursor, …) work the same as `wstack acp spawn`.
+    let cmd = ACP_AGENT_COMMANDS[subagentId];
+    if (!cmd) {
+      const desc = findAgentDescriptor(subagentId);
+      if (desc) {
+        cmd = {
+          command: desc.acp.command,
+          args: [...(desc.acp.args ?? [])],
+          role: subagentId,
+          ...(desc.acp.env ? { env: desc.acp.env } : {}),
+        };
+      }
+    }
     if (!cmd) throw new Error(`Unknown ACP agent: ${subagentId}`);
     // LRU eviction: remove oldest entries if at capacity
     while (this.acpRunnerAccessOrder.length >= MultiAgentHost.ACP_CACHE_MAX) {

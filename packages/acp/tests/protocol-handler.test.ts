@@ -74,7 +74,7 @@ describe('ACPProtocolHandler', () => {
         agentInfo: { name: 'wrongstack', title: 'WrongStack', version: WRONGSTACK_VERSION },
         agentCapabilities: {
           loadSession: true,
-          promptCapabilities: { image: false, audio: false, embeddedContext: true },
+          promptCapabilities: { image: true, audio: false, embeddedContext: true },
           mcpCapabilities: { http: false, sse: false },
           sessionCapabilities: { close: {}, list: {}, delete: {}, resume: {} },
           auth: { logout: {} },
@@ -421,6 +421,111 @@ describe('ACPProtocolHandler', () => {
       handler.close();
       // The pending turn should resolve because the runTurn's signal fires.
       await turnDone;
+    });
+  });
+
+  describe('client permission requests', () => {
+    it('round-trips session/request_permission to the client and returns the outcome', async () => {
+      // Transport that also captures the onMessage handler so we can push
+      // a simulated client response back into the handler.
+      let onMsg: ((m: unknown) => void) | undefined;
+      const sent: unknown[] = [];
+      const transport = {
+        sent,
+        send: vi.fn(async (m: unknown) => { sent.push(m); }),
+        onMessage: (h: (m: unknown) => void) => { onMsg = h; return () => {}; },
+      };
+
+      let observedOutcome: unknown;
+      const runTurn: RunTurn = async (_input, _emit, api) => {
+        const outcome = await api!.requestPermission({
+          toolCall: { toolCallId: 'tc1', title: 'write a.ts', kind: 'edit' },
+          options: [
+            { optionId: 'allow_once', name: 'Allow', kind: 'allow_once' },
+            { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
+          ],
+        });
+        observedOutcome = outcome;
+        return { stopReason: 'end_turn' };
+      };
+
+      const handler = new ACPProtocolHandler({
+        transport: transport as never as AgentServerTransport,
+        defaultCwd: '/test',
+        runTurn,
+      });
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/test' } });
+      const sessionId = (sent[sent.length - 1] as { result?: { sessionId?: string } }).result?.sessionId!;
+      sent.length = 0;
+
+      // Kick off the turn without awaiting — it parks on requestPermission.
+      const turnDone = handler.handleMessage({
+        id: 3, method: 'session/prompt',
+        params: { sessionId, prompt: [{ type: 'text', text: 'edit' }] },
+      });
+      await new Promise((r) => setImmediate(r));
+
+      // The handler should have sent a session/request_permission REQUEST.
+      const req = sent.find(
+        (m) => (m as { method?: string }).method === 'session/request_permission',
+      ) as { id: string; params?: { toolCall?: unknown; options?: unknown } } | undefined;
+      expect(req).toBeDefined();
+      expect(req?.params?.toolCall).toMatchObject({ toolCallId: 'tc1' });
+
+      // Simulate the client's response, routed via onMessage.
+      onMsg?.({ id: req!.id, result: { outcome: { outcome: 'selected', optionId: 'allow_once' } } });
+      await turnDone;
+
+      expect(observedOutcome).toEqual({ outcome: 'selected', optionId: 'allow_once' });
+    });
+
+    it('exposes client fs/terminal via api and round-trips fs/read_text_file', async () => {
+      let onMsg: ((m: unknown) => void) | undefined;
+      const sent: unknown[] = [];
+      const transport = {
+        sent,
+        send: vi.fn(async (m: unknown) => { sent.push(m); }),
+        onMessage: (h: (m: unknown) => void) => { onMsg = h; return () => {}; },
+      };
+
+      let content: string | undefined;
+      let caps: unknown;
+      const runTurn: RunTurn = async (_input, _emit, api) => {
+        caps = api!.clientCapabilities;
+        content = await api!.readTextFile({ path: '/abs/a.ts' });
+        return { stopReason: 'end_turn' };
+      };
+
+      const handler = new ACPProtocolHandler({
+        transport: transport as never as AgentServerTransport,
+        defaultCwd: '/test',
+        runTurn,
+      });
+      await handler.handleMessage({
+        id: 1, method: 'initialize',
+        params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: true }, terminal: true } },
+      });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/test' } });
+      const sessionId = (sent[sent.length - 1] as { result?: { sessionId?: string } }).result?.sessionId!;
+      sent.length = 0;
+
+      const turnDone = handler.handleMessage({
+        id: 3, method: 'session/prompt',
+        params: { sessionId, prompt: [{ type: 'text', text: 'read it' }] },
+      });
+      await new Promise((r) => setImmediate(r));
+
+      const req = sent.find(
+        (m) => (m as { method?: string }).method === 'fs/read_text_file',
+      ) as { id: string; params?: { path?: string } } | undefined;
+      expect(req).toBeDefined();
+      expect(req?.params?.path).toBe('/abs/a.ts');
+      onMsg?.({ id: req!.id, result: { content: 'file body' } });
+      await turnDone;
+
+      expect(content).toBe('file body');
+      expect(caps).toMatchObject({ fs: { readTextFile: true }, terminal: true });
     });
   });
 });

@@ -71,7 +71,9 @@ describe('WrongStackACPServer', () => {
 
     await server.start();
 
-    expect(t.sendStartupMarker).toHaveBeenCalledTimes(1);
+    // v1: stdout is JSON-RPC only by default — no startup marker unless
+    // `legacyStartupMarker` is explicitly set (see the dedicated test below).
+    expect(t.sendStartupMarker).toHaveBeenCalledTimes(0);
     expect(handler.handleMessage).toHaveBeenCalledTimes(2);
     expect(t.close).toHaveBeenCalledTimes(1);
   });

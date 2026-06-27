@@ -18,7 +18,7 @@ const hoisted = vi.hoisted(() => ({
   session: undefined as MockSession | undefined,
   errorKind: undefined as undefined | string,
   errorMessage: undefined as undefined | string,
-  promptResult: undefined as { text: string; stopReason: string; hasText: boolean; plan?: unknown[]; usage?: { used: number; size: number } } | undefined,
+  promptResult: undefined as { text: string; stopReason: string; hasText: boolean; toolCalls: unknown[]; diffs: unknown[]; thoughts: string; plan?: unknown[]; usage?: { used: number; size: number } } | undefined,
   promptError: undefined as unknown,
 }));
 
@@ -100,7 +100,7 @@ beforeEach(() => {
   hoisted.errorKind = undefined;
   hoisted.errorMessage = undefined;
   hoisted.promptError = undefined;
-  hoisted.promptResult = { text: 'ok', stopReason: 'end_turn', hasText: true };
+  hoisted.promptResult = { text: 'ok', stopReason: 'end_turn', hasText: true, toolCalls: [], diffs: [], thoughts: '' };
 });
 
 describe('ACP_AGENT_COMMANDS', () => {
@@ -149,6 +149,9 @@ describe('makeACPSubagentRunner', () => {
       text: 'hello world',
       stopReason: 'end_turn',
       hasText: true,
+      toolCalls: [],
+      diffs: [],
+      thoughts: '',
     };
     const runner = await makeACPSubagentRunner({ command: 'gemini' });
     const result = await runner(TASK, makeCtx(5000).ctx);
@@ -157,6 +160,23 @@ describe('makeACPSubagentRunner', () => {
     expect(result.toolCalls).toBe(0);
     // session was closed in the finally block
     expect(hoisted.session?.close).toHaveBeenCalled();
+  });
+
+  it('reports the real tool-call count captured from the stream', async () => {
+    hoisted.promptResult = {
+      text: 'done',
+      stopReason: 'end_turn',
+      hasText: true,
+      toolCalls: [
+        { toolCallId: 'a', title: 'read x', status: 'completed' },
+        { toolCallId: 'b', title: 'edit y', status: 'completed' },
+      ],
+      diffs: [],
+      thoughts: '',
+    };
+    const runner = await makeACPSubagentRunner({ command: 'gemini' });
+    const result = await runner(TASK, makeCtx(5000).ctx);
+    expect(result.toolCalls).toBe(2);
   });
 
   it('throws SubagentError when ACPSession.start fails with spawn_failed', async () => {

@@ -68,7 +68,15 @@ export type {
   ACPSessionOptions,
   ACPSessionRunResult,
   ACPSessionErrorKind,
+  ACPProgressEvent,
+  ACPProgressHandler,
+  ACPCapturedToolCall,
+  ACPCapturedDiff,
 } from './client/acp-session.js';
+
+export { WebSocketClientTransport } from './client/websocket-transport.js';
+export type { WebSocketClientTransportOptions } from './client/websocket-transport.js';
+export type { ACPClientTransport } from './agent/stdio-transport.js';
 
 export {
   ACPProtocolHandler,
@@ -126,6 +134,8 @@ export type {
 
 export {
   defaultPermissionPolicy,
+  readOnlyPermissionPolicy,
+  makePermissionPolicy,
 } from './client/permission.js';
 export type {
   PermissionPolicy,

@@ -18,6 +18,18 @@ export interface AgentServerTransport {
   onMessage(handler: (msg: ACPMessage) => void): () => void;
 }
 
+/**
+ * Minimal client-side transport contract `ACPSession` drives. `ClientTransport`
+ * (stdio subprocess) and `WebSocketClientTransport` (remote) both implement it,
+ * so the session is agnostic to how bytes reach the agent.
+ */
+export interface ACPClientTransport {
+  start(): Promise<void>;
+  send(msg: ACPMessage): Promise<void>;
+  onMessage(handler: (msg: ACPMessage) => void): () => void;
+  stop(): void;
+}
+
 export class StdioTransport implements AgentServerTransport {
   private readonly stdin = process.stdin;
   private readonly stdout = process.stdout;
@@ -147,7 +159,7 @@ export interface ACPChildProcess extends EventEmitter {
   kill(): void;
 }
 
-export class ClientTransport {
+export class ClientTransport implements ACPClientTransport {
   private child: ACPChildProcess | null = null;
   private buffer = '';
   private readonly handlers = new Set<(msg: ACPMessage) => void>();

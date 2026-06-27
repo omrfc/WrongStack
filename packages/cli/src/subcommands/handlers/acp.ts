@@ -13,12 +13,22 @@
 
 import {
   ACP_AGENT_COMMANDS,
+  type ACPProgressEvent,
   EnsembleRegistry,
   findAgentDescriptor,
   makeACPSubagentRunnerWithStop,
   runEnsemble,
 } from '@wrongstack/acp';
-import { makeACPServerAgentTurn, WrongStackACPServer } from '@wrongstack/acp/agent';
+import {
+  ACPProtocolHandler,
+  ACPSessionStore,
+  makeACPServerAgentTurn,
+  type RunTurn,
+  WrongStackACPServer,
+  WsBridgeTransport,
+} from '@wrongstack/acp/agent';
+import * as path from 'node:path';
+import { WebSocketServer } from 'ws';
 import type { SubagentRunContext } from '@wrongstack/core';
 import { SubagentBudget } from '@wrongstack/core/coordination';
 import { AcpServerConfigError, buildAcpServerAgentFactory } from '../../acp-server-agent.js';
@@ -73,6 +83,11 @@ ACP Mode:
   \`wstack auth\` first to configure a provider, or pass \`--echo\` for a no-op
   connectivity test that needs no provider. Press Ctrl+C to stop.
 
+  Transports:
+    (default)        stdio JSON-RPC (the usual editor-spawned-subprocess mode)
+    --ws[=port]      serve over WebSocket on 127.0.0.1:<port> (default 8889) —
+                     full-duplex, so updates/permission prompts stream live.
+
 spawn:
   Spawns a named ACP agent (claude-code, gemini-cli, codex-cli, copilot,
   cline, goose, openhands, qwen-code, kiro-cli, opencode, mistral-vibe,
@@ -106,7 +121,105 @@ parallel:
   return 1;
 };
 
+/** Parse the `--ws[=port]` flag into a port number, or null if not set. */
+function parseWsPort(flag: unknown): number | null {
+  if (flag === undefined || flag === false) return null;
+  if (flag === true || flag === 'true') return 8889;
+  const n = Number(flag);
+  return Number.isInteger(n) && n > 0 && n < 65_536 ? n : 8889;
+}
+
+/**
+ * Serve WrongStack as an ACP agent over WebSocket. Unlike the HTTP transport
+ * (one POST per message, notifications buffered), a WebSocket is full-duplex:
+ * the agent streams `session/update` and makes `session/request_permission`
+ * callbacks live during a turn. One handler + transport per connection.
+ */
+async function runACPWebSocketServer(deps: SubcommandDeps, port: number): Promise<number> {
+  const host = '127.0.0.1';
+  // `--echo` over WS: a no-provider connectivity test, mirroring stdio `--echo`.
+  const echo = deps.flags?.echo === true || deps.flags?.echo === 'true';
+
+  let turn: ReturnType<typeof makeACPServerAgentTurn> | undefined;
+  let echoTurn: RunTurn | undefined;
+  let store: ACPSessionStore | undefined;
+  if (echo) {
+    echoTurn = async () => ({ stopReason: 'end_turn' });
+  } else {
+    let agentFor;
+    try {
+      agentFor = buildAcpServerAgentFactory(deps);
+    } catch (err) {
+      if (err instanceof AcpServerConfigError) {
+        deps.renderer.writeError(`${err.message}\n`);
+        return 1;
+      }
+      throw err;
+    }
+    turn = makeACPServerAgentTurn({ agentFor });
+    store = deps.paths?.projectDir
+      ? new ACPSessionStore({ dir: path.join(deps.paths.projectDir, 'acp-sessions') })
+      : undefined;
+  }
+
+  const wss = new WebSocketServer({ host, port });
+  wss.on('connection', (socket, req) => {
+    // Origin guard: real ACP clients send no Origin; reject cross-origin
+    // browser connections so a web page can't drive this loopback agent.
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://${host}:${port}` && origin !== `ws://${host}:${port}`) {
+      socket.close(1008, 'cross-origin forbidden');
+      return;
+    }
+    const transport = new WsBridgeTransport((m) => socket.send(JSON.stringify(m)));
+    const handler = new ACPProtocolHandler({
+      transport,
+      defaultCwd: deps.cwd ?? process.cwd(),
+      runTurn: turn ?? echoTurn!,
+      ...(turn ? { replayFor: turn.replay, seedFor: turn.seed } : {}),
+      ...(store ? { store } : {}),
+    });
+    socket.on('message', (data: { toString(): string }) => {
+      let msg: unknown;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch {
+        return;
+      }
+      transport.receive(msg as never);
+      void handler.handleMessage(msg);
+    });
+    const teardown = (): void => {
+      handler.close();
+      transport.close();
+    };
+    socket.on('close', teardown);
+    socket.on('error', teardown);
+  });
+
+  deps.renderer.writeInfo(
+    echo
+      ? `ACP server (echo, no provider) listening on ws://${host}:${port}. Press Ctrl+C to stop.\n`
+      : `WrongStack ACP server listening on ws://${host}:${port} (${deps.config.provider}/${deps.config.model}). Press Ctrl+C to stop.\n`,
+  );
+
+  await new Promise<void>((resolve) => {
+    const shutdown = (): void => {
+      deps.renderer.writeWarning('\nShutting down ACP WebSocket server...');
+      wss.close();
+      resolve();
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+  });
+  return 0;
+}
+
 async function runACPServer(deps: SubcommandDeps): Promise<number> {
+  const wsPort = parseWsPort(deps.flags?.ws);
+  if (wsPort !== null) {
+    return runACPWebSocketServer(deps, wsPort);
+  }
   // `--echo` keeps the no-op connectivity-smoke-test path that the default
   // runTurn provided before this server was wired to a real Agent. Useful for
   // `wstack acp --echo` when you just want to verify the wire format against a
@@ -127,7 +240,18 @@ async function runACPServer(deps: SubcommandDeps): Promise<number> {
             }
             throw err;
           }
-          return { runTurn: makeACPServerAgentTurn({ agentFor }) };
+          const turn = makeACPServerAgentTurn({ agentFor });
+          // Persist sessions under the project's wstack dir so `session/load`
+          // survives a server restart (project-scoped, not in the repo).
+          const store = deps.paths?.projectDir
+            ? new ACPSessionStore({ dir: path.join(deps.paths.projectDir, 'acp-sessions') })
+            : undefined;
+          return {
+            runTurn: turn,
+            replayFor: turn.replay,
+            seedFor: turn.seed,
+            ...(store ? { store } : {}),
+          };
         })(),
   );
 
@@ -219,7 +343,13 @@ async function spawnACPAgent(args: string[], deps: SubcommandDeps): Promise<numb
   let stop: (() => void) | null = null;
 
   try {
-    const { runner, stop: runStop } = await makeACPSubagentRunnerWithStop(cmd);
+    const { runner, stop: runStop } = await makeACPSubagentRunnerWithStop({
+      ...cmd,
+      onProgress: (event) => {
+        const line = formatProgress(event);
+        if (line) deps.renderer.writeInfo(`  ${line}\n`);
+      },
+    });
     stop = runStop;
 
     const taskId = `acp-${crypto.randomUUID()}`;
@@ -271,6 +401,29 @@ async function spawnACPAgent(args: string[], deps: SubcommandDeps): Promise<numb
   }
 }
 
+/**
+ * Render one streamed ACP progress event as a compact one-line summary
+ * for the CLI. Returns '' for events that shouldn't print a line (the
+ * final assistant text is already shown in the result block, so we skip
+ * `message`/`raw` to avoid double-printing).
+ */
+function formatProgress(event: ACPProgressEvent): string {
+  switch (event.type) {
+    case 'tool_call':
+      return `▸ ${event.toolCall.title} (${event.toolCall.status})`;
+    case 'tool_call_update':
+      return event.toolCall.status === 'completed' || event.toolCall.status === 'failed'
+        ? `  ↳ ${event.toolCall.title}: ${event.toolCall.status}`
+        : '';
+    case 'diff':
+      return `✎ ${event.diff.path}${event.diff.oldText === null ? ' (new)' : ''}`;
+    case 'plan':
+      return `☰ plan: ${event.entries.length} step(s)`;
+    default:
+      return '';
+  }
+}
+
 async function parallelACPAgents(
   args: string[],
   deps: SubcommandDeps,
@@ -301,6 +454,10 @@ async function parallelACPAgents(
       task,
       resolveCmd: resolveCmdFromCatalog,
       signal: ac.signal,
+      onProgress: (agentId, event) => {
+        const line = formatProgress(event);
+        if (line) deps.renderer.writeInfo(`  [${agentId}] ${line}\n`);
+      },
     });
 
     // Surface skipped agents up-front, before the per-agent output.
