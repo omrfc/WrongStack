@@ -3,6 +3,7 @@ import {
   type AgentPipelines,
   applyModelRuntime,
   AutoCompactionMiddleware,
+  type Config,
   type Context,
   createDefaultPipelines,
   createSessionEventBridge,
@@ -20,6 +21,7 @@ import {
 } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
 import { resolveRuntimeMaxContext } from '../context-limit.js';
+import { bootstrapMailboxBridgeAtStartup } from './mailbox-bridge-bootstrap.js';
 
 type CompactionDriver = ConstructorParameters<typeof AutoCompactionMiddleware>[0];
 
@@ -227,6 +229,16 @@ export function createAgent(params: {
   tracer?: import('@wrongstack/core').Tracer | undefined;
   /** Optional lifecycle hook runner — wired into the tool executor (PreToolUse/PostToolUse). */
   hookRunner?: import('@wrongstack/core').HookRunner | undefined;
+  /**
+   * Full Config object, used for `features.mailboxBridge` gating and
+   * forwarded to `bootstrapMailboxBridgeAtStartup`. Optional — when
+   * omitted, the bootstrap defaults to 'auto' (i.e. always run).
+   * Tests can pass a stub with just `{ features: { mailboxBridge: 'off' } }`
+   * to skip the bridge entirely without touching the host config.
+   */
+  fullConfig?: Pick<Config, 'features'> | undefined;
+  /** Surface label for the bootstrap log breadcrumb. */
+  source?: 'cli' | 'webui' | 'eternal' | undefined;
 }): Agent {
   const secretScrubber = params.container.resolve(TOKENS.SecretScrubber);
   const renderer = params.container.has(TOKENS.Renderer)
@@ -242,6 +254,30 @@ export function createAgent(params: {
     perIterationOutputCapBytes: params.config.tools.perIterationOutputCapBytes,
     tracer: params.tracer,
     hookRunner: params.hookRunner,
+  });
+
+  // Mailbox bridge bootstrap — best-effort, fire-and-forget.
+  // Runs after the tool executor is built (so tool construction errors
+  // surface first, before we attempt cross-process IPC) and before the
+  // Agent is constructed (so the agent's mailbox checker can read the
+  // handle off ctx.meta when it's attached inside attachMailboxChecker).
+  //
+  // We don't await: createAgent is sync, and waiting up to 5s for the
+  // bridge during boot would visibly delay every WrongStack startup
+  // even when no external agent ever shows up. The bridge lands on
+  // ctx.meta asynchronously; the local mailbox checker keeps working
+  // against the on-disk file while the bridge comes up.
+  const logger = params.container.resolve(TOKENS.Logger);
+  void bootstrapMailboxBridgeAtStartup({
+    projectRoot: params.context.projectRoot,
+    config: params.fullConfig,
+    logger,
+    source: params.source ?? 'cli',
+    ctx: params.context,
+  }).catch((err: unknown) => {
+    logger.warn('mailbox bridge bootstrap threw', {
+      err: err instanceof Error ? err.message : String(err),
+    });
   });
 
   return new Agent({

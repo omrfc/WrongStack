@@ -1241,6 +1241,23 @@ export async function startWebUI(
     tracer: undefined,
   });
 
+  // Mailbox bridge bootstrap for the webui is intentionally NOT wired
+  // here — the bridge (the `wstack mailbox serve` child process) and
+  // its lock primitives both live in `@wrongstack/cli`. The webui has
+  // no cli dependency and we don't want to introduce one for this
+  // single feature. Instead, the webui inherits any running bridge
+  // through the shared on-disk mailbox file: external agents that
+  // connect to a bridge running alongside a CLI surface will see the
+  // webui's mailbox traffic through that same bridge.
+//
+// If a user runs ONLY the webui (no CLI surface, no `wstack mailbox
+// serve`), external agents won't be able to reach them via the HTTP
+// bridge. The webui logs a breadcrumb in that case — see the
+// `mailbox.lock` probe in the session-startup log. Future work:
+// move the lock primitives (`readLiveLock`, the projectDir resolver)
+// to `@wrongstack/core` so the webui can do discovery without a cli
+// dep. See docs/plans/mailbox-daemon.md for the layering plan.
+
   const agent = new Agent({
     container,
     tools: toolRegistry,
