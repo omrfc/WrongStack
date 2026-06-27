@@ -65,6 +65,7 @@ import { ProcessListMonitor } from './components/process-list.js';
 import { GoalPanel } from './components/goal-panel.js';
 import { PlanPanel } from './components/plan-panel.js';
 import { CoordinatorPanel } from './components/coordinator-panel.js';
+import { AuditPanel } from './components/audit-panel.js';
 import { ResumePicker } from './components/resume-picker.js';
 import { SessionsPanel } from './components/sessions-panel.js';
 import {
@@ -1100,6 +1101,7 @@ export function App({
     todosMonitorOpen: false,
     queuePanelOpen: false,
     processListOpen: false,
+    auditPanelOpen: false,
     planPanelOpen: false,
     goalPanelOpen: false,
     sessionsPanelOpen: false,
@@ -6982,6 +6984,12 @@ export function App({
               coordinator={state.coordinator}
               nowTick={nowTick}
               onClose={() => dispatch({ type: 'toggleCoordinatorMonitor' })}
+            />
+          ) : null}
+          {state.auditPanelOpen ? (
+            <AuditPanel
+              sideEffects={agent.ctx.sideEffects ?? []}
+              onClose={() => dispatch({ type: 'toggleAuditPanel' })}
             />
           ) : null}
           {state.rewindOverlay

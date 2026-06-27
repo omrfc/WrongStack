@@ -41,6 +41,7 @@ type PanelResetState = Pick<
   | 'todosMonitorOpen'
   | 'queuePanelOpen'
   | 'processListOpen'
+  | 'auditPanelOpen'
   | 'planPanelOpen'
   | 'goalPanelOpen'
   | 'sessionsPanelOpen'
@@ -62,6 +63,7 @@ function closePanels(state: State): PanelResetState {
     todosMonitorOpen: false,
     queuePanelOpen: false,
     processListOpen: false,
+    auditPanelOpen: false,
     planPanelOpen: false,
     goalPanelOpen: false,
     sessionsPanelOpen: false,
@@ -2298,6 +2300,12 @@ export function reducer(state: State, action: Action): State {
           timeline: [timelineEntry, ...state.coordinator.timeline].slice(0, 50),
         },
       };
+    }
+    case 'toggleAuditPanel': {
+      const opening = !state.auditPanelOpen;
+      return opening
+        ? { ...state, ...closePanels(state), auditPanelOpen: true }
+        : { ...state, auditPanelOpen: false };
     }
     case 'toggleCoordinatorMonitor': {
       const opening = !state.coordinator.monitorOpen;

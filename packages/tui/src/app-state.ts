@@ -478,6 +478,8 @@ export type State = {
   queuePanelOpen: boolean;
   /** When true, the process list overlay is shown (F8). */
   processListOpen: boolean;
+  /** When true, the audit (side effects) overlay is shown (/audit). */
+  auditPanelOpen: boolean;
   /** When true, the plan panel is shown (F5). */
   planPanelOpen: boolean;
   /** When true, the goal panel is shown (F9). */
@@ -1091,6 +1093,8 @@ export type Action =
   | { type: 'collabSubagentSpawned'; subagentId: string; role: string }
   /** Toggle the process list overlay (F8). */
   | { type: 'toggleProcessList' }
+  /** Toggle the audit (side effects) panel. */
+  | { type: 'toggleAuditPanel' }
   /** Toggle the plan panel (F5). */
   | { type: 'togglePlanPanel' }
   | { type: 'toggleGoalPanel' }
