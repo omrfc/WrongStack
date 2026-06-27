@@ -510,6 +510,19 @@ export interface WSDesignMaterialize {
   };
 }
 
+export interface WSDesignVerify {
+  type: 'design.verify';
+  payload: {
+    ok: boolean;
+    kit?: string | undefined;
+    filesScanned?: number | undefined;
+    score?: number | undefined;
+    violationCount?: number | undefined;
+    violations?: { file: string; line: number; snippet: string; reason: string }[] | undefined;
+    error?: string | undefined;
+  };
+}
+
 export interface WSSkillsInstalled {
   type: 'skills.installed';
   payload: {
@@ -1113,6 +1126,7 @@ export type WSClientMessage =
       type: 'design.materialize';
       payload?: { stack?: string | undefined; out?: string | undefined } | undefined;
     }
+  | { type: 'design.verify' }
   // ── MCP client messages (requests to server) ─────────────────────────────────
   | { type: 'mcp.list' }
   | { type: 'mcp.add'; payload: { name: string; transport: string; description?: string; enabled?: boolean; command?: string; args?: string[]; env?: Record<string, string>; allowedTools?: string[] } }
@@ -1176,6 +1190,7 @@ export type WSServerMessage =
   | WSDesignState
   | WSDesignSet
   | WSDesignMaterialize
+  | WSDesignVerify
   | WSSkillsInstalled
   | WSSkillsUninstalled
   | WSSkillsUpdated

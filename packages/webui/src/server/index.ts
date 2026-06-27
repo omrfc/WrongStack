@@ -72,6 +72,7 @@ import {
   handleDesignSet,
   handleDesignUse,
   handleDesignState,
+  handleDesignVerify,
 } from './design-handlers.js';
 import {
   Agent,
@@ -354,6 +355,7 @@ export {
   handleDesignSet,
   handleDesignUse,
   handleDesignState,
+  handleDesignVerify,
 } from './design-handlers.js';
 
 // Message + client shapes now live in ./types.ts (shared with the CLI's
@@ -2096,6 +2098,9 @@ export async function startWebUI(
         break;
       case 'design.materialize':
         await handleDesignMaterialize(ws, { projectRoot, agentMeta: context }, msg);
+        break;
+      case 'design.verify':
+        await handleDesignVerify(ws, { projectRoot, agentMeta: context });
         break;
 
       case 'diag.get': {

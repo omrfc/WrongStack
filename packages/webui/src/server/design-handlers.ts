@@ -27,6 +27,7 @@ import {
   materializeTokens,
   recordKitChoice,
   recordOverrides,
+  runDesignVerify,
   setActiveKit,
   setDesignOverrides,
 } from '@wrongstack/core';
@@ -238,5 +239,37 @@ export async function handleDesignMaterialize(
     });
   } catch (err) {
     send(ws, { type: 'design.materialize', payload: { ok: false, error: String(err) } });
+  }
+}
+
+/** Scan project UI files for off-palette colors against the active kit. */
+export async function handleDesignVerify(ws: WebSocket, ctx: DesignContext): Promise<void> {
+  try {
+    const active = await loadActiveKit(ctx.projectRoot);
+    if (!active) {
+      send(ws, { type: 'design.verify', payload: { ok: false, error: 'No active kit' } });
+      return;
+    }
+    const loader = getDesignKitLoader(ctx.projectRoot);
+    const raw = await loader.readTokens(active.kit);
+    if (!raw) {
+      send(ws, { type: 'design.verify', payload: { ok: false, error: 'Kit has no tokens' } });
+      return;
+    }
+    const tokens = applyTokenOverrides(raw, active.overrides);
+    const report = await runDesignVerify(ctx.projectRoot, tokens);
+    send(ws, {
+      type: 'design.verify',
+      payload: {
+        ok: true,
+        kit: active.kit,
+        filesScanned: report.filesScanned,
+        score: report.score,
+        violations: report.violations.slice(0, 50),
+        violationCount: report.violations.length,
+      },
+    });
+  } catch (err) {
+    send(ws, { type: 'design.verify', payload: { ok: false, error: String(err) } });
   }
 }

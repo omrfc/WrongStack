@@ -119,6 +119,7 @@ import {
   handleDesignSet,
   handleDesignUse,
   handleDesignState,
+  handleDesignVerify,
   verifyClient as verifyWsClient,
   WorktreeWebSocketHandler,
 } from '@wrongstack/webui/server';
@@ -2200,6 +2201,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     'design.state': (_msg, ws) => handleDesignState(ws, designCtx),
     'design.set': (msg, ws) => handleDesignSet(ws, designCtx, msg),
     'design.materialize': (msg, ws) => handleDesignMaterialize(ws, designCtx, msg),
+    'design.verify': (_msg, ws) => handleDesignVerify(ws, designCtx),
 
     // ── Projects / working dir ──
     'projects.list': (_msg, ws) => handleProjectsList(projectsCtx, ws),

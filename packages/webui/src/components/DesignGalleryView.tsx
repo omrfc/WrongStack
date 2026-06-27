@@ -9,7 +9,7 @@
  * codebase's source of truth, not just a prompt hint.
  */
 
-import { Check, Download, Palette, X } from 'lucide-react';
+import { Check, Download, Palette, ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { colorToHex } from '@/lib/color';
@@ -206,16 +206,41 @@ export function DesignGalleryView({ className }: { className?: string }) {
       const p = (msg as { payload?: { ok?: boolean; path?: string; error?: string } }).payload;
       setStatus(p?.ok ? `Wrote ${p.path}` : `Materialize failed: ${p?.error ?? 'error'}`);
     };
+    const onVer = (msg: unknown) => {
+      const p = (
+        msg as {
+          payload?: {
+            ok?: boolean;
+            score?: number;
+            violationCount?: number;
+            filesScanned?: number;
+            error?: string;
+          };
+        }
+      ).payload;
+      if (!p?.ok) {
+        setStatus(`Verify: ${p?.error ?? 'error'}`);
+        return;
+      }
+      const pct = Math.round((p.score ?? 1) * 100);
+      setStatus(
+        p.violationCount
+          ? `Verify: ${pct}% on-palette — ${p.violationCount} off-palette in ${p.filesScanned} file(s)`
+          : `Verify: clean ✓ (${p.filesScanned} file(s) on-palette)`,
+      );
+    };
     client.on('design.list', onList);
     client.on('design.use', onUse);
     client.on('design.set', onSet);
     client.on('design.materialize', onMat);
+    client.on('design.verify', onVer);
     client.send({ type: 'design.list' });
     return () => {
       client.off('design.list', onList);
       client.off('design.use', onUse);
       client.off('design.set', onSet);
       client.off('design.materialize', onMat);
+      client.off('design.verify', onVer);
     };
   }, [client]);
 
@@ -237,6 +262,11 @@ export function DesignGalleryView({ className }: { className?: string }) {
     setStatus('Writing theme file…');
     client?.send({ type: 'design.materialize', payload: { stack } });
   }, [client, stack]);
+
+  const verify = useCallback(() => {
+    setStatus('Scanning UI files…');
+    client?.send({ type: 'design.verify' });
+  }, [client]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -339,6 +369,16 @@ export function DesignGalleryView({ className }: { className?: string }) {
                         title={`Write tokens to a ${stack} theme file`}
                       >
                         <Download className="w-3 h-3" /> Materialize
+                      </button>
+                    )}
+                    {isActive && (
+                      <button
+                        type="button"
+                        onClick={verify}
+                        className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded font-medium border border-border/60 hover:bg-muted"
+                        title="Scan UI files for off-palette colors"
+                      >
+                        <ShieldCheck className="w-3 h-3" /> Verify
                       </button>
                     )}
                     <span className="text-[10px] text-muted-foreground truncate">

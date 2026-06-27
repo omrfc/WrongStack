@@ -9,9 +9,9 @@ import {
   materializeTokens,
   recordKitChoice,
   recordOverrides,
+  runDesignVerify,
   setActiveKit,
   setDesignOverrides,
-  verifyFiles,
 } from '@wrongstack/core';
 
 type Overrides = Record<string, string>;
@@ -40,44 +40,6 @@ interface DesignOutput {
   /** action "verify": adherence score 0..1 and violation count. */
   score?: number | undefined;
   violations?: number | undefined;
-}
-
-// Bounded UI-file walk for `verify` when no explicit files are given.
-const UI_EXT_RE = /\.(css|scss|sass|less|tsx|jsx|vue|svelte|astro|html?)$/i;
-const SKIP_DIR = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  'build',
-  '.next',
-  'out',
-  'coverage',
-  '.wrongstack',
-  '.design',
-]);
-
-async function walkUiFiles(root: string, max = 200): Promise<string[]> {
-  const found: string[] = [];
-  async function rec(dir: string, depth: number): Promise<void> {
-    if (found.length >= max || depth > 8) return;
-    let entries: import('node:fs').Dirent[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (found.length >= max) return;
-      if (e.isDirectory()) {
-        if (SKIP_DIR.has(e.name) || e.name.startsWith('.')) continue;
-        await rec(path.join(dir, e.name), depth + 1);
-      } else if (UI_EXT_RE.test(e.name)) {
-        found.push(path.join(dir, e.name));
-      }
-    }
-  }
-  await rec(root, 0);
-  return found;
 }
 
 function normalizeOverrides(set: unknown): Overrides {
@@ -310,19 +272,7 @@ export const designTool: Tool<DesignInput, DesignOutput> = {
         return { action, kit: active.kit, output: `Kit "${active.kit}" has no tokens.json.` };
       }
       const tokens = applyTokenOverrides(rawTokens, active.overrides);
-      const rels =
-        input.files && input.files.length > 0
-          ? input.files.map((f) => path.join(ctx.projectRoot, f))
-          : await walkUiFiles(ctx.projectRoot);
-      const files: { path: string; text: string }[] = [];
-      for (const abs of rels) {
-        try {
-          files.push({ path: path.relative(ctx.projectRoot, abs), text: await fs.readFile(abs, 'utf8') });
-        } catch {
-          // unreadable — skip
-        }
-      }
-      const report = verifyFiles(tokens, files);
+      const report = await runDesignVerify(ctx.projectRoot, tokens, input.files);
       const pct = Math.round(report.score * 100);
       const top = report.violations
         .slice(0, 25)

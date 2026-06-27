@@ -181,6 +181,7 @@ export {
 export {
   type DesignVerifyReport,
   type DesignViolation,
+  runDesignVerify,
   verifyFiles,
 } from '../execution/design-verify.js';
 export {
