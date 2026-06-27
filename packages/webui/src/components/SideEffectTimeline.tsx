@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, RefreshCw, Terminal, Package, Globe, ChevronUp, ChevronDown } from 'lucide-react';
+import { Activity, RefreshCw, Terminal, Package, Globe, ChevronUp, ChevronDown, Download } from 'lucide-react';
 import { useSideEffectStore } from '@/stores';
 import type { SideEffectEntry } from '@/stores';
 import { cn } from '@/lib/utils';
@@ -53,6 +53,37 @@ function formatInput(se: SideEffectEntry): string {
     return Array.isArray(pkgs) ? pkgs.join(', ').slice(0, 80) : String(pkgs).slice(0, 80);
   }
   return JSON.stringify(se.input).slice(0, 80);
+}
+
+/** Escape a value for CSV — wraps in quotes if it contains commas, quotes, or newlines. */
+function csvEscape(value: string): string {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/** Build a CSV string from side effects and trigger a browser download. */
+function exportCSV(entries: SideEffectEntry[]): void {
+  const header = 'timestamp,tool,risk,detail,outcome';
+  const rows = entries.map((se) => {
+    const detail = se.input['command'] ?? se.input['url'] ?? se.input['packages'] ?? JSON.stringify(se.input);
+    return [
+      csvEscape(se.ts),
+      csvEscape(se.toolName),
+      csvEscape(se.risk),
+      csvEscape(String(detail)),
+      csvEscape(se.outcome ?? ''),
+    ].join(',');
+  });
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `side-effects-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function SideEffectTimeline() {
@@ -126,13 +157,24 @@ export function SideEffectTimeline() {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Side Effects ({filtered.length}{riskFilter !== 'all' ? `/${sideEffects.length}` : ''})
         </h3>
-        <button
-          onClick={refresh}
-          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-        >
-          <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => exportCSV(filtered)}
+            disabled={filtered.length === 0}
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Export filtered side effects as CSV"
+          >
+            <Download className="h-3 w-3" />
+            CSV
+          </button>
+          <button
+            onClick={refresh}
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          >
+            <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filter bar */}
