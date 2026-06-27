@@ -169,6 +169,25 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
       .catch(() => { /* best-effort */ });
     broadcast(clients, { type: 'todos.updated', payload: { todos: [...context.todos] } });
 
+    // P2 #5: push updated side effects after every tool execution so the
+    // Audit tab refreshes automatically — no manual refresh needed.
+    const sideEffects = context.sideEffects ?? [];
+    if (sideEffects.length > 0) {
+      broadcast(clients, {
+        type: 'side_effects',
+        payload: {
+          sideEffects: sideEffects.slice(-50).map((se) => ({
+            toolUseId: se.toolUseId,
+            toolName: se.toolName,
+            ts: se.ts,
+            input: se.input,
+            outcome: se.outcome,
+            risk: se.risk,
+          })),
+        },
+      });
+    }
+
     // Broadcast task/plan updates after task/plan/todo tool executions.
     if (e.name === 'task' || e.name === 'plan' || e.name === 'todo') {
       void (async () => {

@@ -1,5 +1,4 @@
 import { Box, Text } from 'ink';
-import { useEffect, useState } from 'react';
 import type { SideEffect } from '@wrongstack/core';
 
 interface AuditPanelProps {
@@ -31,13 +30,10 @@ function formatTime(ts: string): string {
 }
 
 export function AuditPanel({ sideEffects, onClose: _onClose }: AuditPanelProps) {
-  // Keep a local copy so the panel doesn't re-render on every ctx update
-  // (side effects accumulate but the panel snapshot is taken on open).
-  const [snapshot] = useState(() => [...sideEffects].reverse().slice(0, 50));
-
-  useEffect(() => {
-    // no-op — snapshot taken on mount
-  }, []);
+  // P2 #5: live-refresh the snapshot when sideEffects changes (tool.executed
+  // triggers a re-render via the parent's state update). Reverses so newest
+  // is at the top, caps at 50.
+  const snapshot = [...sideEffects].reverse().slice(0, 50);
 
   if (snapshot.length === 0) {
     return (
