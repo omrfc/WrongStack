@@ -5,6 +5,128 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.274.0] — 2026-06-27
+
+> The **multi-file diff rendering, settings picker, and per-iteration
+> performance** release. The TUI now renders multi-file tool outputs (`replace` /
+> `diff` / `patch` / `write`) as one **DiffFileBlock per file** with an
+> independently-capped preview and a configurable summary footer, plus an
+> 18-chord **settings picker** (`Ctrl` / `Alt` / `Alt+Shift`) with a live fuzzy
+> filter and two new `/settings` inline commands. A per-iteration performance
+> pass cuts redundant serialization, blocking disk writes, and full-history token
+> re-walks on the agent-loop hot path, memoizes the TUI history and tool-entry
+> formatting, and decomposes the 2,095-line `session-store.ts` into focused
+> modules. All workspace packages and the marketing site are aligned to `0.274.0`
+> in lockstep. Additive only — no breaking changes.
+
+### Added
+
+- **`packages/tui` — multi-file diff rendering with per-file DiffFileBlock.**
+  Multi-file tool outputs from `replace`, `diff`, `patch`, and `write` (new file)
+  now render as one **DiffFileBlock per file** instead of a single combined block.
+  Each file's preview is independently capped (12 rows with a `… +N -M hidden`
+  footer), and a **summary footer** lists touched files once the count exceeds the
+  threshold. Three JSON shapes trigger the split: `replace`
+  `{ results: [{ path, diff }] }`, `diff`/`patch` `{ diff, files }`, and `write`
+  (new file) synthesizes a `+++ <path>` header. New helpers
+  `extractMultiFileDiffs`, `splitGitStyleDiff`, and `formatMultiDiffSummary` in
+  `packages/tui/src/components/history/code-block.tsx`. When `diff` / `results[]` /
+  `files` is omitted the renderer falls back to the single combined block. Covered
+  by `packages/tui/tests/tool-format.test.ts` (8 new cases; 85 total).
+  (`0d241db9`)
+
+- **`packages/tui` — 18-chord settings picker + live fuzzy filter.** The settings
+  overlay gains 18 navigation chords across three modifier sets — `Ctrl`
+  (most-tweaked tools/reasoning/fleet rows), `Alt` (autonomy/UX/context), and
+  `Alt+Shift` (logging rows). A live filter bar supports fuzzy subsequence matching
+  with relevance ranking and incremental highlighting, and `lastSettingsField` is
+  persisted across sessions so the picker re-opens on the row you last visited.
+  Surfaced via `SettingsPickerJumpMod` / `SETTINGS_PICKER_JUMP_CHORDS`, documented
+  in the help overlay (`?`), and reachable through the new `/settings` slash command
+  with name resolution. (`3ce81bc7`)
+
+- **`packages/tui` — `/settings` slash-command family.** `/settings` opens the
+  picker; `/settings <chord>` opens it on that row; **`/settings <chord> <value>`**
+  sets a value inline without opening the picker (validates all 36 fields across
+  boolean / enum / preset / text types via `resolveSettingsFieldValue`).
+  **`/settings-get`** with no args prints a section-grouped summary of all 36
+  settings (`formatAllSettingsSummary`); with a chord it shows one value. New
+  exports: `resolveSettingsFieldValue`, `SETTINGS_FIELD_LABELS`,
+  `SettingsPickerPatch`, `SETTINGS_SECTIONS`. 38 new tests in
+  `settings-value-set.test.ts`. (`e599b50a`, `c2239835`)
+
+### Changed
+
+- **`packages/core` — `session-store.ts` decomposition.** The 2,095-line
+  `session-store.ts` is split into three focused, independently-testable modules:
+  `session-store.ts` (1,354 L — `DefaultSessionStore`: read / list / index /
+  delete / prune), `file-session-writer.ts` (756 L — `FileSessionWriter`: append /
+  flush / close / checkpoint / truncate), and `session-helpers.ts` (19 L — shared
+  `userInputTitle`). Architecture boundary tests still pass (716/716); all storage
+  tests pass (717/717). Pure refactor — no behaviour change. (`e0cb827f`)
+
+- **`packages/tui` — multi-file diff summary threshold is user-configurable.** The
+  summary-footer appearance threshold is now tunable via the settings picker
+  (Settings → Tools → "Multi-diff summary", presets `[3, 5, 8, 10, 15, 0]`, default
+  5, `0` suppresses) and referenced from the help overlay. `formatMultiDiffSummary`
+  takes an explicit threshold; `0` suppresses, a positive number sets the cutoff,
+  and the negative sentinel (the `undefined ?? -1` in `Entry`) means "use default".
+  The hard-coded `MULTI_DIFF_SUMMARY_THRESHOLD` constant remains the default
+  fallback.
+
+### Performance
+
+- **`packages/core/src/execution/tool-executor.ts` — skip `JSON.stringify` for empty
+  capabilities.** Most tools declare no dangerous capabilities; the executor now
+  skips the per-call serialization for the common case. (`15d017b1`)
+
+- **`packages/core/src/core/agent-loop.ts` — fire-and-forget in-flight marker.**
+  `writeInFlightMarker` no longer `await`s a disk write on every iteration — it is
+  fire-and-forget, unblocking the iteration loop. (`02670b0f`)
+
+- **`packages/core/src/core/agent-loop.ts` — cached system + tools token overhead.**
+  System-prompt and tool-definition token counts are now cached by reference
+  identity (they change rarely — `/model`, mode switch, MCP connect). A new
+  `systemAndToolsOverhead()` helper backs `stashRequestTokens` as a pre-flight
+  side-effect and the cold-start path. (`02670b0f`)
+
+- **`packages/core/src/core/agent-loop.ts` — incremental delta token estimation.**
+  When tool results append, context pressure is recomputed by summing only the
+  newly appended message tokens plus the cached overhead — O(new_msgs) instead of
+  re-walking the full message history O(all_msgs). (`02670b0f`)
+
+- **`packages/tui` — memoized History + tool-entry formatting.** `History` and
+  `ScrollableHistory` are wrapped in `React.memo`, so keystrokes in the input
+  buffer no longer trigger a full history subtree re-render. In `entry.tsx`,
+  `formatToolOutput` / `extractDiffPreview` / `extractMultiFileDiffs` are wrapped in
+  `useMemo`, avoiding re-parsing tool output on every `autoSubmitCountdown` tick.
+  (`dccb5447`, `4140dcfd`)
+
+- **`packages/core/src/storage` — session filters pushed into the cached index.**
+  New `DefaultSessionStore.listFiltered(criteria)` filters from the **cached session
+  index** before sorting/slicing instead of fetching ~1000 sessions and linearly
+  scanning. `DefaultSessionReader.query()` / `.search()` duck-type it with a
+  graceful fallback for non-`DefaultSessionStore` implementations. Shared
+  `matchesSessionFilter()` helper exported from `session-store`. (`7bda2bfc`)
+
+- **`packages/tools/src/codebase-index` — efficiency bundle.** Added
+  `idx_s_file_fk` and `idx_s_lang_kind` compound indexes (fixes slow delete paths
+  and lang+kind filtered searches); the Python parser now receives content via
+  **stdin** instead of reopening the file (one fewer disk read per Python file);
+  `parse.py` is written **once per process** (cached `_cachedScriptPath`) instead
+  of per file; and stale-file detection replaced a per-file `fs.stat()` loop with
+  O(1) Set-membership lookup against discovered files. (`7bda2bfc`)
+
+### Changed — versions
+
+- **All workspace packages aligned to 0.274.0**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/plugins`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`,
+  `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`,
+  `@wrongstack/acp`, and `@wrongstack/bench`. The marketing site (`website/`)
+  is aligned in lockstep.
+
 ## [0.273.0] — 2026-06-25
 
 > The **Spec-Driven Development "never stuck, never explode"** release. It turns
