@@ -25,10 +25,10 @@ type TokenSavingTier =
 
 | Element | off | minimal | light | medium | aggressive |
 |---------|-----|---------|-------|--------|------------|
-| **Tools** | All 36 | TIER1 (10) | TIER1+memory (14) | TIER1+TIER2 (24) | TIER1+TIER2+some (28) |
+| **Tools** | All 37 | TIER1 (10) | TIER1 (10) | TIER1+TIER2 (25) | TIER1+TIER2+TIER3 (35, minus `task`/`setWorkingDir`) |
 | **Tool desc length** | 80 chars | 40 chars | 50 chars | 60 chars | 70 chars |
 | **Common patterns** | ✅ | ❌ | ✅ | ✅ | ✅ |
-| **Delegation guidance** | Full | ❌ | Minimal | Full | Full |
+| **Delegation guidance** | Full | ❌ | Minimal | Minimal | Full |
 | **Mailbox guidance** | Full | ❌ | Minimal | Minimal | Full |
 | **Context management** | ✅ | ❌ | ❌ | Minimal | ✅ |
 | **MCP guidance** | Full | Minimal | Minimal | Full | Full |
@@ -36,6 +36,13 @@ type TokenSavingTier =
 | **Environment details** | Full | Git+date only | +platform | +languages | +capabilities |
 | **Online agents** | Full list | Count only | Count only | Full list | Full list |
 | **Memory injection** | 8 items | 3 items | 5 items | 8 items | 8 items |
+
+> **Memory tools** (`remember`, `forget`, `searchMemory`, `relatedMemory`) are **not** part of
+> the tier filter — they are registered independently based on `features.memory`
+> (`packages/cli/src/wiring/tools.ts:118-123`). Setting `features.memory: false` removes
+> them at every tier; setting it to `true` registers them at every tier. The original
+> design proposal that "memory tools are always included in minimal+ tiers" was not
+> implemented.
 
 ### Estimated Token Savings by Tier
 
@@ -60,13 +67,15 @@ export interface FeaturesConfig {
   /**
    * Token-saving mode level. Controls how aggressively the system prompt
    * is compacted to reduce per-request token consumption.
-   * 
+   *
    * - 'off'        — Full prompt, all tools, complete guidance
    * - 'minimal'    — TIER1 tools only, stripped guidance (~3-4k tokens saved)
-   * - 'light'      — Core + memory tools, common patterns, minimal guidance
-   * - 'medium'     — Most development tools, some guidance
-   * - 'aggressive' — Maximum savings before tools become unusable (~4-5k tokens)
-   * 
+   * - 'light'      — TIER1 tools only, common patterns, minimal guidance
+   *                   (same tool set as `minimal`; guidance differs)
+   * - 'medium'     — TIER1 + TIER2 tools, some guidance
+   * - 'aggressive' — TIER1 + TIER2 (minus `task`) + TIER3 (minus `setWorkingDir`),
+   *                   maximum savings before tools become unusable (~4-5k tokens)
+   *
    * Default: 'off'
    */
   tokenSavingMode?: TokenSavingTier | boolean | undefined;
@@ -106,16 +115,20 @@ read, write, edit, bash, grep, glob, diff, patch, json, search
 remember, forget, searchMemory, relatedMemory
 ```
 
-### TIER2 — Standard Development (~14 tools, ~900 tokens)
+### TIER2 — Standard Development (~15 tools, ~900 tokens)
 
 Useful for development but not every turn:
 
 ```
 replace, exec, fetch, git, tree,
 lint, format, typecheck, test,
-install, audit,
+install, audit, design,
 todo, plan, task
 ```
+
+> Note: `design` was added to TIER2 in commit `4054e063` (the original design doc
+> counted 14; current code has 15). It is registered at `medium` and `aggressive`
+> tiers only.
 
 ### TIER3 — Specialized/Optional (~12 tools, ~800 tokens)
 
@@ -130,37 +143,46 @@ setWorkingDir
 
 ### Tool Set by Tier
 
+The actual implementation (`packages/cli/src/wiring/tools.ts:68-92`) is:
+
 ```typescript
-function getToolsForTier(tier: TokenSavingTier): Tool[] {
-  const core = [readTool, writeTool, editTool, bashTool, grepTool, globTool, 
-                diffTool, patchTool, jsonTool, searchTool];
-  
-  const memory = [rememberTool, forgetTool, searchMemoryTool, relatedMemoryTool];
-  
-  const t2 = [replaceTool, execTool, fetchTool, gitTool, treeTool,
-              lintTool, formatTool, typecheckTool, testTool,
-              installTool, auditTool,
-              todoTool, planTool, taskTool];
-  
-  const t3 = [outdatedTool, logsTool, documentTool, scaffoldTool,
-              toolSearchTool, toolUseTool, batchToolUseTool, toolHelpTool,
-              codebaseIndexTool, codebaseSearchTool, codebaseStatsTool,
-              setWorkingDirTool];
-  
+export function getToolsForTier(tier: TokenSavingTier, allTools: Tool[]): Tool[] {
+  const t1Names = new Set(TIER1_TOOLS.map((t) => t.name));
+  const t2Names = new Set(TIER2_TOOLS.map((t) => t.name));
+  const t3Names = new Set(TIER3_TOOLS.map((t) => t.name));
+
   switch (tier) {
     case 'off':
-      return [...core, ...memory, ...t2, ...t3];
+      return allTools;
     case 'minimal':
-      return [...core, ...memory];
     case 'light':
-      return [...core, ...memory]; // Same as minimal — guidance differs
+      return allTools.filter((t) => t1Names.has(t.name));
     case 'medium':
-      return [...core, ...memory, ...t2];
+      return allTools.filter((t) => t1Names.has(t.name) || t2Names.has(t.name));
     case 'aggressive':
-      return [...core, ...memory, ...t2.slice(0, 8)]; // Skip task/plan/todo
+      return allTools.filter(
+        (t) =>
+          t1Names.has(t.name) ||
+          (t2Names.has(t.name) && t.name !== 'task') ||
+          (t3Names.has(t.name) && t.name !== 'setWorkingDir'),
+      );
   }
 }
 ```
+
+**Per-tier tool counts** (against `builtinTools` in `packages/tools/src/builtin.ts`):
+
+| Tier | Filter | Count |
+|---|---|---|
+| `off` | allTools | 37 |
+| `minimal` | TIER1 only | 10 |
+| `light` | TIER1 only (same as `minimal`; guidance differs) | 10 |
+| `medium` | TIER1 ∪ TIER2 | 25 |
+| `aggressive` | TIER1 ∪ TIER2 (minus `task`) ∪ TIER3 (minus `setWorkingDir`) | 35 |
+
+**Memory tools** (`remember`/`forget`/`searchMemory`/`relatedMemory`) are registered
+separately in `setupTools()` based on `config.features.memory`, NOT filtered by
+this function. They appear at every tier when `features.memory: true`.
 
 ---
 

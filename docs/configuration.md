@@ -354,11 +354,15 @@ full payload/outcome schema and the security model.
 
 | Tier | Tools | Tool descriptions | Est. savings |
 |------|-------|-----------------|-------------|
-| `off` | All 36 | 80 chars | 0 tokens |
+| `off` | All 37 | 80 chars | 0 tokens |
 | `minimal` | 10 (TIER1 only) | 40 chars | ~3–4k tokens |
 | `light` | 10 (TIER1 only) | 50 chars | ~2–3k tokens |
-| `medium` | 24 (TIER1 + TIER2) | 60 chars | ~1.5–2k tokens |
-| `aggressive` | 34 (TIER1 + TIER2 + TIER3 − task) | 70 chars | ~4–5k tokens |
+| `medium` | 25 (TIER1 + TIER2) | 60 chars | ~1.5–2k tokens |
+| `aggressive` | 35 (TIER1 + TIER2 − task + TIER3 − setWorkingDir) | 70 chars | ~4–5k tokens |
+
+Memory tools (`remember`, `forget`, `searchMemory`, `relatedMemory`) are gated on
+`features.memory`, not on the tier — they appear at every tier when memory is enabled
+and at no tier when it is disabled.
 
 CLI flags:
 - `--token-saving-tier minimal` — set tier directly
@@ -564,11 +568,11 @@ On non-Windows the picker is a no-op; the tool routes through `/bin/bash -c` and
 
 The `exec` tool — the safer, structured alternative to `bash` — only runs commands on a curated allowlist. The defaults cover the common dev/build toolchains:
 
-- **JS/TS:** `node`, `npm`, `pnpm`, `yarn`, `npx`, `bun`, `deno`, `tsc`, `vitest`, `jest`, `biome`, `eslint`, `prettier`
-- **Go:** `go` · **Rust:** `cargo`, `rustc` · **Python:** `python`, `python3`, `pip`, `pip3`
-- **Ruby:** `ruby`, `gem`, `bundle` · **JVM:** `java`, `javac`, `mvn`, `gradle`, `gradlew` · **.NET:** `dotnet`
-- **Native:** `make`, `cmake` · **VCS:** `git` · **Containers:** `docker`, `kubectl` (read-only subcommands)
-- Common POSIX file/text utilities (`ls`, `cat`, `head`, `tail`, `grep`, `find`, …)
+- **JS/TS:** `node`, `npm`, `pnpm`, `yarn`, `npx`, `bun`, `deno`, `corepack`, `tsc`, `tsx`, `ts-node`, `vite`, `vitest`, `jest`, `biome`, `eslint`, `prettier`, `turbo`, `nx`, `webpack`, `rollup`, `parcel`, `next`, `astro`, `playwright`, `cypress`
+- **Go:** `go` · **Rust:** `cargo`, `rustc` · **Python:** `python`, `python3`, `pip`, `pip3`, `pytest`, `ruff`, `mypy`, `uv`, `uvx`, `poetry`, `hatch`, `tox`
+- **Ruby:** `ruby`, `gem`, `bundle` · **PHP:** `php`, `composer`, `phpunit` · **JVM:** `java`, `javac`, `mvn`, `gradle`, `gradlew` · **.NET:** `dotnet`
+- **Native:** `make`, `cmake` · **VCS:** `git` · **Containers:** `docker`, `podman`, `kubectl`
+- Common POSIX file/text utilities (`pwd`, `ls`, `cat`, `head`, `tail`, `grep`, `rg`, `find`, `sed`, `awk`, …)
 
 Extend or trim the list in config:
 
@@ -587,7 +591,7 @@ Extend or trim the list in config:
 **Security:**
 - `allow` **expands** what the agent may execute, so it is honored **only from the trusted user config** (`~/.wrongstack/config.json`). The config loader strips `tools.exec.allow` from the untrusted, repo-committed `<project>/.wrongstack/config.json` (with a `config.in_project_unsafe_fields_ignored` warning naming `tools.exec.allow`).
 - `deny` only ever **removes** commands, so it is honored from any source (in-project repo config included).
-- Per-argument safety is unchanged: dangerous argument patterns (`rm -rf /`, `git --exec=`, `npm run`, `find -exec`, …) are still blocked, `cwd` is confined to the project, args are passed as a clean array (no shell parsing), and every `exec` call is still gated by the `confirm` permission. For anything outside the allowlist, the model falls back to `bash`.
+- Per-argument hard-blocking is deliberately narrow: clear destructive / project-escape patterns (`rm -rf /`, unsafe `rm` targets, `git --exec=`, `git -C`, `git -c`, `find -exec`, publishing/deploying subcommands, `docker push`, …) are blocked, but normal development commands such as `pnpm run test`, `pnpm dlx ...`, `npx ...`, `node -e ...`, `python -m ...`, and `docker build` are allowed. `cwd` is confined to the project, args are passed as a clean array (no shell parsing), and every `exec` call is still gated by the `confirm` permission. For anything outside the allowlist, the model falls back to `bash`.
 
 **Autonomous autophase.** The autonomous AutoPhase verifier runs its verify command *without* per-call confirmation, so it keeps a narrower base allowlist (`pnpm`/`npm`/`yarn`/`bun`). It additionally honors your **explicit** `tools.exec.allow` opt-ins (not the broadened `exec` defaults), so a Go/Rust project can run e.g. `go test ./...` autonomously once you add `go` to `tools.exec.allow` and point `WRONGSTACK_AUTOPHASE_VERIFY_CMD` at it. Because `tools.exec.allow` is trusted-config-only, a repo still cannot widen what runs autonomously.
 
