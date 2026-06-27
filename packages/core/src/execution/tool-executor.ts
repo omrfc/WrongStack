@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Context } from '../core/context.js';
@@ -136,24 +137,33 @@ export class ToolExecutor {
           return { result, tool, durationMs: Date.now() - start };
         }
         if (pre.input) {
-          // A hook rewrote the arguments — re-validate before trusting them.
-          const reval = validateAgainstSchema(pre.input, tool.inputSchema);
-          if (!reval.ok) {
-            const errorDetails = reval.errors
-              .map((e) => `  - ${e.path || 'input'}: ${e.message}`)
-              .join('\n');
-            const result = {
-              type: 'tool_result' as const,
-              tool_use_id: use.id,
-              content:
-                `A PreToolUse hook rewrote the arguments for "${tool.name}" into an invalid shape.\n\n` +
-                `Validation errors:\n${errorDetails}`,
-              is_error: true,
-            };
-            budget = this.budgetForString(result.content, budget);
-            return { result, tool, durationMs: Date.now() - start };
+          // P3 #19 (before-release.md): skip the re-validation when the hook
+          // passed the input through unchanged. Most hooks either block or
+          // return the original input verbatim — re-validating the same shape
+          // the executor already validated above is wasted work. Use
+          // node:util's isDeepStrictEqual for a structural, order-sensitive
+          // comparison (tool inputs are plain JSON, so reference identity is
+          // not enough — a hook may clone before returning).
+          if (!isDeepStrictEqual(pre.input, use.input)) {
+            // A hook rewrote the arguments — re-validate before trusting them.
+            const reval = validateAgainstSchema(pre.input, tool.inputSchema);
+            if (!reval.ok) {
+              const errorDetails = reval.errors
+                .map((e) => `  - ${e.path || 'input'}: ${e.message}`)
+                .join('\n');
+              const result = {
+                type: 'tool_result' as const,
+                tool_use_id: use.id,
+                content:
+                  `A PreToolUse hook rewrote the arguments for "${tool.name}" into an invalid shape.\n\n` +
+                  `Validation errors:\n${errorDetails}`,
+                is_error: true,
+              };
+              budget = this.budgetForString(result.content, budget);
+              return { result, tool, durationMs: Date.now() - start };
+            }
+            use = { ...use, input: pre.input };
           }
-          use = { ...use, input: pre.input };
         }
       }
 
