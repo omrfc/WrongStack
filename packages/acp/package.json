@@ -32,6 +32,10 @@
     "./agent": {
       "import": "./dist/agent.js",
       "types": "./dist/agent.d.ts"
+    },
+    "./sdk": {
+      "import": "./dist/sdk.js",
+      "types": "./dist/sdk.d.ts"
     }
   },
   "files": [
@@ -45,6 +49,7 @@
     "smoke": "pnpm build && node --experimental-strip-types ../../scripts/acp-smoke-test.mts"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.0.0",
     "@wrongstack/core": "workspace:*"
   },
   "devDependencies": {

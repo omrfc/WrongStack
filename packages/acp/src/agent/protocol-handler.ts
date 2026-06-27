@@ -263,7 +263,22 @@ export class ACPProtocolHandler {
           return await this.handleSetConfigOption(id, params);
         case 'session/list':
           return await this.handleSessionList(id);
+        case 'session/fork':
+          return await this.handleSessionFork(id, params);
+        case 'providers/list':
+          return await this.handleProvidersList(id, params);
+        case 'providers/set':
+          return await this.handleProvidersSet(id, params);
+        case 'providers/disable':
+          return await this.handleProvidersDisable(id, params);
+        case 'mcp/message':
+          return await this.handleMcpMessage(id, params);
         default:
+          if (method.startsWith('document/') || method.startsWith('nes/') || method.startsWith('elicitation/')) {
+            // Spec: notifications don't require a response.
+            // These are IDE-specific features we don't yet implement.
+            return false;
+          }
           await this.sendError(id, -32601, `Unknown method: ${method}`);
           return false;
       }
@@ -500,6 +515,51 @@ export class ACPProtocolHandler {
       id,
       result: {},
     }));
+    return false;
+  }
+
+  private async handleSessionFork(id: string | number, params: unknown): Promise<boolean> {
+    // Fork creates a new session from an existing one.
+    const p = (params ?? {}) as { sessionId?: unknown; cwd?: unknown; mcpServers?: unknown };
+    const sourceId = typeof p.sessionId === 'string' ? p.sessionId : null;
+    if (!sourceId || !this.sessions.has(sourceId)) {
+      await this.sendError(id, -32000, `session not found: ${sourceId}`);
+      return false;
+    }
+    // Create a new session based on the source
+    const forkParams: Record<string, unknown> = params as Record<string, unknown>;
+    return this.handleSessionNew(id, { ...forkParams, cwd: p.cwd ?? this.defaultCwd });
+  }
+
+  private async handleProvidersList(id: string | number, _params: unknown): Promise<boolean> {
+    // Return the current provider configuration.
+    await this.transport.send(toWire({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        providers: [],
+        currentProviderId: null,
+      },
+    }));
+    return false;
+  }
+
+  private async handleProvidersSet(id: string | number, _params: unknown): Promise<boolean> {
+    await this.sendError(id, -32000, 'provider configuration not available through ACP; use wstack auth');
+    return false;
+  }
+
+  private async handleProvidersDisable(id: string | number, _params: unknown): Promise<boolean> {
+    await this.transport.send(toWire({
+      jsonrpc: '2.0',
+      id,
+      result: {},
+    }));
+    return false;
+  }
+
+  private async handleMcpMessage(id: string | number, _params: unknown): Promise<boolean> {
+    await this.sendError(id, -32000, 'MCP message routing not available through ACP');
     return false;
   }
 
