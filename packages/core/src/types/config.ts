@@ -479,6 +479,19 @@ export interface FeaturesConfig {
    * When false, tools are restricted to the project root directory.
    */
   allowOutsideProjectRoot?: boolean | undefined;
+  /**
+   * Auto-bootstrap the mailbox HTTP bridge from any WrongStack surface
+   * (REPL/TUI/WebUI/eternal). When 'auto' (the default), the first
+   * surface to come up for a given project joins or spawns the bridge
+   * so external agents can connect without the user running
+   * `wstack mailbox serve` themselves. 'off' disables this — operators
+   * must start the bridge explicitly (e.g. via the `/mailbox-serve`
+   * slash command or the standalone `wstack mailbox serve` subcommand).
+   * The per-project lock + token-persistence model means a second
+   * surface on the same project joins the first's bridge rather than
+   * spawning a duplicate.
+   */
+  mailboxBridge?: 'auto' | 'off' | undefined;
 }
 
 export interface AutonomyConfig {
