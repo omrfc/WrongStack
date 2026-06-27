@@ -184,7 +184,22 @@ export type SessionEvent =
       ts: string;
       context: string;
     }
-  | { type: 'in_flight_end'; ts: string; reason: 'clean' | 'aborted' | 'recovered' };
+  | { type: 'in_flight_end'; ts: string; reason: 'clean' | 'aborted' | 'recovered' }
+  | {
+      /**
+       * Structured side-effect audit record (P2 #5). Appended by tools that
+       * perform non-filesystem mutations (bash, install, fetch) so /diag and
+       * session replay can show what the agent did beyond file edits.
+       * Unlike file_snapshot, this is purely for observability — no undo.
+       */
+      type: 'side_effect';
+      ts: string;
+      toolUseId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      outcome?: string | undefined;
+      risk: 'fs.write' | 'shell' | 'package' | 'network' | 'config';
+    };
 
 export type FileSnapshot = {
   path: string;
@@ -336,6 +351,18 @@ export interface SessionWriter {
    * Called by write/edit/delete tools to track pending changes.
    */
   recordFileChange(input: { path: string; action: 'created' | 'modified' | 'deleted'; before: string | null; after: string | null }): void;
+  /**
+   * Record a structured side effect for audit (P2 #5). Implementations
+   * append a `side_effect` event to the session JSONL. Best-effort —
+   * callers fire-and-forget; errors are swallowed.
+   */
+  recordSideEffect(input: {
+    toolUseId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+    outcome?: string | undefined;
+    risk: 'fs.write' | 'shell' | 'package' | 'network' | 'config';
+  }): void;
   /**
    * Write a checkpoint marker after a user input is processed.
    * Also flushes any pending file snapshots.

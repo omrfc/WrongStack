@@ -108,6 +108,13 @@ export class Context implements RunEnv {
    */
   writtenFiles = new Set<string>();
   fileMtimes = new Map<string, number>();
+  /**
+   * Structured side-effect records accumulated during the current run
+   * (P2 #5). Populated by `recordSideEffect()` — read by /diag for an
+   * in-memory audit trail without parsing the JSONL file. Cleared by
+   * `clearFileTracking()` alongside read/written-file tracking.
+   */
+  sideEffects: import('../types/side-effect.js').SideEffect[] = [];
   contextEvidence: ContextEvidenceState = createContextEvidenceState();
   systemPrompt: TextBlock[];
   provider: Provider;
@@ -261,6 +268,31 @@ export class Context implements RunEnv {
     this.readFiles.clear();
     this.writtenFiles.clear();
     this.fileMtimes.clear();
+    this.sideEffects = [];
+  }
+
+  /**
+   * Record a structured side effect for the audit trail (P2 #5).
+   * Called by tools that perform non-filesystem mutations (bash, install,
+   * fetch) so /diag and session replay can show what the agent did beyond
+   * file edits.
+   *
+   * Unlike recordFileChange(), this does NOT support undo — it is purely
+   * for observability and audit. The event is appended to the session
+   * JSONL fire-and-forget; errors are swallowed so recording never blocks
+   * tool execution.
+   */
+  recordSideEffect(sideEffect: import('../types/side-effect.js').SideEffect): void {
+    this.sideEffects.push(sideEffect);
+    this.session.append({
+      type: 'side_effect',
+      ts: sideEffect.ts,
+      toolUseId: sideEffect.toolUseId,
+      toolName: sideEffect.toolName,
+      input: sideEffect.input,
+      outcome: sideEffect.outcome,
+      risk: sideEffect.risk,
+    }).catch(() => { /* best-effort — never block tool execution */ });
   }
 
   /**

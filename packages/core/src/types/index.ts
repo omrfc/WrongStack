@@ -1,6 +1,7 @@
 export * from './blocks.js';
 export * from './messages.js';
 export * from './tool.js';
+export * from './side-effect.js';
 export * from './provider.js';
 export { StreamHangError } from './provider.js';
 export * from './provider-runner.js';

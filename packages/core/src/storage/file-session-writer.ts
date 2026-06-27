@@ -134,6 +134,25 @@ export class FileSessionWriter implements SessionWriter {
     this.pendingFileSnapshots.push(input);
   }
 
+  recordSideEffect(input: {
+    toolUseId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+    outcome?: string | undefined;
+    risk: 'fs.write' | 'shell' | 'package' | 'network' | 'config';
+  }): void {
+    // Fire-and-forget — side-effect recording must never block tool execution.
+    this.append({
+      type: 'side_effect',
+      ts: new Date().toISOString(),
+      toolUseId: input.toolUseId,
+      toolName: input.toolName,
+      input: input.input,
+      outcome: input.outcome,
+      risk: input.risk,
+    }).catch(() => { /* best-effort */ });
+  }
+
   constructor(
     public readonly id: string,
     private handle: fsp.FileHandle,
