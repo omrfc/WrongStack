@@ -679,6 +679,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   process.on('exit', exitHandler);
 
   const detachListeners = () => {
+    process.off('SIGINT', sigintHandler);
     for (const s of signals) process.off(s, signalHandler);
     for (const s of swallowSignals) {
       try {

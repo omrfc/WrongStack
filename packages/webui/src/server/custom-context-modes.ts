@@ -98,7 +98,7 @@ export function createCustomModeStore(wrongstackDir: string): CustomModeStore {
       custom: true,
     };
     modes.set(mode.id, entry);
-    void save();
+    void save().catch(() => {});
     return { ok: true };
   };
 
@@ -128,7 +128,7 @@ export function createCustomModeStore(wrongstackDir: string): CustomModeStore {
     if (patch.targetLoad !== undefined) next.targetLoad = patch.targetLoad;
     if (patch.aggressiveOn !== undefined) next.aggressiveOn = patch.aggressiveOn;
     modes.set(id, next);
-    void save();
+    void save().catch(() => {});
     return { ok: true };
   };
 
@@ -141,7 +141,7 @@ export function createCustomModeStore(wrongstackDir: string): CustomModeStore {
     if (!modes.delete(id)) {
       return { ok: false, error: `Mode "${id}" not found` };
     }
-    void save();
+    void save().catch(() => {});
     return { ok: true };
   };
 

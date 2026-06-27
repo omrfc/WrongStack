@@ -475,9 +475,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     storageLog('storage.write', args[0] as Record<string, unknown>);
   const onStorageError = (...args: unknown[]) =>
     storageLog('storage.error', args[0] as Record<string, unknown>);
-  events.on('storage.read', onStorageRead);
-  events.on('storage.write', onStorageWrite);
-  events.on('storage.error', onStorageError);
+  const offStorageRead = events.on('storage.read', onStorageRead);
+  const offStorageWrite = events.on('storage.write', onStorageWrite);
+  const offStorageError = events.on('storage.error', onStorageError);
 
   // Tracks the in-flight chimera subagent so finally can await it before session.close().
   // Without this, the fire-and-forget IIFE appends to a session whose handle is already closed.
@@ -1136,6 +1136,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       });
     }
   } finally {
+    offStorageRead();
+    offStorageWrite();
+    offStorageError();
     // Tear down the live fleet status line first so the scroll region is
     // restored before any end-of-session output prints.
     fleetStatusLine?.stop();

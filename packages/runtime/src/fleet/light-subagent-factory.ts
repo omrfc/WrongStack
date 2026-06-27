@@ -61,6 +61,20 @@ export interface LightSubagentFactoryDeps {
 const SUBAGENT_BASELINE =
   'You are a subagent executing one delegated task end-to-end. Work autonomously with your tools; do not ask for confirmation on routine in-project actions. Keep output concise.';
 
+// Slot in ctx.meta where the per-subagent AbortController is stored.
+// Callers retrieve it via abortLightSubagent(agent).
+const _SUBAGENT_ABORT = 'wrongstack:subagent-abort-controller';
+
+/**
+ * Retrieve and abort a light subagent's AbortController (stored in ctx.meta
+ * by makeLightSubagentFactory). Idempotent — calling abort() on an already-aborted
+ * signal is a no-op.
+ */
+export function abortLightSubagent(agent: Agent): void {
+  const ac = agent.ctx.meta[_SUBAGENT_ABORT] as AbortController | undefined;
+  ac?.abort();
+}
+
 export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentFactory {
   const configStore = deps.container.resolve(TOKENS.ConfigStore);
   const tokenCounter = deps.container.resolve(TOKENS.TokenCounter);
@@ -100,11 +114,14 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
     const agentName = subCfg.name ?? subCfg.id ?? `sub_${cryptoId()}`;
     const session = makeSubagentSessionShim(deps.session);
 
+    // Keep the AbortController reference so callers can abort this subagent's
+    // work. Stored with a symbol key so it is opaque to general-purpose consumers.
+    const ac = new AbortController();
     const ctx = new Context({
       systemPrompt: baseSystem,
       provider,
       session,
-      signal: new AbortController().signal,
+      signal: ac.signal,
       tokenCounter,
       cwd: subCwd,
       projectRoot: deps.projectRoot,
@@ -116,6 +133,8 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
       agentName,
     });
     if (subCfg.role) ctx.meta['agentRole'] = subCfg.role;
+    // Store the AbortController so abortLightSubagent() can retrieve it.
+    (ctx.meta[_SUBAGENT_ABORT] as AbortController) = ac;
 
     // Subagents can't answer prompts — auto-approve the wide work capability set
     // (the spawn site may narrow it via allowedCapabilities). `source: 'yolo'`

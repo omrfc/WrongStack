@@ -168,16 +168,16 @@ export function startSddRun(opts: StartSddRunOptions): SddRunHandle {
         else if (c.type === 'set_task_fallbacks' && p.taskId) run.setTaskFallbacks(p.taskId, p.fallbackModels);
         else if (c.type === 'set_task_verification' && p.taskId)
           run.setTaskVerification(p.taskId, p.verificationCommand);
-        else if (c.type === 'cancel_task' && p.taskId) void run.cancelTask(p.taskId);
+        else if (c.type === 'cancel_task' && p.taskId) void run.cancelTask(p.taskId).catch(() => {});
         else if (c.type === 'delete_task' && p.taskId) run.deleteTask(p.taskId);
         else if (c.type === 'split_task' && p.taskId && p.subtasks?.length) run.splitTask(p.taskId, p.subtasks);
         // Lifecycle: stop the run first, then sweep worktrees / revert commits.
         // (Both are no-ops while the run is still live — the user pairs them with
         // a prior `stop`.)
-        else if (c.type === 'cleanup_worktrees') void run.cleanupWorktrees();
-        else if (c.type === 'rollback') void run.rollback();
+        else if (c.type === 'cleanup_worktrees') void run.cleanupWorktrees().catch(() => {});
+        else if (c.type === 'rollback') void run.rollback().catch(() => {});
       }
-    });
+    }).catch(() => {});
   }, drainMs);
   // Best-effort: don't keep the event loop alive solely for the drain timer.
   (controlTimer as { unref?: () => void }).unref?.();

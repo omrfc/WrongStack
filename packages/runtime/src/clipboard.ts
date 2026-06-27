@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -58,7 +59,7 @@ export async function readClipboardText(): Promise<string | null> {
 }
 
 async function readWindows(): Promise<ClipboardImage | null> {
-  const tmp = path.join(os.tmpdir(), `wstack-clip-${Date.now()}.png`);
+  const tmp = path.join(os.tmpdir(), `wstack-clip-${randomUUID()}.png`);
   const ps = [
     'Add-Type -AssemblyName System.Windows.Forms',
     'Add-Type -AssemblyName System.Drawing',
@@ -74,7 +75,7 @@ async function readWindows(): Promise<ClipboardImage | null> {
 }
 
 async function readDarwin(): Promise<ClipboardImage | null> {
-  const tmp = path.join(os.tmpdir(), `wstack-clip-${Date.now()}.png`);
+  const tmp = path.join(os.tmpdir(), `wstack-clip-${randomUUID()}.png`);
   const script = [
     'try',
     `  set the_file to (open for access POSIX file "${tmp}" with write permission)`,
@@ -94,7 +95,7 @@ async function readDarwin(): Promise<ClipboardImage | null> {
 }
 
 async function readLinux(): Promise<ClipboardImage | null> {
-  const tmp = path.join(os.tmpdir(), `wstack-clip-${Date.now()}.png`);
+  const tmp = path.join(os.tmpdir(), `wstack-clip-${randomUUID()}.png`);
   const tries: Array<[string, string[]]> = [
     ['wl-paste', ['--type', 'image/png']],
     ['xclip', ['-selection', 'clipboard', '-t', 'image/png', '-o']],
