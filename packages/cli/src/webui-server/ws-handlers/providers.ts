@@ -105,9 +105,12 @@ export async function handleProviderModels(
     return;
   }
   try {
-    // Resolve models from the catalog AND the saved config. OAuth / subscription
-    // providers (github-copilot, anthropic-oauth, openai-codex, …) are never in
-    // the models.dev catalog — their model list lives only in the saved config.
+    // Resolve models from the merged catalog (models.dev + the curated overlay)
+    // AND the saved config. Most OAuth / subscription providers (github-copilot,
+    // anthropic-oauth, …) are absent from models.dev — their model list lives
+    // only in the saved config. openai-codex is a partial exception: the
+    // overlay adds it, so getProvider() may return catalog metadata; but the
+    // saved allowlist is still authoritative and wins via resolveProviderModelList.
     // The switcher lazy-loads every saved provider, so a catalog miss must yield
     // the saved allowlist (or an empty list), never an error result — that error
     // path produced a "not found in catalog" toast per non-catalog provider.
