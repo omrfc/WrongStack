@@ -97,6 +97,7 @@ import { WorktreeMonitor } from './components/worktree-monitor.js';
 import { WorktreePanel } from './components/worktree-panel.js';
 import { searchFiles } from './file-search.js';
 import { type GitInfo, readGitInfo } from './git-info.js';
+import { usePickerKeys } from './hooks/use-picker-keys.js';
 import { useDirectorFleetBridge } from './hooks/use-director-fleet-bridge.js';
 import { useAutonomousCoordinator } from './hooks/use-autonomous-coordinator.js';
 import { useStatuslineState } from './hooks/use-statusline-state.js';
@@ -3833,6 +3834,191 @@ export function App({
     streamFleet: state.streamFleet,
   });
 
+  // submit is defined later in the component body (after handleKey);
+  // this ref lets usePickerKeys call it without reordering code.
+  const submitRef = useRef<(text: string) => void>(() => {});
+  const tryPickerKey = usePickerKeys({
+    state,
+    dispatch,
+    lastEnterAtRef,
+    inputGateRef,
+    switchProviderAndModel,
+    setLiveProvider,
+    setLiveModel,
+    setActiveMaxContext,
+    agentCtxMaxContext: agent.ctx.provider.capabilities.maxContext,
+    switchAutonomy,
+    submit: (text) => submitRef.current(text),
+    onPromptPickerEnter: () => {
+      const filtered = filterPromptPicker(
+        state.promptPicker.all,
+        state.promptPicker.categories,
+        state.promptPicker.catIndex,
+        state.promptPicker.recentSlugs,
+      );
+      const entry = filtered[state.promptPicker.selected];
+      dispatch({ type: 'promptPickerClose' });
+      if (entry) {
+        dispatch({ type: 'setBuffer', buffer: entry.content, cursor: entry.content.length });
+        void promptUsageRef.current?.record(entry.slug).catch(() => {});
+      }
+    },
+    onResumePickerEnter: async () => {
+      const session = state.resumePicker.sessions[state.resumePicker.selected];
+      if (!session || session.isCurrent) return;
+      if (state.resumePicker.busy) return;
+      dispatch({ type: 'resumePickerBusy', on: true });
+      onResumeSession?.(session.id).then((result) => {
+        if (!result) {
+          dispatch({ type: 'resumePickerError', text: `Failed to resume session ${session.id}.` });
+          return;
+        }
+        dispatch({ type: 'replaceHistory', entries: result.entries, nextId: result.nextId });
+        dispatch({ type: 'resumePickerClose' });
+        dispatch({
+          type: 'addEntry',
+          entry: {
+            kind: 'info',
+            text: `Resumed session ${result.sessionId} — ${result.entries.length} entries replayed.`,
+          },
+        });
+      }).catch((err) => {
+        dispatch({
+          type: 'resumePickerError',
+          text: toErrorMessage(err),
+        });
+      });
+    },
+    onSessionsPanelEnter: async () => {
+      if (state.sessionResumeConfirm) {
+        const pending = state.sessionResumeConfirm;
+        dispatch({ type: 'sessionResumeConfirmClear' });
+        dispatch({ type: 'sessionsPanelBusy', on: true });
+        onResumeSession?.(pending.sessionId).then((result) => {
+          if (!result) {
+            dispatch({ type: 'sessionsPanelBusy', on: false });
+            return;
+          }
+          dispatch({ type: 'replaceHistory', entries: result.entries, nextId: result.nextId });
+          dispatch({ type: 'toggleSessionsPanel' });
+          dispatch({
+            type: 'addEntry',
+            entry: {
+              kind: 'info',
+              text: `Resumed session ${result.sessionId} — ${result.entries.length} entries replayed.`,
+            },
+          });
+        }).catch(() => {
+          dispatch({ type: 'sessionsPanelBusy', on: false });
+        });
+        return;
+      }
+      const sessions = state.sessionsPanel.sessions;
+      const sel = state.sessionsPanel.selected;
+      if (sel < 0 || sel >= sessions.length) return;
+      const session = sessions[sel];
+      if (!session) return;
+      const isCurrentProject = session.projectRoot === projectRoot;
+      if (isCurrentProject) {
+        if (session.pid === process.pid) {
+          dispatch({
+            type: 'addEntry',
+            entry: { kind: 'info', text: 'That is this session — nothing to resume.' },
+          });
+          dispatch({ type: 'toggleSessionsPanel' });
+          return;
+        }
+        if (session.pid != null) {
+          dispatch({
+            type: 'addEntry',
+            entry: {
+              kind: 'warn',
+              text: `Session is open in another running wstack (pid ${session.pid}) — a live session cannot be resumed here. Use /resume for previous sessions.`,
+            },
+          });
+          dispatch({ type: 'toggleSessionsPanel' });
+          return;
+        }
+        dispatch({
+          type: 'sessionResumeConfirmSet',
+          sessionId: session.sessionId,
+          sessionName: session.projectName,
+        });
+      } else {
+        onSwitchToSession?.(session.sessionId, session.projectRoot ?? '', session.projectName);
+        dispatch({ type: 'toggleSessionsPanel' });
+        requestExit?.(42);
+      }
+    },
+    onProjectPickerEnter: async () => {
+      const items = state.projectPicker.items;
+      const selected = state.projectPicker.selected;
+      if (selected < 0 || selected >= items.length) return;
+      const item = items[selected];
+      if (!item || item.key === '__divider__' || item.key === 'quit') {
+        dispatch({ type: 'projectPickerClose' });
+        return;
+      }
+      if (item.kind === 'project') {
+        await onProjectSelect?.(item.key, item.kind);
+        dispatch({ type: 'projectPickerClose' });
+        dispatch({ type: 'addEntry', entry: { kind: 'info', text: `Switched project: ${item.label.trim()}.` } });
+        return;
+      }
+      dispatch({ type: 'projectPickerClose' });
+      if (item.key === 'new-session') {
+        await onProjectSelect?.(item.key, item.kind);
+        dispatch({ type: 'addEntry', entry: { kind: 'info', text: 'Started a fresh session in this project.' } });
+      } else if (item.key === 'prev-sessions') {
+        submitRef.current('/resume');
+      }
+    },
+    onSlashPickerEnter: () => {
+      const line = selectedSlashCommandLine(state.slashPicker);
+      if (line) {
+        submitRef.current(line);
+      } else {
+        acceptSlashPickerSelection();
+      }
+    },
+    onSlashPickerTab: () => {
+      if (state.slashPicker.matches.length > 0) {
+        const sel = state.slashPicker.matches[state.slashPicker.selected];
+        if (sel) {
+          setDraft(`/${sel.name} `, sel.name.length + 2);
+          dispatch({ type: 'slashPickerClose' });
+        }
+      }
+    },
+    onSettingsPickerEnter: () => {
+      const sp = state.settingsPicker;
+      if (sp.filter !== '') {
+        dispatch({ type: 'settingsFilterSet', filter: '' });
+        return;
+      }
+      if (sp.field === THINKING_WORD_FIELD) {
+        dispatch({ type: 'settingsThinkingEditStart' });
+      } else {
+        dispatch({ type: 'settingsValueChange', delta: 1 });
+      }
+    },
+    onFKeyPickerEnter: () => {
+      const selected = state.fKeyPicker.selected;
+      const entry = F_KEY_ENTRIES[selected];
+      if (!entry) return;
+      dispatch({ type: 'fKeyPickerClose' });
+      if (entry.action === 'projectPickerOpen') {
+        openProjectPicker();
+        return;
+      }
+      const action = actionForFKeyPanel(entry, statuslineHiddenForPicker());
+      if (action) dispatch(action);
+    },
+    onPickerEnter: async () => {
+      await acceptPickerSelection();
+    },
+  });
+
   // Handle SIGINT as a three-stage escalation:
   //   1st press — stop work and stay at the prompt: cancel the foreground
   //     run + kill the fleet, OR (in autonomy / background-only mode) halt
@@ -4215,709 +4401,11 @@ export function App({
     // depend on receiving those events. The late guard before text
     // insertion handles the empty-input case correctly.
 
-    // Model picker takes absolute precedence: nothing else is meaningful
-    // while the two-step overlay is open. Esc cancels (or backs out of
-    // step 2 to step 1); Enter advances to the next step or confirms.
-    // Step 2 additionally supports type-to-search and Backspace-to-delete.
-    if (state.modelPicker.open) {
-      if (key.escape) {
-        if (state.modelPicker.step === 'model') {
-          dispatch({ type: 'modelPickerBack' });
-        } else {
-          dispatch({ type: 'modelPickerClose' });
-        }
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'modelPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'modelPickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'modelPickerMove', delta: 1 });
-        return;
-      }
-      // Step 2: type-to-search — printable characters append to the filter.
-      if (state.modelPicker.step === 'model' && input && !key.return && !key.backspace) {
-        dispatch({ type: 'modelPickerSearch', query: state.modelPicker.searchQuery + input });
-        return;
-      }
-      // Step 2: Backspace — delete last char from filter, or go back if empty.
-      if (state.modelPicker.step === 'model' && key.backspace) {
-        const q = state.modelPicker.searchQuery;
-        if (q.length > 0) {
-          dispatch({ type: 'modelPickerSearch', query: q.slice(0, -1) });
-        } else {
-          dispatch({ type: 'modelPickerBack' });
-        }
-        return;
-      }
-      if (isEnter) {
-        // Debounce \r\n double-event from terminals that emit Enter as two stdin reads.
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        inputGateRef.current = true;
-        try {
-          if (state.modelPicker.step === 'provider') {
-            const opt = state.modelPicker.providerOptions[state.modelPicker.selected];
-            if (!opt) return;
-            dispatch({
-              type: 'modelPickerPickProvider',
-              providerId: opt.id,
-              models: opt.models,
-            });
-            return;
-          }
-          // step === 'model' → commit the switch (use filteredOptions for selected model)
-          const providerId = state.modelPicker.pickedProviderId;
-          const modelId = state.modelPicker.filteredOptions[state.modelPicker.selected];
-          if (!providerId || !modelId) return;
-          const err = await switchProviderAndModel?.(providerId, modelId);
-          if (err) {
-            dispatch({ type: 'modelPickerHint', text: err });
-            return;
-          }
-          setLiveProvider(providerId);
-          setLiveModel(modelId);
-          setActiveMaxContext(agent.ctx.provider.capabilities.maxContext);
-          dispatch({
-            type: 'addEntry',
-            entry: { kind: 'info', text: `Switched to ${providerId} / ${modelId}.` },
-          });
-          dispatch({ type: 'modelPickerClose' });
-          return;
-        } finally {
-          inputGateRef.current = false;
-        }
-      }
-      // Any other key while picker is open: ignore.
-      return;
-    }
-
-    // Autonomy picker takes absolute precedence while open.
-    if (state.autonomyPicker.open) {
-      if (key.escape) {
-        dispatch({ type: 'autonomyPickerClose' });
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'autonomyPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'autonomyPickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'autonomyPickerMove', delta: 1 });
-        return;
-      }
-      if (isEnter) {
-        // Debounce \r\n double-event from terminals that emit Enter as two stdin reads.
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        const opt = state.autonomyPicker.options[state.autonomyPicker.selected];
-        if (!opt) return;
-        const err = switchAutonomy?.(opt.mode);
-        if (err) {
-          dispatch({ type: 'autonomyPickerHint', text: err });
-          return;
-        }
-        dispatch({ type: 'autonomyPickerClose' });
-        return;
-      }
-      return;
-    }
-
-    // Design Studio kit picker — arrows navigate, ←/→ cycle the target stack,
-    // Enter applies the kit by running `/design <id> <stack>` (pins + loads it).
-    if (state.designPicker.open) {
-      if (key.escape) {
-        dispatch({ type: 'designPickerClose' });
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'designPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'designPickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'designPickerMove', delta: 1 });
-        return;
-      }
-      if (key.leftArrow || key.rightArrow) {
-        const stacks = ['web', 'react-native', 'flutter', 'swiftui', 'compose'];
-        const cur = stacks.indexOf(state.designPicker.stack);
-        const delta = key.rightArrow ? 1 : -1;
-        const next = stacks[(cur + delta + stacks.length) % stacks.length] ?? 'web';
-        dispatch({ type: 'designPickerStack', stack: next });
-        return;
-      }
-      if (isEnter) {
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        const kit = state.designPicker.kits[state.designPicker.selected];
-        const stack = state.designPicker.stack;
-        dispatch({ type: 'designPickerClose' });
-        if (kit) void submit(`/design ${kit.id} ${stack}`);
-        return;
-      }
-      return;
-    }
-
-    // Prompt library picker — ↑/↓ navigate, ←/→ cycle category, Enter inserts
-    // the chosen prompt's content into the input buffer ({{variables}} left for
-    // the user to fill inline), Esc cancels.
-    if (state.promptPicker.open) {
-      if (key.escape) {
-        dispatch({ type: 'promptPickerClose' });
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'promptPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'promptPickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'promptPickerMove', delta: 1 });
-        return;
-      }
-      if (key.leftArrow) {
-        dispatch({ type: 'promptPickerCategory', delta: -1 });
-        return;
-      }
-      if (key.rightArrow) {
-        dispatch({ type: 'promptPickerCategory', delta: 1 });
-        return;
-      }
-      if (isEnter) {
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        const filtered = filterPromptPicker(
-          state.promptPicker.all,
-          state.promptPicker.categories,
-          state.promptPicker.catIndex,
-          state.promptPicker.recentSlugs,
-        );
-        const entry = filtered[state.promptPicker.selected];
-        dispatch({ type: 'promptPickerClose' });
-        if (entry) {
-          dispatch({ type: 'setBuffer', buffer: entry.content, cursor: entry.content.length });
-          void promptUsageRef.current?.record(entry.slug).catch(() => {});
-        }
-        return;
-      }
-      return;
-    }
-
-    // Resume picker takes absolute precedence while open.
-    if (state.resumePicker.open) {
-      if (key.escape) {
-        dispatch({ type: 'resumePickerClose' });
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'resumePickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'resumePickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'resumePickerMove', delta: 1 });
-        return;
-      }
-      if (isEnter) {
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        const session = state.resumePicker.sessions[state.resumePicker.selected];
-        if (!session || session.isCurrent) return;
-        if (state.resumePicker.busy) return;
-        // Fire the resume callback — the host loads the session and
-        // returns the hydrated history entries.
-        dispatch({ type: 'resumePickerBusy', on: true });
-        onResumeSession?.(session.id).then((result) => {
-          if (!result) {
-            dispatch({ type: 'resumePickerError', text: `Failed to resume session ${session.id}.` });
-            return;
-          }
-          dispatch({ type: 'replaceHistory', entries: result.entries, nextId: result.nextId });
-          dispatch({ type: 'resumePickerClose' });
-          dispatch({
-            type: 'addEntry',
-            entry: {
-              kind: 'info',
-              text: `Resumed session ${result.sessionId} — ${result.entries.length} entries replayed.`,
-            },
-          });
-        }).catch((err) => {
-          dispatch({
-            type: 'resumePickerError',
-            text: toErrorMessage(err),
-          });
-        });
-        return;
-      }
-      return;
-    }
-
-    if (state.settingsPicker.open) {
-      const sp = state.settingsPicker;
-      // Modal free-text editing of the thinking word: while active, the row
-      // captures every key — type to edit, Enter commits, Esc cancels (and
-      // does NOT close the picker), Backspace deletes. Everything else is
-      // swallowed so navigation can't fire mid-edit.
-      if (sp.thinkingWordEditing) {
-        if (key.escape) {
-          dispatch({ type: 'settingsThinkingEditCancel' });
-          return;
-        }
-        if (isEnter) {
-          const now = Date.now();
-          if (now - lastEnterAtRef.current < 50) return;
-          lastEnterAtRef.current = now;
-          dispatch({ type: 'settingsThinkingEditCommit' });
-          return;
-        }
-        if (key.backspace) {
-          dispatch({ type: 'settingsThinkingEditChange', draft: sp.thinkingWordDraft.slice(0, -1) });
-          return;
-        }
-        if (input && input.length === 1 && input.charCodeAt(0) >= 0x20 && input.charCodeAt(0) < 0x7f) {
-          dispatch({ type: 'settingsThinkingEditChange', draft: sp.thinkingWordDraft + input });
-          return;
-        }
-        return;
-      }
-      if (key.escape || (key.ctrl && input === 's')) {
-        dispatch({ type: 'settingsClose' });
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'settingsFieldMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      // Ctrl+<letter>, Alt+<letter>, or Alt+Shift+<letter> → jump straight to the
-      // named settings-picker row. Chords are registered in
-      // SETTINGS_PICKER_JUMP_CHORDS (settings-picker.tsx) alongside the
-      // help-overlay surface so the two stay in sync. Lives after the
-      // thinking-word edit modal block so the typing shortcut never hijacks
-      // a free-text edit. Avoids every globally-bound chord
-      // (Ctrl+S/F/G/P/T/A/K and Alt+V) — see the JUMP_CHORDS docstring for
-      // the full list. The Alt+Shift variant lets the Logging rows reuse
-      // letters already taken by the Ctrl/Alt sets without colliding.
-      if (input && input.length === 1 && (key.ctrl || key.meta)) {
-        const mod: 'ctrl' | 'alt' | 'alt-shift' = key.ctrl
-          ? 'ctrl'
-          : key.shift
-            ? 'alt-shift'
-            : 'alt';
-        const field = settingsPickerJumpField(mod, input);
-        if (field !== undefined) {
-          dispatch({ type: 'settingsFieldSet', field });
-          return;
-        }
-      }
-      // Filter mode (row search). Pressing `/` on an empty filter enters
-      // filter mode; subsequent printable characters extend the query;
-      // backspace removes the last character; Esc clears the filter.
-      // The filter value always includes the leading `/` so the visual
-      // cue is consistent (`Filter: /multi`); matchers strip it.
-      if (input === '/' && sp.filter === '') {
-        dispatch({ type: 'settingsFilterSet', filter: '/' });
-        return;
-      }
-      if (sp.filter !== '') {
-        if (key.escape) {
-          dispatch({ type: 'settingsFilterSet', filter: '' });
-          return;
-        }
-        if (key.backspace) {
-          // Strip the trailing character, but keep the leading `/` so
-          // the picker knows we're still in filter mode.
-          const next = sp.filter.length > 1 ? sp.filter.slice(0, -1) : '';
-          dispatch({ type: 'settingsFilterSet', filter: next });
-          return;
-        }
-        if (input && input.length === 1 && input.charCodeAt(0) >= 0x20 && input.charCodeAt(0) < 0x7f) {
-          dispatch({ type: 'settingsFilterSet', filter: sp.filter + input });
-          return;
-        }
-        // Anything else (arrows, Enter, etc.) — fall through to the
-        // default handling below, which navigates within the filtered
-        // rows. Enter is special-cased below to "accept and clear".
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'settingsFieldMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'settingsFieldMove', delta: 1 });
-        return;
-      }
-      if (key.leftArrow) {
-        dispatch({ type: 'settingsValueChange', delta: -1 });
-        return;
-      }
-      if (key.rightArrow) {
-        dispatch({ type: 'settingsValueChange', delta: 1 });
-        return;
-      }
-      if (isEnter) {
-        // Debounce \r\n double-event from terminals that emit Enter as two stdin reads.
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        // If the user is in filter mode, Enter accepts the current row
-        // (the cursor is already on a matching row because navigation
-        // works within the filtered set) and exits filter mode.
-        if (sp.filter !== '') {
-          dispatch({ type: 'settingsFilterSet', filter: '' });
-          return;
-        }
-        // The thinking-word row opens free-text editing on Enter; every other
-        // field cycles its value (same as ←/→).
-        if (sp.field === THINKING_WORD_FIELD) {
-          dispatch({ type: 'settingsThinkingEditStart' });
-        } else {
-          dispatch({ type: 'settingsValueChange', delta: 1 });
-        }
-        return;
-      }
-      return;
-    }
-
-    // Statusline picker — interactive status bar chip editor.
-    if (state.statuslinePicker.open) {
-      if (key.escape) {
-        dispatch({ type: 'statuslineClose' });
-        return;
-      }
-      // F5 deliberately NOT handled here — it falls through to the plan-panel
-      // toggle below. Esc is the close key for the statusline picker.
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'statuslineFieldMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      // ↑/↓ navigate chips; ←/→ toggle the focused chip on/off.
-      if (key.upArrow) {
-        dispatch({ type: 'statuslineFieldMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'statuslineFieldMove', delta: 1 });
-        return;
-      }
-      if (key.leftArrow || key.rightArrow) {
-        const focused = STATUSLINE_ITEMS[state.statuslinePicker.field];
-        if (focused) {
-          dispatch({ type: 'statuslineToggle', item: focused });
-        }
-        return;
-      }
-      // Enter is deliberately a no-op — ↑/↓ navigate, ←/→ toggle.
-      return;
-    }
-
-    // Project picker — keyboard-driven project switching panel.
-    if (state.projectPicker.open) {
-      if (key.escape) {
-        if (state.projectPicker.filter) {
-          // First Esc clears the filter
-          dispatch({ type: 'projectPickerFilter', filter: '' });
-        } else {
-          dispatch({ type: 'projectPickerClose' });
-        }
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'projectPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'projectPickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'projectPickerMove', delta: 1 });
-        return;
-      }
-      if (isEnter) {
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        const items = state.projectPicker.items;
-        const selected = state.projectPicker.selected;
-        if (selected < 0 || selected >= items.length) return;
-        const item = items[selected];
-        if (!item || item.key === '__divider__' || item.key === 'quit') {
-          dispatch({ type: 'projectPickerClose' });
-          return;
-        }
-        // Project selections re-root the live app in place; no exit/restart.
-        if (item.kind === 'project') {
-          await onProjectSelect?.(item.key, item.kind);
-          dispatch({ type: 'projectPickerClose' });
-          dispatch({ type: 'addEntry', entry: { kind: 'info', text: `Switched project: ${item.label.trim()}.` } });
-          return;
-        }
-        // Actions: 'new-session' starts a fresh session in the current project;
-        // 'prev-sessions' opens the in-TUI /resume picker. These used to be
-        // dead menu items — onProjectSelect no-op'd on actions and nothing
-        // else handled them.
-        dispatch({ type: 'projectPickerClose' });
-        if (item.key === 'new-session') {
-          await onProjectSelect?.(item.key, item.kind);
-          dispatch({ type: 'addEntry', entry: { kind: 'info', text: 'Started a fresh session in this project.' } });
-        } else if (item.key === 'prev-sessions') {
-          void submit('/resume');
-        }
-        return;
-      }
-      // Printable characters → add to filter
-      if (input && input.length === 1 && input.charCodeAt(0) >= 0x20 && input.charCodeAt(0) < 0x7f) {
-        dispatch({ type: 'projectPickerFilter', filter: state.projectPicker.filter + input });
-        return;
-      }
-      // Backspace → remove last char from filter
-      if (key.backspace) {
-        if (state.projectPicker.filter.length > 0) {
-          dispatch({
-            type: 'projectPickerFilter',
-            filter: state.projectPicker.filter.slice(0, -1),
-          });
-        }
-        return;
-      }
-      return;
-    }
-
-    // Sessions panel (F10) — arrow-key navigation + Enter to resume/switch.
-    if (state.sessionsPanelOpen) {
-      if (key.escape) {
-        if (state.sessionResumeConfirm) {
-          // First Esc clears the confirmation
-          dispatch({ type: 'sessionResumeConfirmClear' });
-        } else {
-          dispatch({ type: 'toggleSessionsPanel' });
-        }
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'sessionsPanelMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'sessionsPanelMove', delta: 1 });
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'sessionsPanelMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (isEnter) {
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-
-        // Two-step resume: first Enter selects, second confirms
-        if (state.sessionResumeConfirm) {
-          // Second Enter — proceed with resume
-          const pending = state.sessionResumeConfirm;
-          dispatch({ type: 'sessionResumeConfirmClear' });
-          dispatch({ type: 'sessionsPanelBusy', on: true });
-          onResumeSession?.(pending.sessionId).then((result) => {
-            if (!result) {
-              dispatch({ type: 'sessionsPanelBusy', on: false });
-              return;
-            }
-            dispatch({ type: 'replaceHistory', entries: result.entries, nextId: result.nextId });
-            dispatch({ type: 'toggleSessionsPanel' });
-            dispatch({
-              type: 'addEntry',
-              entry: {
-                kind: 'info',
-                text: `Resumed session ${result.sessionId} — ${result.entries.length} entries replayed.`,
-              },
-            });
-          }).catch(() => {
-            dispatch({ type: 'sessionsPanelBusy', on: false });
-          });
-          return;
-        }
-
-        const sessions = state.sessionsPanel.sessions;
-        const sel = state.sessionsPanel.selected;
-        if (sel < 0 || sel >= sessions.length) return;
-        const session = sessions[sel];
-        if (!session) return;
-
-        // Determine if same project (in-process resume) or different project
-        // (clean exit + respawn in the target root, like the F1 switch).
-        const isCurrentProject = session.projectRoot === projectRoot;
-        if (isCurrentProject) {
-          // The F10 list shows LIVE sessions — guard before offering resume.
-          if (session.pid === process.pid) {
-            dispatch({
-              type: 'addEntry',
-              entry: { kind: 'info', text: 'That is this session — nothing to resume.' },
-            });
-            dispatch({ type: 'toggleSessionsPanel' });
-            return;
-          }
-          if (session.pid != null) {
-            dispatch({
-              type: 'addEntry',
-              entry: {
-                kind: 'warn',
-                text: `Session is open in another running wstack (pid ${session.pid}) — a live session cannot be resumed here. Use /resume for previous sessions.`,
-              },
-            });
-            dispatch({ type: 'toggleSessionsPanel' });
-            return;
-          }
-          // First Enter — show confirmation
-          dispatch({
-            type: 'sessionResumeConfirmSet',
-            sessionId: session.sessionId,
-            sessionName: session.projectName,
-          });
-        } else {
-          // Different project — record the pending switch, then exit cleanly
-          // with the project-switch code so the host respawns wstack in the
-          // target project (resuming the chosen session).
-          onSwitchToSession?.(session.sessionId, session.projectRoot ?? '', session.projectName);
-          dispatch({ type: 'toggleSessionsPanel' });
-          requestExit?.(42);
-        }
-        return;
-      }
-      return;
-    }
-
-    if (state.slashPicker.open) {
-      if (key.escape) {
-        dispatch({ type: 'slashPickerClose' });
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'slashPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'slashPickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'slashPickerMove', delta: 1 });
-        return;
-      }
-      if (isEnter) {
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        inputGateRef.current = true;
-        const line = selectedSlashCommandLine(state.slashPicker);
-        if (line) {
-          void submit(line);
-        } else {
-          acceptSlashPickerSelection();
-        }
-        inputGateRef.current = false;
-        return;
-      }
-      // Tab → autocomplete with selected command
-      if (key.tab && state.slashPicker.matches.length > 0) {
-        const sel = state.slashPicker.matches[state.slashPicker.selected];
-        if (sel) {
-          setDraft(`/${sel.name} `, sel.name.length + 2);
-          dispatch({ type: 'slashPickerClose' });
-        }
-        return;
-      }
-      // Any other key falls through to normal text handling.
-    }
-
-    // F-key panel picker — keyboard navigation
-    if (state.fKeyPicker.open) {
-      if (key.escape) {
-        dispatch({ type: 'fKeyPickerClose' });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'fKeyPickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'fKeyPickerMove', delta: 1 });
-        return;
-      }
-      if (isEnter) {
-        const selected = state.fKeyPicker.selected;
-        const entry = F_KEY_ENTRIES[selected];
-        if (!entry) return;
-        dispatch({ type: 'fKeyPickerClose' });
-        if (entry.action === 'projectPickerOpen') {
-          openProjectPicker();
-          return;
-        }
-        const action = actionForFKeyPanel(entry, statuslineHiddenForPicker());
-        if (action) dispatch(action);
-        return;
-      }
-      return;
-    }
-
-    // Picker takes precedence over normal input handling when open.
-    if (state.picker.open) {
-      if (key.escape) {
-        dispatch({ type: 'pickerClose' });
-        return;
-      }
-      if (key.mouse?.kind === 'wheel') {
-        dispatch({ type: 'pickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
-        return;
-      }
-      if (key.upArrow) {
-        dispatch({ type: 'pickerMove', delta: -1 });
-        return;
-      }
-      if (key.downArrow) {
-        dispatch({ type: 'pickerMove', delta: 1 });
-        return;
-      }
-      if (isEnter) {
-        // Debounce \r\n double-event from terminals that emit Enter as two stdin reads.
-        const now = Date.now();
-        if (now - lastEnterAtRef.current < 50) return;
-        lastEnterAtRef.current = now;
-        inputGateRef.current = true;
-        try {
-          await acceptPickerSelection();
-        } finally {
-          inputGateRef.current = false;
-        }
-        return;
-      }
-      // Any other key falls through to normal text handling, which will
-      // either extend the @-query (e.g. typing more chars) or break it
-      // (e.g. typing a space) — handled below.
-    }
+    // All picker dispatch is delegated to the usePickerKeys hook.
+    // The hook handles Esc (close), ↑/↓ (navigate), wheel (scroll),
+    // Enter (confirm), and picker-specific keys (search, filter, Tab).
+    // If no picker is open the hook returns false immediately.
+    if (tryPickerKey(input, key, isEnter)) return;
 
     // Esc when the agent is busy = "drop what you're doing, I want to
     // steer". Aborts the current iteration, terminates any running
@@ -6675,6 +6163,7 @@ export function App({
 
     await runBlocks(blocks);
   };
+  submitRef.current = submit;
 
   // ─── --goal / --ask boot inject ─────────────────────────────────────
   // The CLI may pass `--goal "..."` or `--ask "..."` to pre-populate the

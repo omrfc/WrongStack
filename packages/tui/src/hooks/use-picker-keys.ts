@@ -6,54 +6,53 @@
  * falls through (returning `false`). The hook returns a single function
  * `tryPickerKey(input, key, isEnter)` that the caller's `handleKey` invokes
  * *before* its non-picker dispatch and bails on `true`.
- *
- * Currently handles the **Model picker** (two-step: provider → model).
- * Other pickers (autonomy, resume, settings, slash, file) are still
- * inlined in `handleKey` — they're good candidates for follow-up
- * extractions in the same pattern.
  */
 
 import { useCallback } from 'react';
 import type { Action, State } from '../app-reducer.js';
 import type { KeyEvent } from '../components/input.js';
+import { settingsPickerJumpField } from '../components/settings-picker.js';
+import { STATUSLINE_ITEMS } from '../components/statusline-picker.js';
 
 export interface PickerKeysHost {
-  /** Live reducer state. The picker is identified by `state.modelPicker.open`. */
   state: State;
-  /** Reducer dispatch. */
   dispatch: React.Dispatch<Action>;
-  /** Agent context `maxContext` — read after a successful model switch. */
-  agentCtxMaxContext: number;
-  /** Ref-like double-tap debounce for Enter (avoids \\r\\n double-submits). */
-  lastEnterAtRef: { current: number } | React.RefObject<number>;
-  /** Ref-like re-entrancy guard for input handling. */
-  inputGateRef: { current: boolean } | React.RefObject<boolean>;
-  /** Live model switch. Returns `null`/`undefined` on success or a hint string. */
+  lastEnterAtRef: { current: number };
+  inputGateRef: { current: boolean };
+
   switchProviderAndModel:
     | ((providerId: string, modelId: string) => string | null | Promise<string | null>)
     | undefined;
-  /** Setter for the live provider mirror (status bar). Accepts the wider
-   *  `Dispatch<SetStateAction<string>>` shape so the React state setters
-   *  the caller already has can be passed directly without wrapping. */
   setLiveProvider: React.Dispatch<React.SetStateAction<string>> | undefined;
-  /** Setter for the live model mirror (status bar). */
   setLiveModel: React.Dispatch<React.SetStateAction<string>> | undefined;
-  /** Setter for the active max context (status bar context chip). */
   setActiveMaxContext: React.Dispatch<React.SetStateAction<number | undefined>> | undefined;
+  agentCtxMaxContext: number;
+
+  switchAutonomy: ((mode: string) => string | null) | undefined;
+  submit: ((text: string) => void) | undefined;
+
+  onPromptPickerEnter: (() => void) | undefined;
+  onResumePickerEnter: (() => Promise<void>) | undefined;
+  onSessionsPanelEnter: (() => Promise<void>) | undefined;
+  onProjectPickerEnter: (() => Promise<void>) | undefined;
+  onSlashPickerEnter: (() => void) | undefined;
+  onSettingsPickerEnter: (() => void) | undefined;
+  onFKeyPickerEnter: (() => void) | undefined;
+  onPickerEnter: (() => Promise<void>) | undefined;
+
+  setDraft: ((buffer: string, cursor: number) => void) | undefined;
+  onSlashPickerTab: (() => void) | undefined;
 }
 
 const ENTER_DOUBLE_TAP_MS = 50;
 
-/**
- * Try to dispatch the key against any open picker. Returns `true` if a picker
- * handled the key (caller MUST stop dispatching), `false` otherwise.
- *
- * `isEnter` is passed per-call (not via the hook) because it is derived from
- * `key.return || input === '\r' || input === '\n' || clickConfirm` and the
- * latter two are recomputed inside `handleKey` from the current picker-open
- * state. The hook holds the *stable* host bits; the per-call bits stay in
- * `handleKey`.
- */
+function debouncedEnter(host: PickerKeysHost): boolean {
+  const now = Date.now();
+  if (now - host.lastEnterAtRef.current < ENTER_DOUBLE_TAP_MS) return true;
+  host.lastEnterAtRef.current = now;
+  return false;
+}
+
 export function usePickerKeys(
   host: PickerKeysHost,
 ): (input: string, key: KeyEvent, isEnter: boolean) => boolean {
@@ -83,12 +82,10 @@ export function usePickerKeys(
           dispatch({ type: 'modelPickerMove', delta: 1 });
           return true;
         }
-        // Step 2: type-to-search — printable characters append to the filter.
         if (state.modelPicker.step === 'model' && input && !key.return && !key.backspace) {
           dispatch({ type: 'modelPickerSearch', query: state.modelPicker.searchQuery + input });
           return true;
         }
-        // Step 2: Backspace — delete last char from filter, or go back if empty.
         if (state.modelPicker.step === 'model' && key.backspace) {
           const q = state.modelPicker.searchQuery;
           if (q.length > 0) {
@@ -99,10 +96,7 @@ export function usePickerKeys(
           return true;
         }
         if (isEnter) {
-          // Debounce \r\n double-event from terminals that emit Enter as two stdin reads.
-          const now = Date.now();
-          if (now - host.lastEnterAtRef.current < ENTER_DOUBLE_TAP_MS) return true;
-          host.lastEnterAtRef.current = now;
+          if (debouncedEnter(host)) return true;
           host.inputGateRef.current = true;
           try {
             if (state.modelPicker.step === 'provider') {
@@ -115,7 +109,6 @@ export function usePickerKeys(
               });
               return true;
             }
-            // step === 'model' → commit the switch (use filteredOptions for selected model)
             const providerId = state.modelPicker.pickedProviderId;
             const modelId = state.modelPicker.filteredOptions[state.modelPicker.selected];
             if (!providerId || !modelId) return true;
@@ -146,8 +139,424 @@ export function usePickerKeys(
             host.inputGateRef.current = false;
           }
         }
-        // Any other key while picker is open: ignore.
         return true;
+      }
+
+      // ── Autonomy picker ───────────────────────────────────────
+      if (state.autonomyPicker.open) {
+        if (key.escape) {
+          dispatch({ type: 'autonomyPickerClose' });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'autonomyPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'autonomyPickerMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'autonomyPickerMove', delta: 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          const opt = state.autonomyPicker.options[state.autonomyPicker.selected];
+          if (!opt) return true;
+          const err = host.switchAutonomy?.(opt.mode);
+          if (err) {
+            dispatch({ type: 'autonomyPickerHint', text: err });
+            return true;
+          }
+          dispatch({ type: 'autonomyPickerClose' });
+          return true;
+        }
+        return true;
+      }
+
+      // ── Design picker ─────────────────────────────────────────
+      if (state.designPicker.open) {
+        if (key.escape) {
+          dispatch({ type: 'designPickerClose' });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'designPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'designPickerMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'designPickerMove', delta: 1 });
+          return true;
+        }
+        if (key.leftArrow || key.rightArrow) {
+          const stacks = ['web', 'react-native', 'flutter', 'swiftui', 'compose'];
+          const cur = stacks.indexOf(state.designPicker.stack);
+          const delta = key.rightArrow ? 1 : -1;
+          const next = stacks[(cur + delta + stacks.length) % stacks.length] ?? 'web';
+          dispatch({ type: 'designPickerStack', stack: next });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          const kit = state.designPicker.kits[state.designPicker.selected];
+          const stack = state.designPicker.stack;
+          dispatch({ type: 'designPickerClose' });
+          if (kit) host.submit?.(`/design ${kit.id} ${stack}`);
+          return true;
+        }
+        return true;
+      }
+
+      // ── Prompt picker ──────────────────────────────────────────
+      if (state.promptPicker.open) {
+        if (key.escape) {
+          dispatch({ type: 'promptPickerClose' });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'promptPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'promptPickerMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'promptPickerMove', delta: 1 });
+          return true;
+        }
+        if (key.leftArrow) {
+          dispatch({ type: 'promptPickerCategory', delta: -1 });
+          return true;
+        }
+        if (key.rightArrow) {
+          dispatch({ type: 'promptPickerCategory', delta: 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          host.onPromptPickerEnter?.();
+          return true;
+        }
+        return true;
+      }
+
+      // ── Resume picker ─────────────────────────────────────────
+      if (state.resumePicker.open) {
+        if (key.escape) {
+          dispatch({ type: 'resumePickerClose' });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'resumePickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'resumePickerMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'resumePickerMove', delta: 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          host.inputGateRef.current = true;
+          try {
+            if (!state.resumePicker.busy) {
+              void host.onResumePickerEnter?.();
+            }
+          } finally {
+            host.inputGateRef.current = false;
+          }
+          return true;
+        }
+        return true;
+      }
+
+      // ── Settings picker ───────────────────────────────────────
+      if (state.settingsPicker.open) {
+        const sp = state.settingsPicker;
+        if (sp.thinkingWordEditing) {
+          if (key.escape) {
+            dispatch({ type: 'settingsThinkingEditCancel' });
+            return true;
+          }
+          if (isEnter) {
+            if (debouncedEnter(host)) return true;
+            dispatch({ type: 'settingsThinkingEditCommit' });
+            return true;
+          }
+          if (key.backspace) {
+            dispatch({ type: 'settingsThinkingEditChange', draft: sp.thinkingWordDraft.slice(0, -1) });
+            return true;
+          }
+          if (input && input.length === 1 && input.charCodeAt(0) >= 0x20 && input.charCodeAt(0) < 0x7f) {
+            dispatch({ type: 'settingsThinkingEditChange', draft: sp.thinkingWordDraft + input });
+            return true;
+          }
+          return true;
+        }
+        if (key.escape || (key.ctrl && input === 's')) {
+          dispatch({ type: 'settingsClose' });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'settingsFieldMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (input && input.length === 1 && (key.ctrl || key.meta)) {
+          const mod: 'ctrl' | 'alt' | 'alt-shift' = key.ctrl
+            ? 'ctrl'
+            : key.shift
+              ? 'alt-shift'
+              : 'alt';
+          const field = settingsPickerJumpField(mod, input);
+          if (field !== undefined) {
+            dispatch({ type: 'settingsFieldSet', field });
+            return true;
+          }
+        }
+        if (input === '/' && sp.filter === '') {
+          dispatch({ type: 'settingsFilterSet', filter: '/' });
+          return true;
+        }
+        if (sp.filter !== '') {
+          if (key.escape) {
+            dispatch({ type: 'settingsFilterSet', filter: '' });
+            return true;
+          }
+          if (key.backspace) {
+            const next = sp.filter.length > 1 ? sp.filter.slice(0, -1) : '';
+            dispatch({ type: 'settingsFilterSet', filter: next });
+            return true;
+          }
+          if (input && input.length === 1 && input.charCodeAt(0) >= 0x20 && input.charCodeAt(0) < 0x7f) {
+            dispatch({ type: 'settingsFilterSet', filter: sp.filter + input });
+            return true;
+          }
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'settingsFieldMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'settingsFieldMove', delta: 1 });
+          return true;
+        }
+        if (key.leftArrow) {
+          dispatch({ type: 'settingsValueChange', delta: -1 });
+          return true;
+        }
+        if (key.rightArrow) {
+          dispatch({ type: 'settingsValueChange', delta: 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          host.onSettingsPickerEnter?.();
+          return true;
+        }
+        return true;
+      }
+
+      // ── Statusline picker ─────────────────────────────────────
+      if (state.statuslinePicker.open) {
+        if (key.escape) {
+          dispatch({ type: 'statuslineClose' });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'statuslineFieldMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'statuslineFieldMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'statuslineFieldMove', delta: 1 });
+          return true;
+        }
+        if (key.leftArrow || key.rightArrow) {
+          const focused = STATUSLINE_ITEMS[state.statuslinePicker.field];
+          if (focused) {
+            dispatch({ type: 'statuslineToggle', item: focused });
+          }
+          return true;
+        }
+        return true;
+      }
+
+      // ── Project picker ────────────────────────────────────────
+      if (state.projectPicker.open) {
+        if (key.escape) {
+          if (state.projectPicker.filter) {
+            dispatch({ type: 'projectPickerFilter', filter: '' });
+          } else {
+            dispatch({ type: 'projectPickerClose' });
+          }
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'projectPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'projectPickerMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'projectPickerMove', delta: 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          host.inputGateRef.current = true;
+          try {
+            void host.onProjectPickerEnter?.();
+          } finally {
+            host.inputGateRef.current = false;
+          }
+          return true;
+        }
+        if (input && input.length === 1 && input.charCodeAt(0) >= 0x20 && input.charCodeAt(0) < 0x7f) {
+          dispatch({ type: 'projectPickerFilter', filter: state.projectPicker.filter + input });
+          return true;
+        }
+        if (key.backspace) {
+          if (state.projectPicker.filter.length > 0) {
+            dispatch({
+              type: 'projectPickerFilter',
+              filter: state.projectPicker.filter.slice(0, -1),
+            });
+          }
+          return true;
+        }
+        return true;
+      }
+
+      // ── Sessions panel ────────────────────────────────────────
+      if (state.sessionsPanelOpen) {
+        if (key.escape) {
+          if (state.sessionResumeConfirm) {
+            dispatch({ type: 'sessionResumeConfirmClear' });
+          } else {
+            dispatch({ type: 'toggleSessionsPanel' });
+          }
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'sessionsPanelMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'sessionsPanelMove', delta: 1 });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'sessionsPanelMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          void host.onSessionsPanelEnter?.();
+          return true;
+        }
+        return true;
+      }
+
+      // ── Slash picker ─────────────────────────────────────────
+      if (state.slashPicker.open) {
+        if (key.escape) {
+          dispatch({ type: 'slashPickerClose' });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'slashPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'slashPickerMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'slashPickerMove', delta: 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          host.inputGateRef.current = true;
+          try {
+            host.onSlashPickerEnter?.();
+          } finally {
+            host.inputGateRef.current = false;
+          }
+          return true;
+        }
+        if (key.tab && state.slashPicker.matches.length > 0) {
+          host.onSlashPickerTab?.();
+          return true;
+        }
+        return false;
+      }
+
+      // ── F-key panel picker ─────────────────────────────────────
+      if (state.fKeyPicker.open) {
+        if (key.escape) {
+          dispatch({ type: 'fKeyPickerClose' });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'fKeyPickerMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'fKeyPickerMove', delta: 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          host.onFKeyPickerEnter?.();
+          return true;
+        }
+        return true;
+      }
+
+      // ── General picker ─────────────────────────────────────────
+      if (state.picker.open) {
+        if (key.escape) {
+          dispatch({ type: 'pickerClose' });
+          return true;
+        }
+        if (key.mouse?.kind === 'wheel') {
+          dispatch({ type: 'pickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+          return true;
+        }
+        if (key.upArrow) {
+          dispatch({ type: 'pickerMove', delta: -1 });
+          return true;
+        }
+        if (key.downArrow) {
+          dispatch({ type: 'pickerMove', delta: 1 });
+          return true;
+        }
+        if (isEnter) {
+          if (debouncedEnter(host)) return true;
+          host.inputGateRef.current = true;
+          try {
+            void host.onPickerEnter?.();
+          } finally {
+            host.inputGateRef.current = false;
+          }
+          return true;
+        }
+        return false;
       }
 
       return false;
