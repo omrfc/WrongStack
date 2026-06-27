@@ -897,6 +897,8 @@ export async function main(argv: string[]): Promise<number> {
     config,
     confirmAwaiter: makeConfirmAwaiter(reader),
     hookRunner,
+    fullConfig: config,
+    source: 'cli',
   });
 
   // SessionStart / Stop lifecycle hooks (PreToolUse/PostToolUse live in the
