@@ -25,8 +25,10 @@ import { wstackGlobalRoot } from '../utils/wstack-paths.js';
 export class ToolExecutor {
   /** Minimum gap between coalesced `partial_output` tool.progress emits. */
   static readonly PROGRESS_EMIT_INTERVAL_MS = 100;
-  /** Max chars of accumulated stream text carried per coalesced emit. */
+  /** Max chars of accumulated stream text carried per coalesced emit (tail). */
   static readonly PROGRESS_TAIL_CHARS = 16_384;
+  /** Max chars of the head (beginning of output) kept alongside the tail. */
+  static readonly PROGRESS_HEAD_CHARS = 16_384;
 
   private readonly serializer;
   private readonly iterationTimeoutMs: number;
@@ -508,15 +510,17 @@ export class ToolExecutor {
     // break of a for-await-of loop.
     const iter = stream[Symbol.asyncIterator]();
     // Coalesce `partial_output` progress into at most one EventBus emit per
-    // PROGRESS_EMIT_INTERVAL_MS, carrying only the most recent
-    // PROGRESS_TAIL_CHARS of accumulated text. A chatty child process (a test
-    // suite or build spewing ANSI progress) can stream hundreds of MB per
-    // minute through executeStream; emitting every flush as its own event
-    // floods every bus subscriber (TUI render per dispatch, session bridge,
-    // WebUI broadcast) and has OOM'd the host. The live tail only ever shows
-    // the last few KB, so coalescing loses nothing the UI can display —
-    // the tool's own capped `final` output is unaffected.
+    // PROGRESS_EMIT_INTERVAL_MS, carrying the most recent PROGRESS_TAIL_CHARS
+    // of accumulated text PLUS the first PROGRESS_HEAD_CHARS (the head).
+    // P3 #22 (before-release.md): without the head, an important error
+    // message at the beginning of a long output (e.g. `pnpm build`) was
+    // gone by the time the user saw the live tail. Now both the head and
+    // tail survive — when the output exceeds the combined buffer, the flush
+    // emits "head...\n[...truncated...]\n...tail" so subscribers see both
+    // ends.
     let progressTail = '';
+    let progressHead = '';
+    let headComplete = false;
     let lastProgressEmitAt = 0;
     const emitProgress = (ev: ToolProgressEvent) => {
       this.opts.events?.emit('tool.progress', {
@@ -526,12 +530,20 @@ export class ToolExecutor {
       });
     };
     const flushProgressTail = (force: boolean) => {
-      if (progressTail.length === 0) return;
+      if (progressTail.length === 0 && progressHead.length === 0) return;
       const now = Date.now();
       if (!force && now - lastProgressEmitAt < ToolExecutor.PROGRESS_EMIT_INTERVAL_MS) return;
-      const text = progressTail;
-      progressTail = '';
       lastProgressEmitAt = now;
+      // Combine head + tail. When the head is full and there's tail content,
+      // the output was truncated in the middle — join them with a truncation
+      // marker so the subscriber can show "First N chars ... Last M chars".
+      let text: string;
+      if (headComplete && progressTail.length > 0) {
+        text = `${progressHead}\n[...output truncated...]\n${progressTail}`;
+      } else {
+        text = progressHead + progressTail;
+      }
+      progressTail = '';
       emitProgress({ type: 'partial_output', text });
     };
     try {
@@ -545,9 +557,30 @@ export class ToolExecutor {
           break;
         }
         if (ev.type === 'partial_output' && typeof ev.text === 'string') {
-          progressTail += ev.text;
-          if (progressTail.length > ToolExecutor.PROGRESS_TAIL_CHARS) {
-            progressTail = progressTail.slice(-ToolExecutor.PROGRESS_TAIL_CHARS);
+          // P3 #22: fill the head buffer first, then the tail. This keeps
+          // both the beginning and end of long output available for the
+          // live progress view.
+          if (!headComplete) {
+            const remaining = ToolExecutor.PROGRESS_HEAD_CHARS - progressHead.length;
+            if (ev.text.length <= remaining) {
+              progressHead += ev.text;
+            } else {
+              progressHead += ev.text.slice(0, remaining);
+              headComplete = true;
+              // Spill the rest into the tail.
+              const overflow = ev.text.slice(remaining);
+              if (overflow) {
+                progressTail += overflow;
+                if (progressTail.length > ToolExecutor.PROGRESS_TAIL_CHARS) {
+                  progressTail = progressTail.slice(-ToolExecutor.PROGRESS_TAIL_CHARS);
+                }
+              }
+            }
+          } else {
+            progressTail += ev.text;
+            if (progressTail.length > ToolExecutor.PROGRESS_TAIL_CHARS) {
+              progressTail = progressTail.slice(-ToolExecutor.PROGRESS_TAIL_CHARS);
+            }
           }
           flushProgressTail(false);
           continue;
