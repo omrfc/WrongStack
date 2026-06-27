@@ -122,6 +122,10 @@ export async function setupTools(params: ToolsWiringDeps): Promise<ToolsWiringRe
     toolRegistry.register(relatedMemoryTool(memoryStore));
   }
   applyToolDescriptionModes(toolRegistry, config.tools?.descriptionMode);
+  // Apply disabled tools from config
+  if (config.tools?.disabledTools) {
+    toolRegistry.applyDisabled(config.tools.disabledTools);
+  }
 
   // Mode store
   const modeStore = new DefaultModeStore({ directory: wpaths.configDir });

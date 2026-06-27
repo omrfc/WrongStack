@@ -139,6 +139,24 @@ export function InspectorPanel() {
               </span>
             </>
           )}
+          {/* Side-effect count — clickable to jump to Audit tab */}
+          {sideEffectCount > 0 && (
+            <>
+              <span className="opacity-40">·</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInspectorOpen(true);
+                  setInspectorTab('sideEffects');
+                }}
+                className="flex items-center gap-1 text-yellow-500 hover:text-yellow-400 transition-colors"
+                title="Open Audit tab"
+              >
+                <Activity className="h-3 w-3" />
+                <span className="tabular-nums">{sideEffectCount}</span>
+              </button>
+            </>
+          )}
         </span>
         <span className="flex items-center gap-1 shrink-0 opacity-70 group-hover:opacity-100">
           <Bot className="h-3 w-3" />

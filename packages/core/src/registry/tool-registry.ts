@@ -33,6 +33,12 @@ export type ToolWrapper = (tool: Tool) => Tool;
 export class ToolRegistry {
   private readonly tools = new Map<string, { tool: Tool; owner: string }>();
   private readonly descriptionModes = new Map<string, ToolDescriptionMode>();
+  /**
+   * Set of tool names that are disabled (hidden from list(), get() and all
+   * other public accessors). The underlying tool data stays in `_tools` so
+   * re-enable is a constant-time operation.
+   */
+  private readonly _disabled = new Set<string>();
   /** Monotonic version bumped on every registry mutation. */
   private _version = 0;
   /** Cached `list()` result, frozen after build. Invalidated on _version change. */
@@ -46,6 +52,7 @@ export class ToolRegistry {
     }
   }
 
+  /** Apply the description mode transform and stamp token estimates. */
   private _prepareForStorage(tool: Tool): Tool {
     const mode = this.descriptionModes.get(tool.name) ?? 'extend';
     return applyToolDescriptionModeToTool(tool, mode);
@@ -226,6 +233,7 @@ export class ToolRegistry {
   }
 
   get(name: string): Tool | undefined {
+    if (this._disabled.has(name)) return undefined;
     return this.tools.get(name)?.tool;
   }
 
@@ -233,11 +241,92 @@ export class ToolRegistry {
     return this.tools.get(name)?.owner;
   }
 
+  // ── Disable / enable ────────────────────────────────────────────
+
+  /**
+   * Disable a tool by name. The tool is removed from all public accessors
+   * (list(), get(), listByCategory(), listWithOwner()) so it does NOT
+   * appear in the system prompt or provider request. The underlying
+   * registration is preserved in memory — use `enable()` to restore it.
+   *
+   * @returns `true` if the tool was found and disabled; `false` if the
+   *          tool is not registered or is already disabled.
+   */
+  disable(name: string): boolean {
+    if (!this.tools.has(name) || this._disabled.has(name)) return false;
+    this._disabled.add(name);
+    this._version++;
+    return true;
+  }
+
+  /**
+   * Re-enable a previously disabled tool. The tool reappears in all
+   * public accessors and will be included in the next system prompt /
+   * provider request.
+   *
+   * @returns `true` if the tool was disabled and is now re-enabled;
+   *          `false` if the tool was not disabled.
+   */
+  enable(name: string): boolean {
+    if (!this._disabled.has(name)) return false;
+    this._disabled.delete(name);
+    this._version++;
+    return true;
+  }
+
+  /**
+   * Re-enable ALL currently disabled tools at once. Returns the number
+   * of tools that were re-enabled.
+   */
+  enableAll(): number {
+    const count = this._disabled.size;
+    if (count === 0) return 0;
+    this._disabled.clear();
+    this._version++;
+    return count;
+  }
+
+  /**
+   * Check whether a tool is currently disabled.
+   */
+  isDisabled(name: string): boolean {
+    return this._disabled.has(name);
+  }
+
+  /**
+   * Apply a list of tool names to disable. Tools not in the registry
+   * are silently ignored so config can reference future tools without
+   * error. Returns the number of tools actually disabled.
+   */
+  applyDisabled(names: readonly string[]): number {
+    let count = 0;
+    for (const name of names) {
+      if (this.disable(name)) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Return the list of all disabled tool entries (tool + owner). Useful
+   * for the /tools slash command to show disabled tools alongside
+   * enabled ones.
+   */
+  listDisabled(): { tool: Tool; owner: string }[] {
+    return Array.from(this._disabled)
+      .map((name) => {
+        const entry = this.tools.get(name);
+        return entry ? { tool: entry.tool, owner: entry.owner } : null;
+      })
+      .filter((e): e is { tool: Tool; owner: string } => e !== null);
+  }
+
   list(): Tool[] {
     if (this._listSnapshot && this._version === this._listSnapshotVersion) {
       return this._listSnapshot as Tool[];
     }
-    const arr = Array.from(this.tools.values()).map((e) => e.tool);
+    const arr = Array.from(this.tools.entries())
+      .filter(([name]) => !this._disabled.has(name))
+      .map(([, entry]) => entry.tool);
     this._listSnapshot = arr;
     this._listSnapshotVersion = this._version;
     return arr;
@@ -250,7 +339,8 @@ export class ToolRegistry {
    */
   listByCategory(): Map<string, Tool[]> {
     const map = new Map<string, Tool[]>();
-    for (const { tool } of this.tools.values()) {
+    for (const [name, { tool }] of this.tools) {
+      if (this._disabled.has(name)) continue;
       const cat = tool.category ?? '';
       let group = map.get(cat);
       if (!group) {
@@ -263,12 +353,15 @@ export class ToolRegistry {
   }
 
   listWithOwner(): { tool: Tool; owner: string }[] {
-    return Array.from(this.tools.values());
+    return Array.from(this.tools.entries())
+      .filter(([name]) => !this._disabled.has(name))
+      .map(([, entry]) => entry);
   }
 
   clear(): void {
     this.tools.clear();
     this.descriptionModes.clear();
+    this._disabled.clear();
     this._version++;
   }
 
@@ -278,10 +371,20 @@ export class ToolRegistry {
    */
   clone(): ToolRegistry {
     const copy = new ToolRegistry();
+    copy.descriptionModes.clear();
     for (const [name, mode] of this.descriptionModes) {
       copy.descriptionModes.set(name, mode);
     }
-    for (const { tool, owner } of this.listWithOwner()) copy.register(tool, owner);
+    // Re-register all tools (including disabled ones — they need to be in
+    // the copy's _tools map to be re-enableable later).
+    for (const [name, { tool, owner }] of this.tools) {
+      copy.tools.set(name, { tool, owner });
+    }
+    // Copy the disabled set so the clone has the same visibility state.
+    for (const name of this._disabled) {
+      copy._disabled.add(name);
+    }
+    copy._version = this._version;
     return copy;
   }
 }

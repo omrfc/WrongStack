@@ -56,6 +56,7 @@ export interface RegisterBuiltinToolsDeps {
     tools?:
       | {
           descriptionMode?: ToolDescriptionModeConfig | undefined;
+          disabledTools?: string[] | undefined;
           exec?: { allow?: string[] | undefined; deny?: string[] | undefined } | undefined;
         }
       | undefined;
@@ -139,6 +140,13 @@ export function registerBuiltinTools(deps: RegisterBuiltinToolsDeps): void {
     makeMailInboxTool({ projectDir: deps.wpaths.projectDir, events: deps.events }),
   );
   applyToolDescriptionModes(deps.toolRegistry, deps.config.tools?.descriptionMode);
+  // Apply disabled tools from config. Tools not yet registered are silently
+  // skipped — the registry's disable() returns false for unknown names, which
+  // is fine: the tool will be registered later (e.g. MCP / plugin tools) and
+  // we apply the disabled list after every registration batch anyway.
+  if (deps.config.tools?.disabledTools) {
+    deps.toolRegistry.applyDisabled(deps.config.tools.disabledTools);
+  }
   // Apply the configured exec command policy (DEFAULT ∪ allow − deny). `allow`
   // is trusted-config-only — the config loader strips `tools.exec.allow` from
   // any in-project repo config before this point.

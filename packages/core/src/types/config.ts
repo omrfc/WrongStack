@@ -244,6 +244,14 @@ export interface ToolsConfig {
    */
   descriptionMode?: ToolDescriptionModeConfig | undefined;
   /**
+   * Tool names to disable. Disabled tools are excluded from the tool registry
+   * (`ToolRegistry.list()` / `get()`), so they do NOT appear in the system
+   * prompt's "## Tool usage" block — reducing per-request token consumption.
+   * Override per-session with `/tool enable <name>` or re-enable all via
+   * `/tool enable-all`.
+   */
+  disabledTools?: string[] | undefined;
+  /**
    * When true (default), the agent automatically extends its iteration
    * limit by 100 when hit. Set to false to require user confirmation.
    */

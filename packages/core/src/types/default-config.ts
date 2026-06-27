@@ -11,6 +11,7 @@ export const DEFAULT_TOOLS_CONFIG = Object.freeze({
   sessionTimeoutMs: 1_800_000,
   perIterationOutputCapBytes: 100_000,
   descriptionMode: Object.freeze({}) as Record<string, 'extend' | 'simple' | undefined>,
+  disabledTools: Object.freeze([]) as readonly string[],
   autoExtendLimit: true,
   restrictToProjectRoot: false,
 });

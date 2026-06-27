@@ -296,23 +296,23 @@ export function DiffBlock({
         const bg = row.kind === 'add' ? theme.diffAddBg : theme.diffDelBg;
         const lineColor = row.kind === 'add' ? theme.success : theme.error;
         const marker = markerFor(row.kind);
+        const text = textForDisplay(row);
+        // Ink's <Text> does NOT support backgroundColor — only <Box> does.
+        // We wrap the entire line in a <Box> with the background color so
+        // added lines show a soft pastel green wash and removed lines show
+        // a soft pastel red wash, making the diff scannable at a glance.
+        const gutter = `${oldLn} ${newLn}`;
         return (
-          <Text key={key}>
-            <Text color={row.kind === 'del' ? lineColor : undefined} dimColor={row.kind !== 'del'}>
-              {oldLn}
+          <Box key={key} backgroundColor={bg} minWidth={1} flexShrink={0}>
+            <Text>
+              <Text dimColor>{gutter}</Text>
+              <Text>{' '}</Text>
+              <Text color={lineColor} bold>
+                {marker}
+              </Text>
+              <Text color="black">{text}</Text>
             </Text>
-            <Text dimColor>{' '}</Text>
-            <Text color={row.kind === 'add' ? lineColor : undefined} dimColor={row.kind !== 'add'}>
-              {newLn}
-            </Text>
-            <Text>{' '}</Text>
-            <Text color={lineColor} bold>
-              {marker}
-            </Text>
-            <Text backgroundColor={bg} color="black">
-              {textForDisplay(row)}
-            </Text>
-          </Text>
+          </Box>
         );
       })}
       {hidden > 0 ? (
