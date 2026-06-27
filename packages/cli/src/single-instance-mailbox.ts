@@ -115,6 +115,12 @@ export async function acquireOrJoin(
   // cleanup. This way the generation counter survives across
   // acquire→release→reacquire cycles — only an owner restart bumps
   // it.
+  //
+  // acquireOrJoin is the ONLY caller that wants the stale lock
+  // unlinked (the next acquire needs a clean slate). readLiveLock
+  // also calls this classifier but MUST NOT unlink — it just reports
+  // liveness for the caller. So we classify here and do the cleanup
+  // explicitly below.
   const inspected = await readLockForInspection(lockPath);
   if (inspected.kind === 'live') {
     const existing = inspected.lock;
@@ -125,6 +131,11 @@ export async function acquireOrJoin(
   }
   // inspected.kind === 'absent' | 'stale' — either way, we may
   // acquire. `generation` is read off the live lock (stale → 1).
+  // We're claiming the slot now, so unlink any stale lock first so
+  // a concurrent reader doesn't race against our rename below.
+  if (inspected.kind === 'stale') {
+    await fsp.unlink(lockPath).catch(() => undefined);
+  }
   const generation = inspected.kind === 'stale'
     ? inspected.lock.generation + 1
     : 1;
@@ -211,23 +222,21 @@ type LockInspection =
 /**
  * Read the lock file once and classify it as live / stale / absent.
  *
- * Single read + single parse, so the generation counter survives
- * even when we decide to clean up a stale lock — the caller reads
- * `lock.generation` off the inspected record and increments it
- * themselves. Calling readLockIfLive + nextGeneration separately
- * loses this property because the first call unlinks a stale lock
- * before the second one reads it.
+ * **Side-effect free** — does NOT unlink the lock file on stale or
+ * malformed JSON. Callers that want cleanup do it themselves after
+ * they decide what to do (acquireOrJoin unlinks so its rename can
+ * claim the slot atomically; readLiveLock never unlinks because it
+ * only reports).
  *
- * Side effects:
- *  - 'live' / 'stale': the JSON parsed successfully
- *  - 'stale': the lock file is unlinked (best-effort) so the next
- *    acquire finds a clean slate
- *  - 'absent': no lock file existed (or it was malformed JSON, also
- *    cleaned up best-effort)
+ * The only filesystem writes this function performs are best-effort
+ * unlinks of a MALFORMED lock (so the next acquire starts fresh) —
+ * these can't lose data because there's no usable lock to preserve.
+ * Stale-but-parseable locks are preserved so the caller can read the
+ * generation counter off them.
  *
  * The healthz probe runs only for the 'live' branch (a reused PID
- * would otherwise fool us). Stale-PID cleanup doesn't bother probing
- * because the PID is already gone.
+ * would otherwise fool us). Stale-PID detection doesn't bother
+ * probing because the PID is already gone.
  */
 async function readLockForInspection(lockPath: string): Promise<LockInspection> {
   let raw: string;
@@ -240,11 +249,14 @@ async function readLockForInspection(lockPath: string): Promise<LockInspection> 
   try {
     parsed = JSON.parse(raw) as MailboxBridgeLock;
   } catch {
+    // Malformed JSON — no usable data to preserve, safe to unlink so
+    // the next acquire starts fresh. We don't lose anything here.
     await fsp.unlink(lockPath).catch(() => undefined);
     return { kind: 'absent' };
   }
   if (!isProcessAlive(parsed.pid)) {
-    await fsp.unlink(lockPath).catch(() => undefined);
+    // Stale PID — keep the data so callers (acquireOrJoin) can bump
+    // generation off it; the caller decides whether to unlink.
     return { kind: 'stale', lock: parsed };
   }
   // Sanity-check the URL too — if the lock is well-formed but the
@@ -252,10 +264,44 @@ async function readLockForInspection(lockPath: string): Promise<LockInspection> 
   // a reused pid. Probe /healthz to be sure. (Best-effort — if the
   // probe fails we still trust the PID check.)
   if (!(await probeHealthz(parsed.url))) {
-    await fsp.unlink(lockPath).catch(() => undefined);
+    // PID alive but /healthz unreachable. Keep the data so the
+    // caller can surface the URL/token to the user; do NOT unlink.
     return { kind: 'stale', lock: parsed };
   }
   return { kind: 'live', lock: parsed };
+}
+
+/**
+ * Read the lock file and return it, with enough information for the
+ * caller to distinguish:
+ *  - 'live'        — PID alive, /healthz reachable; safe to use.
+ *  - 'probe-failed' — PID alive (or recently was) but /healthz
+ *                     unreachable. Caller can still return the URL
+ *                     + token to the host so its request layer can
+ *                     retry; the host's fetch timeout will surface
+ *                     the real error if the bridge is truly dead.
+ *  - 'absent'      — no lock file existed, or it was malformed
+ *                     (cleaned up best-effort).
+ *
+ * Distinguishing 'probe-failed' from 'absent' matters for the
+ * "joined vs spawned" decision in tryAcquireMailboxBridge — we
+ * don't want to spawn a second bridge just because /healthz flaked.
+ */
+export type LiveLockResult =
+  | { kind: 'live'; lock: MailboxBridgeLock }
+  | { kind: 'probe-failed'; lock: MailboxBridgeLock }
+  | { kind: 'absent' };
+
+export async function readLiveLock(projectDir: string): Promise<LiveLockResult> {
+  const lockPath = path.join(projectDir, MAILBOX_BRIDGE_LOCK_FILENAME);
+  const result = await readLockForInspection(lockPath);
+  if (result.kind === 'live') {
+    return { kind: 'live', lock: result.lock };
+  }
+  if (result.kind === 'stale') {
+    return { kind: 'probe-failed', lock: result.lock };
+  }
+  return { kind: 'absent' };
 }
 
 /**
