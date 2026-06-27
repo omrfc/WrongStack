@@ -11,6 +11,18 @@ export interface AnthropicProviderOptions {
   apiVersion?: string | undefined;
   beta?: string[] | undefined;
   fetchImpl?: typeof fetch | undefined;
+  /**
+   * Override the provider id surfaced on the `Provider` instance. Defaults to
+   * the wire-format `cfg.id` (`'anthropic'`) when omitted so direct
+   * `new AnthropicProvider({...})` callers — tests, plugins — keep their
+   * expected `id === 'anthropic'` without having to opt in.
+   *
+   * Set this when a user-visible config provider (e.g. `minimax-token-plan`
+   * with `family: 'anthropic'`) needs to keep its chosen id through the
+   * Anthropic wire family. Without it, every Anthropic-compatible proxy
+   * shows up in the status bar / provider pickers as plain `anthropic`.
+   */
+  id?: string | undefined;
   /** Raw stream debugging and hang-detection options. */
   streamOpts?: WireAdapterStreamOptions | undefined;
 }
@@ -25,7 +37,7 @@ function isAnthropicHost(baseUrl: string): boolean {
 }
 
 export class AnthropicProvider extends WireFormatProvider<AnthropicStreamState> {
-  override readonly id: string = 'anthropic';
+  override readonly id: string;
   override readonly capabilities: Capabilities = anthropicWireFormat.capabilities;
 
   private readonly opts: AnthropicProviderOptions;
@@ -37,6 +49,11 @@ export class AnthropicProvider extends WireFormatProvider<AnthropicStreamState> 
       fetchImpl: opts.fetchImpl,
       streamOpts: opts.streamOpts,
     });
+    // Preserve a user-visible alias (e.g. 'minimax-token-plan' configured with
+    // family 'anthropic') instead of collapsing it to the wire family's
+    // canonical id. `cfg.id` is the wire-format default ('anthropic'); the
+    // explicit opts override wins when present.
+    this.id = opts.id ?? anthropicWireFormat.id;
     this.opts = opts;
   }
 

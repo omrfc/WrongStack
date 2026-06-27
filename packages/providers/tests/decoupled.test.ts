@@ -11,8 +11,29 @@ describe('makeProviderFromConfig (no models.dev dependency)', () => {
       apiKey: 'sk-fake',
     });
     expect(p).toBeInstanceOf(AnthropicProvider);
-    expect(p.id).toBe('anthropic');
+    // The user-visible provider id MUST be preserved — not collapsed to
+    // the wire family's canonical id ('anthropic'). Without this, every
+    // Anthropic-compatible proxy shows up in the status bar / pickers as
+    // plain 'anthropic' and the configured alias is silently lost.
+    expect(p.id).toBe('custom-claude');
     expect(p.capabilities.tools).toBe(true);
+  });
+
+  it('preserves the user-visible id when constructing an Anthropic provider via the preset', () => {
+    // Regression: passing the user-visible id through AnthropicProvider
+    // directly (the path used by `makeProvider()`'s `case 'anthropic'`)
+    // must keep the alias too. Direct construction is what plugins/tests
+    // use — the `id` option is the contract.
+    const p = new AnthropicProvider({ apiKey: 'sk-fake', id: 'minimax-token-plan' });
+    expect(p.id).toBe('minimax-token-plan');
+  });
+
+  it('falls back to the wire-family id when no id option is provided', () => {
+    // Backward-compat: direct `new AnthropicProvider({ apiKey })` calls
+    // (tests, plugins that pre-date the `id` option) must still report
+    // `id === 'anthropic'` so existing assertions keep passing.
+    const p = new AnthropicProvider({ apiKey: 'sk-fake' });
+    expect(p.id).toBe('anthropic');
   });
 
   it('constructs an OpenAI-compatible provider with baseUrl override', () => {

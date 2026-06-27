@@ -296,7 +296,13 @@ function makeProvider(p: ResolvedProvider, cfg: ProviderConfig): Provider {
 
   switch (family) {
     case 'anthropic':
-      return new AnthropicProvider({ apiKey: expectDefined(apiKey), baseUrl });
+      // Pass `id` so a config-side alias (e.g. `minimax-token-plan` with
+      // `family: 'anthropic'`) keeps its user-visible id instead of being
+      // collapsed to the wire-family canonical id. Without this the status
+      // bar / pickers / fallback chain all see `id === 'anthropic'` and the
+      // configured alias is silently lost — which is exactly the drift that
+      // used to happen on `/model` switch and session resume.
+      return new AnthropicProvider({ apiKey: expectDefined(apiKey), baseUrl, id: p.id });
     case 'openai':
       return new OpenAIProvider({
         apiKey: expectDefined(apiKey),
