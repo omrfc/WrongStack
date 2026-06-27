@@ -250,7 +250,7 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
     if (!final) throw new Error('fetch: stream ended without final event');
     return final;
   },
-  async *executeStream(input, _ctx, opts): AsyncGenerator<ToolStreamEvent<FetchOutput>> {
+  async *executeStream(input, ctx, opts): AsyncGenerator<ToolStreamEvent<FetchOutput>> {
     if (!input?.url) throw new Error('fetch: url is required');
     const u = new URL(input.url);
     if (u.protocol !== 'https:' && u.protocol !== 'http:') {
@@ -339,6 +339,15 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
           url: res.url,
         },
       };
+      // P2 #5: record the network request as a structured side effect.
+      ctx.recordSideEffect({
+        toolUseId: `fetch-${Date.now()}`,
+        toolName: 'fetch',
+        ts: new Date().toISOString(),
+        input: { url: input.url, format: input.format },
+        outcome: `HTTP ${res.status} (${ct})`,
+        risk: 'network',
+      });
     } finally {
       clearTimeout(timer);
     }

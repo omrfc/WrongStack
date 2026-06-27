@@ -174,6 +174,20 @@ export const installTool: Tool<InstallInput, InstallOutput> = {
       }
     }
 
+    // P2 #5: record the package operation as a structured side effect.
+    ctx.recordSideEffect({
+      toolUseId: `install-${Date.now()}`,
+      toolName: 'install',
+      ts: new Date().toISOString(),
+      input: { packages: pkgList, cwd, dry_run: Boolean(input.dry_run) },
+      outcome: output.dry_run
+        ? 'dry run'
+        : result.exitCode === 0
+          ? `installed ${pkgList.length || 'all'} packages`
+          : `failed (exit ${result.exitCode})`,
+      risk: 'package',
+    });
+
     yield { type: 'final', output };
   },
 };
