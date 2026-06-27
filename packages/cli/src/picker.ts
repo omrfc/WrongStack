@@ -605,7 +605,13 @@ async function runLiveModelPicker(
   const out = process.stdout;
   if (!stdin.isTTY || !out.isTTY) return undefined;
 
-  const header = `${provider.name} (${provider.id}) models:`;
+  // openai-codex is the ChatGPT sign-in family; mirror the official Codex
+  // picker header, and surface that the list only shows current models —
+  // legacy ids are still usable via the flag/config, just not listed here.
+  const isCodex = provider.id === 'openai-codex';
+  const header = isCodex
+    ? `Select Model and Effort`
+    : `${provider.name} (${provider.id}) models:`;
   const byNewest = (a: ModelsDevModel, b: ModelsDevModel): number =>
     (b.release_date ?? '').localeCompare(a.release_date ?? '');
   // Pre-select the default model (if any) in newest-first order.
@@ -687,6 +693,14 @@ async function pickModel(
   defaultModel?: string | undefined,
 ): Promise<PickerResult | undefined> {
   renderer.write(`\n  ${color.bold(provider.name)} ${color.dim(`(${provider.id})`)} models:\n\n`);
+  // openai-codex picker mirrors the official Codex CLI header; only current
+  // models are listed, but legacy ids remain usable via --model / config.json.
+  if (provider.id === 'openai-codex') {
+    renderer.write(
+      `  ${color.bold('Select Model and Effort')}\n` +
+        `${color.dim('  Access legacy models by running `wstack -m <model_name>` or in your `config.json`.')}\n\n`,
+    );
+  }
 
   const models = [...provider.models].sort((a, b) =>
     (b.release_date ?? '').localeCompare(a.release_date ?? ''),
