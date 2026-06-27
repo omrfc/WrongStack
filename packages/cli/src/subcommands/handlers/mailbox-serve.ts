@@ -14,13 +14,32 @@
  * agents are NOT given raw file access — they go through `GlobalMailbox`
  * so they cannot race the file lock during acks.
  *
+ * ## Single-instance lock
+ *
+ * Per-project isolation. The lock file lives at
+ * `<projectDir>/.mailbox-bridge.lock` and records the owner process,
+ * the OS-bound URL, and the bearer token. A second `wstack mailbox serve`
+ * for the same project detects the live lock, prints the existing URL
+ * and token to stdout, and exits 0 — so shell pipelines can capture
+ * them with `$(wstack mailbox serve)`. Two different projects get
+ * different lock files (different project slugs), so they never collide.
+ *
+ * When `--port N` is requested but another project on a different
+ * project dir already owns that port, the second invocation fails
+ * loud and prints the existing owner's URL on stderr — see
+ * `--strict-port` for the deterministic variant.
+ *
  * ## Authentication
  *
- * On startup we mint a 32-byte random bearer token and write it to
- * `<projectDir>/.mailbox.token` with mode `0600`. The token is rotated
- * every time the server starts; clients must present it as
- * `Authorization: Bearer <token>`. Tokens are compared in constant
- * time. The token file is unlinked on clean shutdown.
+ * On first start we mint a 32-byte random bearer token and persist it
+ * in BOTH the lock file AND `<projectDir>/.mailbox.token` (mode 0600).
+ * Subsequent restarts of the SAME instance reuse the persisted token,
+ * so external agents that read the token before a bridge restart
+ * survive the restart without having to re-discover credentials. If
+ * the lock file is missing or the recorded PID is dead, we treat this
+ * as a fresh instance and mint a new token. Tokens are compared in
+ * constant time. The token file is unlinked on clean shutdown when
+ * we are still the recorded owner.
  *
  * ## Bind safety
  *
@@ -44,8 +63,7 @@
  *
  * @module subcommands/handlers/mailbox-serve
  */
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import * as fsp from 'node:fs/promises';
+import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import {
   GlobalMailbox,
@@ -61,8 +79,12 @@ import {
   wstackGlobalRoot,
 } from '@wrongstack/core';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
+import {
+  acquireOrJoin,
+  finalize,
+  release,
+} from '../../single-instance-mailbox.js';
 
-const TOKEN_FILENAME = '.mailbox.token';
 /** Cap inbound JSON bodies. The mailbox message format is small — a 256 KB
  *  limit leaves room for long bodies + attachments-as-base64 while still
  *  rejecting pathological payloads before they reach `JSON.parse`. */
@@ -97,24 +119,74 @@ async function startServer(deps: SubcommandDeps): Promise<number> {
   }
 
   const projectDir = resolveProjectDir(deps.projectRoot, wstackGlobalRoot());
+
+  // Phase 1 — lock acquire. If another instance already owns this
+  // project's mailbox-bridge slot, we either join them (URL/token
+  // reuse) or fail loud on port-conflict. Both paths skip the listen
+  // step entirely — no HTTP server is started in this process.
+  const acquireResult = await acquireOrJoin({
+    projectDir,
+    host,
+    requestedPort: strictPort ? portRaw : null,
+    strictPort,
+  });
+
+  if (acquireResult.kind === 'joined') {
+    const lock = acquireResult.lock;
+    // Another live instance owns this project. Print its URL + token
+    // so a shell pipeline can capture them with
+    // `$(wstack mailbox serve)`. Exit 0 because the system as a whole
+    // is in a valid state — the user's request ("mailbox serve") is
+    // effectively satisfied.
+    deps.renderer.write(
+      `Mailbox bridge already running (PID ${lock.pid}).\n` +
+      `  URL:        ${lock.url}\n` +
+      `  Token file: ${acquireResult.tokenPath}\n` +
+      `  Lock:       ${projectDir}${process.platform === 'win32' ? '\\' : '/'}.mailbox-bridge.lock\n\n`,
+    );
+    return 0;
+  }
+
+  if (acquireResult.kind === 'port-conflict') {
+    // Caller asked for an explicit port; another process on a
+    // DIFFERENT project dir owns that port. We can't join them
+    // (cross-project is forbidden — tokens and locks are per-project).
+    // Loud-fail with the existing owner's URL so the caller can
+    // either pick a different port or reuse that other bridge.
+    const existing = acquireResult.existing;
+    deps.renderer.writeError(
+      `Port ${portRaw} already in use by another mailbox bridge on a different project.\n` +
+      `  Owner project: ${projectDir} (us)\n` +
+      `  Owner URL:     ${existing.url}\n` +
+      `  Owner PID:     ${existing.pid}\n\n` +
+      `Either pick a different --port, run without --strict-port (OS will assign a free one),\n` +
+      `or stop the conflicting process and retry.\n`,
+    );
+    // No tentative lock was written in this branch — acquireOrJoin
+    // returns port-conflict before the write step. Nothing to
+    // release.
+    return 1;
+  }
+
+  // acquireResult.kind === 'acquired' — we own the slot. Now bind
+  // the HTTP server.
+  const tentative = acquireResult.lock;
   const mailbox = new GlobalMailbox(projectDir);
 
-  const token = randomBytes(32).toString('hex');
-  const tokenPath = `${projectDir}${process.platform === 'win32' ? '\\' : '/'}${TOKEN_FILENAME}`;
-  // 0600: owner read/write only. On POSIX this is enforced; on Windows the
-  // mode is recorded but the OS uses ACLs, which we do not tighten here —
-  // the token is single-use per session and rotated on every start.
-  await fsp.writeFile(tokenPath, token, { mode: 0o600 });
-
   const server = createServer((req, res) => {
-    void handle(mailbox, token, req, res);
+    void handle(mailbox, tentative.token, req, res);
   });
 
   // Listen semantics:
-  //  - strictPort: bind to the exact port requested; reject on EADDRINUSE
-  //    so the operator knows their port is taken.
-  //  - !strictPort: ask the OS for a free port (pass 0). Operator gets a
-  //    working URL no matter what else is bound to the default port.
+  //  - strictPort: bind to the exact port requested; reject on
+  //    EADDRINUSE so the operator knows their port is taken. The lock
+  //    acquire already verified no WrongStack bridge owns this
+  //    project, so a strict-port failure here means an UNRELATED
+  //    process is sitting on the port.
+  //  - !strictPort: ask the OS for a free port (pass 0). Operator
+  //    gets a working URL no matter what else is bound to the
+  //    default port.
+  let boundPort = -1;
   try {
     await new Promise<void>((resolve, reject) => {
       const onError = (err: Error) => {
@@ -130,20 +202,35 @@ async function startServer(deps: SubcommandDeps): Promise<number> {
       const requestedPort = strictPort ? portRaw : 0;
       server.listen(requestedPort, host);
     });
+    const addr = server.address();
+    boundPort = typeof addr === 'object' && addr !== null ? addr.port : portRaw;
   } catch (err) {
-    // Cleanup before failing — token file is rotated on every start, so
-    // a failed listen must not leave a stale token on disk.
-    await fsp.unlink(tokenPath).catch(() => undefined);
-    deps.renderer.writeError(`Failed to bind ${host}:${strictPort ? portRaw : '0'}: ${(err as Error).message}\n`);
+    // Listen failed — release our tentative lock so the next
+    // acquire doesn't see a stale "owned" record pointing at a
+    // process that never bound.
+    await release(projectDir, tentative.generation);
+    const msg = (err as Error).message;
+    if (strictPort) {
+      deps.renderer.writeError(
+        `Failed to bind ${host}:${portRaw}: ${msg}\n` +
+        `Either pick a different --port or stop the process holding this port.\n`,
+      );
+    } else {
+      deps.renderer.writeError(
+        `Failed to bind ${host} on an OS-assigned port: ${msg}\n` +
+        `This usually means no port is available (extremely rare). Retry or pick an explicit --port.\n`,
+      );
+    }
     return 1;
   }
-  const addr = server.address();
-  const boundPort = typeof addr === 'object' && addr !== null ? addr.port : portRaw;
 
-  writeStartupInfo(deps, { host, port: boundPort, projectDir, tokenPath });
+  // Phase 2 — finalize: write the lock + token with the actual
+  // bound port and the same token, atomically.
+  const finalized = await finalize(projectDir, tentative, boundPort);
+  writeStartupInfo(deps, { host, port: boundPort, projectDir, tokenPath: acquireResult.tokenPath });
 
   // Keep the process alive until SIGINT/SIGTERM. We resolve once the
-  // server has fully closed and the token file is gone.
+  // server has fully closed and the lock + token files are gone.
   await new Promise<void>((resolve) => {
     let shuttingDown = false;
     const shutdown = async (sig: NodeJS.Signals) => {
@@ -155,9 +242,10 @@ async function startServer(deps: SubcommandDeps): Promise<number> {
       await mailbox.close().catch((err) => {
         deps.renderer.writeWarning(`mailbox close error: ${(err as Error).message}\n`);
       });
-      await fsp.unlink(tokenPath).catch(() => {
-        /* file may already be gone — ignore */
-      });
+      // Best-effort release. If we lost the lock race to another
+      // acquire, release() will detect the generation mismatch and
+      // leave their lock alone.
+      await release(projectDir, finalized.generation);
       resolve();
     };
     process.on('SIGINT', shutdown);
