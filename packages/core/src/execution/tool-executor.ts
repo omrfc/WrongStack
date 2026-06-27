@@ -23,6 +23,7 @@ import { subjectForToolInput } from '../utils/tool-subject.js';
 import { createToolOutputSerializer } from '../utils/tool-output-serializer.js';
 import { wstackGlobalRoot } from '../utils/wstack-paths.js';
 import { ToolValidationError } from '../types/errors.js';
+import { MALFORMED_ARG_MARKERS } from '../types/tool-markers.js';
 export class ToolExecutor {
   /** Minimum gap between coalesced `partial_output` tool.progress emits. */
   static readonly PROGRESS_EMIT_INTERVAL_MS = 100;
@@ -680,15 +681,18 @@ function clampTimeoutMs(timeoutMs: number, maxTimeoutMs: number): number {
  * Sentinel keys the provider adapters use to wrap tool arguments that could
  * not be parsed into a proper JSON object. `parseToolInput` (Anthropic /
  * shared) uses `__raw`, `contentFromOpenAI` uses `__raw_arguments`, and the
- * streaming response builder's `safeJsonOrRaw` uses `_raw`. Keep this list in
- * sync if a new adapter introduces another marker.
+ * streaming response builder's `safeJsonOrRaw` uses `_raw`.
+ *
+ * P3 #14 (before-release.md): centralized in `types/tool-markers.ts` so the
+ * providers package (which produces these markers) and this executor (which
+ * detects them) share a single source of truth. The old "Keep this list in
+ * sync" comment is gone.
  *
  * NOTE: `parseToolInput` and `safeJsonOrRaw` now attempt JSON repair
  * (auto-closing braces and strings) before wrapping — so a truncated blob
  * like `{"old_string": "line1\nline2` gets repaired first. The sentinel is
  * only used when repair also fails.
  */
-const MALFORMED_ARG_MARKERS = ['__raw', '__raw_arguments', '_raw'] as const;
 
 function hasMalformedArguments(input: unknown): boolean {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
