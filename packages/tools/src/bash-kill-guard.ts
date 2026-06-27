@@ -37,13 +37,22 @@ export interface KillCheckResult {
  * Extract the actual kill command from a shell-wrapped command.
  * e.g., "bash -c 'kill -9 12345'" -> "kill -9 12345"
  * e.g., "/bin/bash -c \"pkill node\"" -> "pkill node"
+ *
+ * P2 #10 (before-release.md): the path pattern now matches any executable
+ * followed by `-c`, not just `/bin` and `/usr/bin`. Real systems often have
+ * bash at `/usr/local/bin/bash`, `/opt/homebrew/bin/bash`, or invoke it via
+ * `/usr/bin/env bash`. Previously these bypassed the guard entirely.
  */
 function extractKillCommand(command: string): string | null {
   const normalized = command.replace(/\s+/g, ' ').trim();
 
-  // Pattern: bash -c "kill ..." or /bin/bash -c 'kill ...'
+  // Pattern: <any executable path or name> -c "kill ..." or 'kill ...'
+  // Matches /bin/bash, /usr/local/bin/bash, /opt/homebrew/bin/bash,
+  // /usr/bin/env bash, plain bash/sh/zsh, etc. The executable is any run of
+  // non-whitespace, optionally followed by a space and a second token (for
+  // the `/usr/bin/env bash` form) before `-c`.
   const shellCMatch = normalized.match(
-    /^(?:\/\w+)?\/?(?:bin|usr)\/(?:ba)?sh\s+-[c]\s+['"](.+?)['"]$/,
+    /^(?:\S+(?:\s+\S+)?)?\s+-c\s+['"](.+?)['"]$/,
   );
   if (shellCMatch?.[1]) {
     const inner = shellCMatch[1].trim();
@@ -51,9 +60,9 @@ function extractKillCommand(command: string): string | null {
     return isKillRelatedCommand(inner) ? inner : null;
   }
 
-  // Pattern: bash -c kill -9 12345 (without quotes)
+  // Pattern: <executable> -c kill -9 12345 (without quotes)
   const shellCUnquoted = normalized.match(
-    /^(?:\/\w+)?\/?(?:bin|usr)\/(?:ba)?sh\s+-[c]\s+(kill(?:\s+-[a-zA-Z]+)?(?:\s+\d+)+)$/,
+    /^(?:\S+(?:\s+\S+)?)?\s+-c\s+(kill(?:\s+-[a-zA-Z]+)?(?:\s+\d+)+)$/,
   );
   if (shellCUnquoted?.[1]) {
     return shellCUnquoted[1];
