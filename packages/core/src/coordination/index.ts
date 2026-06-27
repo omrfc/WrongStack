@@ -184,6 +184,27 @@ export { DefaultMailbox } from './mailbox.js';
 export { normalizeRecipient } from './mailbox-types.js';
 export { BrainMonitor, type BrainMonitorOptions, type BrainInterventionInput } from './brain-monitor.js';
 export { GlobalMailbox, resolveProjectDir } from './global-mailbox.js';
+// ── Mailbox bridge lock — per-project single-instance contract ─────────
+// The HTTP bridge (`wstack mailbox serve`) writes a per-project lock +
+// token file at `<projectDir>/.mailbox-bridge.{lock,token}`. Core owns
+// the on-disk contract (read, classify, atomic write, release); the
+// cli's `mailbox serve` subcommand owns the spawn/listen side and
+// produces the finalized lock via `acquireOrJoin` + `finalize`.
+// Consumers that only need to discover or clean up a bridge
+// (webui, eternal-autonomy, external agents reading the file)
+// import from here.
+export {
+  acquireOrJoin,
+  finalize,
+  release,
+  readLiveLock,
+  MAILBOX_BRIDGE_LOCK_FILENAME,
+  MAILBOX_BRIDGE_TOKEN_FILENAME,
+  type MailboxBridgeLock,
+  type AcquireResult,
+  type AcquireOptions,
+  type LiveLockResult,
+} from './single-instance-mailbox.js';
 export {
   MailboxHealthWatchdog,
   MAILBOX_HEALTH_DEFAULT_INTERVAL_MS,

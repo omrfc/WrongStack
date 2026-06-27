@@ -83,7 +83,7 @@ import {
   acquireOrJoin,
   finalize,
   release,
-} from '../../single-instance-mailbox.js';
+} from '@wrongstack/core/coordination';
 
 /** Cap inbound JSON bodies. The mailbox message format is small — a 256 KB
  *  limit leaves room for long bodies + attachments-as-base64 while still

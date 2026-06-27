@@ -8,7 +8,7 @@ import {
   finalize,
   release,
   type MailboxBridgeLock,
-} from '../src/single-instance-mailbox.js';
+} from '@wrongstack/core/coordination';
 
 /**
  * Tests for the single-instance mailbox-bridge lock.

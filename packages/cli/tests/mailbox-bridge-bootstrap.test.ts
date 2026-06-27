@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import {
   acquireOrJoin,
   MAILBOX_BRIDGE_LOCK_FILENAME,
-} from '../src/single-instance-mailbox.js';
+} from '@wrongstack/core/coordination';
 import {
   tryAcquireMailboxBridge,
   type ProbeFn,
@@ -322,7 +322,7 @@ describe('tryAcquireMailboxBridge', () => {
       strictPort: false,
     });
     expect(lock.kind).toBe('acquired');
-    const { readLiveLock } = await import('../src/single-instance-mailbox.js');
+    const { readLiveLock } = await import('@wrongstack/core/coordination');
     const result = await readLiveLock(projectDir);
     expect(result.kind).toBe('probe-failed');
     if (result.kind === 'probe-failed') {

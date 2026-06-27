@@ -30,13 +30,13 @@
  *    fine (someone else already took over). A generation mismatch means
  *    we lost the race and another instance owns it now — also fine.
  *
- * Token persistence: the token in the lock matches the token in
- * `.mailbox.token`. External agents that read either get the same
- * value. On a fresh `wstack mailbox serve` the token is regenerated
- * and BOTH files are updated atomically; a restarting owner keeps
- * the same token across restarts (no longer rotates on every start).
- * This lets external agents survive a bridge restart without having
- * to re-discover credentials.
+ * Token persistence: the token in the lock always matches the token in
+ * `.mailbox.token`, so an external agent that reads either file gets the
+ * same value. While an instance stays alive, every joining caller
+ * (`kind: 'joined'`) reuses that one token. A cold (re)start — no lock,
+ * or a lock whose owner PID is dead/unhealthy — mints a FRESH token and
+ * rewrites both files atomically. External agents must therefore re-read
+ * `.mailbox.token` after a bridge restart (a stale token returns 401).
  */
 
 import { randomBytes } from 'node:crypto';

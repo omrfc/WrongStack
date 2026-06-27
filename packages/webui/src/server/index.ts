@@ -1,4 +1,5 @@
-import { expectDefined, GlobalMailbox, getSessionRegistry, AgentStatusTracker, FleetNotifier } from '@wrongstack/core';
+import { expectDefined, GlobalMailbox, getSessionRegistry, AgentStatusTracker, FleetNotifier, resolveProjectDir } from '@wrongstack/core';
+import { readLiveLock } from '@wrongstack/core/coordination';
 import {
   handleWorklistMessage,
   type WorklistContext,
@@ -1241,22 +1242,30 @@ export async function startWebUI(
     tracer: undefined,
   });
 
-  // Mailbox bridge bootstrap for the webui is intentionally NOT wired
-  // here — the bridge (the `wstack mailbox serve` child process) and
-  // its lock primitives both live in `@wrongstack/cli`. The webui has
-  // no cli dependency and we don't want to introduce one for this
-  // single feature. Instead, the webui inherits any running bridge
-  // through the shared on-disk mailbox file: external agents that
-  // connect to a bridge running alongside a CLI surface will see the
-  // webui's mailbox traffic through that same bridge.
-//
-// If a user runs ONLY the webui (no CLI surface, no `wstack mailbox
-// serve`), external agents won't be able to reach them via the HTTP
-// bridge. The webui logs a breadcrumb in that case — see the
-// `mailbox.lock` probe in the session-startup log. Future work:
-// move the lock primitives (`readLiveLock`, the projectDir resolver)
-// to `@wrongstack/core` so the webui can do discovery without a cli
-// dep. See docs/plans/mailbox-daemon.md for the layering plan.
+  // Mailbox bridge discovery — fire-and-forget. Now that the lock
+  // primitives live in `@wrongstack/core` (see commit after
+  // `f1720ed0`), the webui can read the per-project
+  // `.mailbox-bridge.lock` directly without a cli dependency. We
+  // don't spawn a bridge here — the cli surface (REPL/TUI) does that
+  // via the auto-bootstrap wiring; we just join whatever's running
+  // for this project and stash the handle on ctx.meta so downstream
+  // HTTP surfaces (mailbox routes, external-agent proxy) can find it.
+  //
+  // Best-effort: a failed discovery never blocks the WebUI from
+  // starting. If no bridge is running, we log a breadcrumb so the
+  // user knows to start `wstack mailbox serve` (or any CLI surface)
+  // to enable external-agent connectivity.
+  const webuiLogger = container.resolve(TOKENS.Logger);
+  void discoverMailboxBridgeForWebui({
+    projectRoot,
+    config,
+    logger: webuiLogger,
+    ctx: context,
+  }).catch((err: unknown) => {
+    webuiLogger.warn('mailbox bridge discovery threw on webui boot', {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   const agent = new Agent({
     container,
@@ -2859,4 +2868,71 @@ export async function startWebUI(
       return unregisterInstance(process.pid, registryBaseDir);
     },
   });
+}
+
+/**
+ * Webui-side mailbox bridge discovery.
+ *
+ * The webui doesn't spawn a bridge — the bridge (`wstack mailbox serve`)
+ * is spawned by any CLI surface via the auto-bootstrap wiring. We just
+ * probe the per-project lock for an already-running instance and stash
+ * the discovered handle on `ctx.meta['mailboxBridge']` so any later
+ * code (the `/mailbox` HTTP surface, agent-status broadcasters,
+ * external-agent proxy) can find it without re-running discovery.
+ *
+ * If no bridge is running, we log a breadcrumb so the user knows
+ * to start one (`wstack --repl`, `wstack --webui`, or
+ * `wstack mailbox serve` standalone).
+ *
+ * Best-effort: never throws. A failure (missing lock dir, ENOENT,
+ * etc.) logs at warn level and returns — the webui keeps running.
+ */
+async function discoverMailboxBridgeForWebui(params: {
+  projectRoot: string;
+  config: { features?: { mailboxBridge?: 'auto' | 'off' | undefined } } | undefined;
+  logger: { debug: (msg: string, meta?: Record<string, unknown>) => void; warn: (msg: string, meta?: Record<string, unknown>) => void; info: (msg: string, meta?: Record<string, unknown>) => void };
+  ctx: { meta: Record<string, unknown> };
+}): Promise<void> {
+  const mode = params.config?.features?.mailboxBridge ?? 'auto';
+  if (mode === 'off') return;
+
+  const projectDir = resolveProjectDir(params.projectRoot, wstackGlobalRoot());
+  const result = await readLiveLock(projectDir);
+  switch (result.kind) {
+    case 'live': {
+      params.logger.debug('webui joined existing mailbox bridge', {
+        url: result.lock.url,
+        lockPath: projectDir,
+      });
+      params.ctx.meta['mailboxBridge'] = {
+        url: result.lock.url,
+        token: result.lock.token,
+        lockPath: projectDir,
+        childPid: null,
+        source: 'joined',
+      };
+      break;
+    }
+    case 'probe-failed': {
+      params.logger.warn(
+        'mailbox bridge present but /healthz unreachable; webui will start without external-agent connectivity',
+        { url: result.lock.url, lockPath: projectDir },
+      );
+      params.ctx.meta['mailboxBridge'] = {
+        url: result.lock.url,
+        token: result.lock.token,
+        lockPath: projectDir,
+        childPid: null,
+        source: 'unhealthy',
+      };
+      break;
+    }
+    case 'absent': {
+      params.logger.info(
+        'no mailbox bridge running; webui will start without external-agent connectivity. Run `wstack mailbox serve` or a CLI surface to bring one up.',
+        { projectDir },
+      );
+      break;
+    }
+  }
 }
