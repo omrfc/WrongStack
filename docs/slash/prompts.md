@@ -15,6 +15,18 @@ existing prompt.
 | `/prompts show <title>` | Alias for `view` |
 | `/prompts add "title" "content"` | Add a prompt |
 | `/prompts add --category <c> --description "<d>" --tags <a,b> --var <name:desc> "title" "content"` | Add with structured fields + `{{variables}}` |
+
+### Variable richness
+
+A `--var` spec is `name:description`, optionally followed by a `::meta` suffix:
+
+- `::multiline` — the value is multi-line (pasted code, a diff); surfaces render a textarea.
+- `::enum=a|b|c` — closed value set; surfaces render a dropdown and an out-of-range value is rejected.
+
+Example: `--var "code:Paste the snippet::multiline,flavor:Regex flavor::enum=PCRE|JS|Python"`
+
+> Disable the whole subsystem with `features.prompts: false` in config (defaults to on).
+
 | `/prompts new "title" "content"` | Alias for `add` |
 | `/prompts favorite <slug-or-title>` | Mark a prompt favorite (copies a builtin into your user layer) |
 | `/prompts export [path]` | Write your user prompts to a JSON file (default `wrongstack-prompts.json`) |

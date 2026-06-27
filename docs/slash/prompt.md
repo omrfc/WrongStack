@@ -16,10 +16,18 @@ and inserts a chosen prompt into your next turn — filling any `{{variables}}`.
 
 Source glyphs: 📦 builtin · 👤 user · 📁 project · ☁ synced.
 
+Variables may declare an `enum` (a value outside the set is rejected with the
+allowed options) or be `multiline`. When inserting, a value for an `enum`
+variable must be one of its options.
+
 In the WebUI, `/prompt` opens a searchable modal in the chat input (browse by
-category, preview, fill variables, insert). In the TUI, a bare `/prompt` opens a
-visual picker (↑/↓ navigate · ←/→ cycle category · Enter inserts the prompt's
+category, preview, fill variables, insert) — `enum` variables render as a
+dropdown and `multiline` ones as a textarea. In the TUI, a bare `/prompt` opens
+a visual picker (↑/↓ navigate · ←/→ cycle category · Enter inserts the prompt's
 content into the input buffer, leaving `{{variables}}` for inline filling · Esc).
+
+The library can be disabled entirely with `features.prompts: false` in config
+(defaults to on).
 
 ## Related
 
