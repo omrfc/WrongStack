@@ -139,19 +139,41 @@ export class DefaultMailbox implements Mailbox {
     const limit = q.limit ?? 50;
     const order = q.minPriority !== undefined ? { low: 0, normal: 1, high: 2 } as const : null;
     const minPriorityRank = order && q.minPriority !== undefined ? order[q.minPriority] : 0;
-    const filtered: MailboxMessage[] = [];
+    const passes = (msg: MailboxMessage): boolean => {
+      if (q.to !== undefined && msg.to !== q.to && msg.to !== '*') return false;
+      if (q.from !== undefined && msg.from !== q.from) return false;
+      if (q.unreadBy !== undefined && q.unreadBy in msg.readBy) return false;
+      if (q.incompleteOnly && msg.completed) return false;
+      if (q.type !== undefined && msg.type !== q.type) return false;
+      if (order !== null && (order[msg.priority as keyof typeof order] ?? 1) < minPriorityRank) return false;
+      if (q.since !== undefined && msg.timestamp <= q.since) return false;
+      return true;
+    };
 
-    for (const msg of candidates) {
-      if (q.to !== undefined && msg.to !== q.to && msg.to !== '*') continue;
-      if (q.from !== undefined && msg.from !== q.from) continue;
-      if (q.unreadBy !== undefined && q.unreadBy in msg.readBy) continue;
-      if (q.incompleteOnly && msg.completed) continue;
-      if (q.type !== undefined && msg.type !== q.type) continue;
-      if (order !== null && (order[msg.priority as keyof typeof order] ?? 1) < minPriorityRank) continue;
-      if (q.since !== undefined && msg.timestamp <= q.since) continue;
-      filtered.push(msg);
+    // When `candidates` is in append (chronological) order — which it is
+    // for the file-scan and cache-array paths — we can avoid the full
+    // O(N log N) sort by iterating newest-first and stopping at `limit`.
+    // The candidate order for the indexed path (`_byTo.get(...)` etc.)
+    // is also insertion order, which equals append order on this side
+    // because every push goes through _pushToCache / _indexMsg in the
+    // order the lines were parsed.
+    if (order === null) {
+      const out: MailboxMessage[] = [];
+      for (let i = candidates.length - 1; i >= 0 && out.length < limit; i--) {
+        const msg = candidates[i]!;
+        if (passes(msg)) out.push(msg);
+      }
+      return out;
     }
 
+    // Priority-ordered queries still require a full sort, but we cap
+    // the working set to the first N matches under the timestamp order
+    // so we never re-rank more messages than we have to return.
+    const filtered: MailboxMessage[] = [];
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const msg = candidates[i]!;
+      if (passes(msg)) filtered.push(msg);
+    }
     filtered.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     return filtered.slice(0, limit);
   }

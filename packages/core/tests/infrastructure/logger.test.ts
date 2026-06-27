@@ -26,11 +26,12 @@ describe('DefaultLogger', () => {
     vi.restoreAllMocks();
   });
 
-  it('writes JSON lines to file', () => {
+  it('writes JSON lines to file', async () => {
     const logFile = path.join(tmp, 'app.log');
     const log = new DefaultLogger({ level: 'debug', file: logFile });
     log.info('hello', { x: 1 });
     log.debug('details');
+    await log.flush();
     const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n');
     expect(lines).toHaveLength(2);
     const first = JSON.parse(lines[0]!);
@@ -47,20 +48,22 @@ describe('DefaultLogger', () => {
     expect(stderrWrites.join('')).not.toContain('skipped');
   });
 
-  it('child inherits bindings', () => {
+  it('child inherits bindings', async () => {
     const logFile = path.join(tmp, 'c.log');
     const log = new DefaultLogger({ level: 'info', file: logFile, bindings: { app: 'x' } });
     const child = log.child({ comp: 'y' });
     child.info('m');
+    await log.flush();
     const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
     expect(entry.app).toBe('x');
     expect(entry.comp).toBe('y');
   });
 
-  it('serialises Error context to message+stack', () => {
+  it('serialises Error context to message+stack', async () => {
     const logFile = path.join(tmp, 'e.log');
     const log = new DefaultLogger({ level: 'error', file: logFile });
     log.error('boom', new Error('inner'));
+    await log.flush();
     const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
     expect(entry.ctx.message).toBe('inner');
     expect(typeof entry.ctx.stack).toBe('string');
@@ -124,7 +127,7 @@ describe('DefaultLogger', () => {
     expect(stderrWrites[0]).toContain('hello');
   });
 
-  it('rotates the file to <file>.1 once it exceeds maxFileBytes', () => {
+  it('rotates the file to <file>.1 once it exceeds maxFileBytes', async () => {
     const logFile = path.join(tmp, 'rotate.log');
     const log = new DefaultLogger({ level: 'info', stderr: false, file: logFile, maxFileBytes: 2_000 });
     // Size is checked on the first write and every 100 writes after — write
@@ -132,6 +135,7 @@ describe('DefaultLogger', () => {
     for (let i = 0; i < 101; i++) {
       log.info(`line ${i} ${'x'.repeat(80)}`);
     }
+    await log.flush();
     expect(fs.existsSync(`${logFile}.1`)).toBe(true);
     // Rotated file holds the old lines; the live file restarted small.
     expect(fs.statSync(`${logFile}.1`).size).toBeGreaterThan(2_000);

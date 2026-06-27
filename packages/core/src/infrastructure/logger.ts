@@ -1,4 +1,4 @@
-import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import type { LogLevel, Logger } from '../types/logger.js';
 import { color } from '../utils/color.js';
@@ -57,12 +57,42 @@ export class DefaultLogger implements Logger {
   private static readonly ROTATE_CHECK_EVERY = 100;
 
   level: LogLevel;
-  private readonly file?: string | undefined;
-  private readonly bindings: Record<string, unknown>;
-  private readonly format: LogFormat;
-  private readonly stderr: boolean;
-  private readonly maxFileBytes: number;
+  private file?: string | undefined;
+  private bindings: Record<string, unknown>;
+  private format: LogFormat;
+  private stderr: boolean;
+  private maxFileBytes: number;
   private writesSinceRotateCheck = 0;
+  /**
+   * Serialized async tail for file writes. Every appendFile (and any
+   * chained rotation) is awaited through this promise so file I/O
+   * never overlaps itself — preserving the per-line ordering the
+   * sync version had, but without blocking the caller thread. Any
+   * rejection is swallowed (`catch(() => {})`) because logging must
+   * never crash the host.
+   *
+   * Children share the parent's tail: `child.tail === parent.tail`
+   * for the lifetime of the chain. Read/write access goes through
+   * `_tail` so that, when a child has been wired to a parent, both
+   * `enqueueRotate` and `log` always observe the parent's current tail
+   * rather than a stale snapshot taken at `child()` time.
+   */
+  private tail: Promise<void> = Promise.resolve();
+  private parent: DefaultLogger | null = null;
+
+  /**
+   * Resolve the current tail. For the root logger this is the field;
+   * for a child logger we always read through the parent so that a
+   * child's appends land on the parent's most recent tail, and a
+   * parent's `flush()` waits for everything the child chained.
+   */
+  private get _tail(): Promise<void> {
+    return this.parent ? this.parent._tail : this.tail;
+  }
+  private set _tail(next: Promise<void>) {
+    if (this.parent) this.parent.tail = next;
+    else this.tail = next;
+  }
 
   constructor(opts: DefaultLoggerOptions = {}) {
     this.level = opts.level ?? parseLogLevel(process.env.WRONGSTACK_LOG_LEVEL);
@@ -72,11 +102,19 @@ export class DefaultLogger implements Logger {
     this.stderr = opts.stderr !== false; // default true
     this.maxFileBytes = opts.maxFileBytes ?? 10 * 1024 * 1024;
     if (this.file) {
-      try {
-        fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      } catch {
-        // best-effort
-      }
+      // Chain mkdir onto the file-write tail so the first append can't
+      // race a still-pending mkdir (especially under tests that call
+      // `flush()` immediately after `info()`). mkdir is best-effort;
+      // a rejection only blocks subsequent appends in the chain that
+      // observed it via the rejected promise, which would skip the
+      // append — that is acceptable because ENOENT/EEXIST/EPERM all
+      // either are no-ops or indicate an unrecoverable environment.
+      const dir = path.dirname(this.file);
+      this._tail = this._tail
+        .then(async () => {
+          await fsp.mkdir(dir, { recursive: true });
+        })
+        .catch(() => undefined);
     }
   }
 
@@ -97,14 +135,34 @@ export class DefaultLogger implements Logger {
   }
 
   child(bindings: Record<string, unknown>): Logger {
-    return new DefaultLogger({
-      level: this.level,
-      file: this.file,
-      format: this.format,
-      stderr: this.stderr,
-      maxFileBytes: this.maxFileBytes,
-      bindings: { ...this.bindings, ...bindings },
-    });
+    // Construct without invoking the class constructor (which would mkdir
+    // again and create a separate file-write tail). The parent and child
+    // must share the same tail so `parent.flush()` waits for child
+    // appends too — otherwise a test that flushes the parent after
+    // `child.info(...)` would race the child append and observe an empty
+    // file. Sharing the tail preserves the order the parent originally
+    // had via its serialised file-write queue.
+    const child = Object.create(DefaultLogger.prototype) as DefaultLogger;
+    child.level = this.level;
+    child.file = this.file;
+    child.bindings = { ...this.bindings, ...bindings };
+    child.format = this.format;
+    child.stderr = this.stderr;
+    child.maxFileBytes = this.maxFileBytes;
+    child.parent = this;
+    child.writesSinceRotateCheck = this.writesSinceRotateCheck;
+    return child;
+  }
+
+  /**
+   * Wait until all queued file writes (and any pending rotation) have
+   * completed. `log()` is fire-and-forget by design — the caller never
+   * blocks on disk — so tests, shutdown handlers, and processes that
+   * need a deterministic "everything is on disk now" guarantee should
+   * `await logger.flush()` before reading the file or exiting.
+   */
+  flush(): Promise<void> {
+    return this._tail;
   }
 
   /**
@@ -114,17 +172,30 @@ export class DefaultLogger implements Logger {
    * Best-effort: a rename can fail on Windows while another process holds
    * the file — the next check retries. Multiple processes appending to the
    * same log all run this check; whoever crosses the threshold first wins.
+   *
+   * Async: the rotation runs on the file-write tail (so its writes don't
+   * interleave with the next append), and the caller never blocks on a
+   * statSync / renameSync syscall on the hot log path.
    */
-  private maybeRotate(file: string): void {
+  private enqueueRotate(file: string): void {
     if (this.writesSinceRotateCheck++ % DefaultLogger.ROTATE_CHECK_EVERY !== 0) return;
-    try {
-      const st = fs.statSync(file);
-      if (st.size < this.maxFileBytes) return;
-      fs.rmSync(`${file}.1`, { force: true });
-      fs.renameSync(file, `${file}.1`);
-    } catch {
-      // file missing, locked, or raced by another process — ignore
-    }
+    this._tail = this._tail
+      .then(async () => {
+        let st;
+        try {
+          st = await fsp.stat(file);
+        } catch {
+          return; // file missing — nothing to rotate
+        }
+        if (st.size < this.maxFileBytes) return;
+        try {
+          await fsp.rm(`${file}.1`, { force: true });
+          await fsp.rename(file, `${file}.1`);
+        } catch {
+          // file locked, or raced by another process — ignore
+        }
+      })
+      .catch(() => undefined);
   }
 
   private log(level: LogLevel, msg: string, ctx?: unknown): void {
@@ -136,14 +207,16 @@ export class DefaultLogger implements Logger {
     if (ctx !== undefined) {
       entry.ctx = ctx instanceof Error ? { message: ctx.message, stack: ctx.stack } : ctx;
     }
-    // Disk: JSON line
+    // Disk: JSON line. Serialized through `_tail` so concurrent log
+    // calls preserve per-line order without blocking the caller on
+    // sync file I/O. Children route through their parent's tail, so
+    // a parent's `flush()` waits for every chained child append.
     if (this.file) {
-      try {
-        this.maybeRotate(this.file);
-        fs.appendFileSync(this.file, `${JSON.stringify(entry)}\n`);
-      } catch {
-        // ignore
-      }
+      this.enqueueRotate(this.file);
+      const line = `${JSON.stringify(entry)}\n`;
+      this._tail = this._tail
+        .then(() => fsp.appendFile(this.file!, line))
+        .catch(() => undefined);
     }
     // Stderr: pretty or json. Suppressed when this.stderr is false (TUI mode)
     // so plugin/library log messages don't interleave with Ink's rendering.

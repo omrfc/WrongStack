@@ -594,11 +594,8 @@ export class DefaultSessionStore implements SessionStore {
       // missing, empty, or unreadable.
       const indexed = await this.readIndex();
       if (indexed.length > 0) {
-        indexed.sort((a, b) => {
-          if (a.startedAt < b.startedAt) return 1;
-          if (a.startedAt > b.startedAt) return -1;
-          return a.id.localeCompare(b.id);
-        });
+        // `readIndex()` already sorted the array by startedAt DESC, id
+        // ASC, so we just slice the prefix.
         return indexed.slice(0, limit);
       }
       // Index unavailable — fall back to a directory scan. Prefer summary
@@ -773,6 +770,15 @@ export class DefaultSessionStore implements SessionStore {
       }
     }
     const summaries = Array.from(seen.values());
+    // Sort once when the index is (re)loaded so `list()` callers can
+    // take a prefix without re-sorting the whole array per request.
+    // Sort key mirrors the original `list()` comparator:
+    //   startedAt DESC, then id ASC for tie-breaks.
+    summaries.sort((a, b) => {
+      if (a.startedAt < b.startedAt) return 1;
+      if (a.startedAt > b.startedAt) return -1;
+      return a.id.localeCompare(b.id);
+    });
     this._indexCache = { ...stat, summaries };
     return [...summaries];
   }
