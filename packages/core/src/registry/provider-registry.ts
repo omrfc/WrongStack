@@ -58,6 +58,14 @@ export class ProviderRegistry {
     return this.factories.has(type);
   }
 
+  /**
+   * Unregister a provider factory by type. Returns true if a factory was
+   * removed, false if none was registered for that type.
+   */
+  unregister(type: string): boolean {
+    return this.factories.delete(type);
+  }
+
   create(cfg: ProviderConfig): Provider {
     const f = this.factories.get(cfg.type);
     if (!f) {

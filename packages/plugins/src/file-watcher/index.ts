@@ -17,7 +17,8 @@ interface WatchHandle {
   paths: string[];
   recursive: boolean;
   events: string[];
-  watcher: { close: () => void };
+  /** One watcher per path; close all to fully release resources. */
+  watchers: Array<{ close: () => void }>;
   createdAt: string;
 }
 
@@ -96,10 +97,12 @@ const plugin: Plugin = {
     // and clear any pending debounce timers before re-populating. The
     // Maps live at module scope so teardown can reach them.
     for (const handle of watches.values()) {
-      try {
-        handle.watcher.close();
-      } catch {
-        /* ignore — handle may already be closed */
+      for (const w of handle.watchers) {
+        try {
+          w.close();
+        } catch {
+          /* ignore — handle may already be closed */
+        }
       }
     }
     watches.clear();
@@ -173,7 +176,7 @@ const plugin: Plugin = {
           api.log.warn(`file-watcher: error on ${dirPath}: ${err}`);
         });
 
-        handle.watcher = watcher;
+        handle.watchers.push(watcher);
       } catch (err) {
         api.log.warn(`file-watcher: could not watch ${dirPath}: ${err}`);
       }
@@ -225,7 +228,7 @@ const plugin: Plugin = {
           paths,
           recursive,
           events,
-          watcher: { close: () => {} },
+          watchers: [],
           createdAt: new Date().toISOString(),
         };
 
@@ -269,10 +272,12 @@ const plugin: Plugin = {
           return { ok: false, error: `No active watch with ID: ${watchId}` };
         }
 
-        try {
-          handle.watcher.close();
-        } catch {
-          // ignore
+        for (const w of handle.watchers) {
+          try {
+            w.close();
+          } catch {
+            /* ignore — may already be closed */
+          }
         }
 
         watches.delete(watchId);
@@ -324,10 +329,12 @@ const plugin: Plugin = {
     // audit, 2026-06-03). With module-level Maps we can finally
     // reach the resources and free them.
     for (const handle of watches.values()) {
-      try {
-        handle.watcher.close();
-      } catch {
-        /* ignore — handle may already be closed */
+      for (const w of handle.watchers) {
+        try {
+          w.close();
+        } catch {
+          /* ignore — may already be closed */
+        }
       }
     }
     watches.clear();

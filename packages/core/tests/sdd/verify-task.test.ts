@@ -35,8 +35,12 @@ describe('makeCommandVerifier', () => {
 
   it('kills and fails on timeout', async () => {
     const verify = makeCommandVerifier({ timeoutMs: 150 });
-    // node is guaranteed present; a long sleep exceeds the 150ms budget.
-    const cmd = `node -e "setTimeout(()=>{}, 60000)"`;
+    // Use a command where the *spawned process itself* is what blocks — not a forked
+    // child that outlives the spawn.  node -e "setTimeout(...)" forks in Node 18+ so
+    // node exits immediately; ping (Windows) and sleep (Unix) run inside the shell.
+    const cmd = process.platform === 'win32'
+      ? 'ping -n 61 127.0.0.1 >nul'
+      : 'sleep 61';
     const out = await verify({ task: task({ verificationCommand: cmd }), result, cwd });
     expect(out.ok).toBe(false);
     expect(out.reason).toContain('timed out');

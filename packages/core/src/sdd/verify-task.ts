@@ -37,19 +37,39 @@ export function makeCommandVerifier(options: CommandVerifierOptions = {}) {
     if (typeof cmd !== 'string' || !cmd.trim()) return { ok: true };
 
     return await new Promise((resolve) => {
-      const child = spawn(cmd, { cwd: info.cwd, shell: true, windowsHide: true, stdio: 'ignore' });
+      // Parse the command string through an explicit shell invocation rather than
+      // spawn(..., { shell: true }), which lets Node interpolate the whole string
+      // and exposes any metacharacters (;  &&  |  $()  etc.) as injection vectors
+      // in the command itself.  sh -c "cmd" / cmd /s /c "cmd" passes the full string
+      // to the shell as a single positional argument — the shell interprets it, not Node.
+      const isWindows = process.platform === 'win32';
+      const [shell, ...shellArgs] = isWindows
+        ? ['cmd', '/d', '/c'] satisfies [string, ...string[]]
+        : ['sh', '-c'] satisfies [string, ...string[]];
+      const child = spawn(shell, [...shellArgs, cmd], {
+        cwd: info.cwd,
+        shell: false,
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      let timedOut = false;
       const timer = setTimeout(() => {
+        timedOut = true;
         child.kill();
         resolve({ ok: false, reason: `verification timed out: ${cmd}` });
       }, timeoutMs);
       child.on('exit', (code) => {
         clearTimeout(timer);
+        // Don't overwrite the timeout reason once the timer has fired.
+        if (timedOut) return;
         resolve(
           code === 0 ? { ok: true } : { ok: false, reason: `verification failed (exit ${code}): ${cmd}` },
         );
       });
       child.on('error', (err) => {
         clearTimeout(timer);
+        // Don't overwrite the timeout reason once the timer has fired.
+        if (timedOut) return;
         resolve({ ok: false, reason: `verification spawn error: ${String(err)}` });
       });
     });

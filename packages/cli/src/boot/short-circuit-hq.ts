@@ -181,8 +181,13 @@ export async function handleHqShortCircuit(
   }
   // Keep the process alive until SIGINT/SIGTERM
   await new Promise<void>((resolve) => {
-    const shutdown = () => {
-      void handle.close().then(() => resolve());
+    const shutdown = async () => {
+      try {
+        await handle.close();
+      } catch (err) {
+        console.error(`HQ server close error: ${String(err)}`);
+      }
+      resolve();
     };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);

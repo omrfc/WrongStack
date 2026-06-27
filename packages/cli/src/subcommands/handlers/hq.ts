@@ -81,13 +81,22 @@ async function startServer(deps: SubcommandDeps): Promise<number> {
 
   // Keep the process alive until SIGINT/SIGTERM
   await new Promise<void>((resolve) => {
-    const shutdown = () => {
-      void handle.close().then(() => resolve());
+    const shutdown = async () => {
+      try {
+        await handle.close();
+      } catch (err) {
+        deps.renderer.write(`HQ server close error: ${String(err)}\n`);
+      }
+      resolve();
     };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
   });
   return 0;
+}
+
+function redactToken(s: string): string {
+  return s.replace(/\?token=[^&]*/i, '?token=[REDACTED]');
 }
 
 function writeStartupInfo(deps: SubcommandDeps, handle: HqServerHandle): void {
@@ -98,12 +107,12 @@ function writeStartupInfo(deps: SubcommandDeps, handle: HqServerHandle): void {
     return;
   }
 
-  deps.renderer.write(`Browser endpoint: ${handle.firstRunSetup.browserUrl}\n`);
-  deps.renderer.write(`Client endpoint:  ws://${handle.host}:${handle.port}/ws/client?token=${handle.firstRunSetup.clientEnv.WRONGSTACK_HQ_TOKEN}\n`);
+  deps.renderer.write(`Browser endpoint: ${redactToken(handle.firstRunSetup.browserUrl)}\n`);
+  deps.renderer.write(`Client endpoint:  ${redactToken(handle.firstRunSetup.clientUrl)}\n`);
   deps.renderer.write(`\nFirst-run HQ auth created in ${handle.firstRunSetup.dataDir}\n`);
   deps.renderer.write(`Start clients with:\n`);
   deps.renderer.write(`  WRONGSTACK_HQ_URL=${handle.firstRunSetup.clientEnv.WRONGSTACK_HQ_URL}\n`);
-  deps.renderer.write(`  WRONGSTACK_HQ_TOKEN=${handle.firstRunSetup.clientEnv.WRONGSTACK_HQ_TOKEN}\n`);
+  deps.renderer.write(`  WRONGSTACK_HQ_TOKEN=[REDACTED]\n`);
 }
 
 async function hqTokenCmd(args: string[], deps: SubcommandDeps): Promise<number> {

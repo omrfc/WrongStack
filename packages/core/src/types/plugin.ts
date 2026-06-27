@@ -32,6 +32,7 @@ export interface ProviderFactory {
 
 export interface ProviderRegistryView {
   register(f: ProviderFactory): void;
+  unregister(type: string): boolean;
   create(cfg: { type: string } & Record<string, unknown>): Provider;
   list(): string[];
 }

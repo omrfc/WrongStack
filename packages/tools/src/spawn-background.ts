@@ -27,9 +27,20 @@
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
 import * as os from 'node:os';
+import { assertSafeWin32ShellArgs, resolveWin32Command } from './_win32-resolve.js';
+
+const isWin = os.platform() === 'win32';
 
 export interface SpawnBackgroundOptions {
-  /** Command to run */
+  /**
+   * Shell command string to execute (e.g. `"node --version"`, `"npm run dev"`).
+   *
+   * ⚠️ SECURITY: This value is passed verbatim to the system shell
+   * (`/bin/bash -c` on POSIX, `cmd.exe /c` on Windows). Shell metacharacters
+   * (`;`, `&&`, `|`, `$()`, backticks, etc.) ARE interpreted. Never pass
+   * untrusted or user-controlled input here — use {@link spawnBackgroundExec}
+   * instead, which spawns a command + args array with no shell interpretation.
+   */
   command: string;
   /** Arguments (for exec-style commands) */
   args?: string[];
@@ -42,7 +53,13 @@ export interface SpawnBackgroundOptions {
 }
 
 /**
- * Spawn a fully detached background process.
+ * Spawn a fully detached background process **via the system shell**.
+ *
+ * ⚠️ SECURITY: `opts.command` is interpreted by `/bin/bash -c` (POSIX) or
+ * `cmd.exe /c` (Windows). This is an explicit shell-exec sink. If
+ * `opts.command` contains untrusted or user-influenced input, it is a direct
+ * command-injection vector. For untrusted input use {@link spawnBackgroundExec},
+ * which takes a command + args array and never invokes a shell.
  *
  * @returns The spawned ChildProcess (already unref'd so it doesn't block exit)
  */
@@ -50,8 +67,6 @@ export function spawnBackground(opts: SpawnBackgroundOptions): {
   pid: number | null;
   child: ReturnType<typeof spawn>;
 } {
-  const isWin = os.platform() === 'win32';
-
   // Determine shell and args
   const shell = opts.shell ?? (isWin ? process.env['COMSPEC'] ?? 'cmd.exe' : '/bin/bash');
   const shellArgs = isWin ? ['/c', opts.command] : ['-c', opts.command];
@@ -112,7 +127,14 @@ function releaseStdio(child: ReturnType<typeof spawn>): void {
 
 /**
  * Spawn a command (exec-style, no shell) as a detached background process.
- * This is more secure than shell spawning since there are no shell injection risks.
+ * This is more secure than {@link spawnBackground} since there are no shell
+ * injection risks — args are passed as an argv array, never through a shell.
+ *
+ * On Windows, `.cmd`/`.bat` wrappers still require `shell: true` (Node cannot
+ * spawn them directly). When that path is taken, {@link assertSafeWin32ShellArgs}
+ * rejects any argument containing a cmd.exe injection metacharacter
+ * (`& | < >` or newline) — the same guard used by exec.ts, _spawn-stream.ts,
+ * and outdated.ts. Safe args pass through unchanged.
  *
  * @returns The spawned ChildProcess (already unref'd so it doesn't block exit)
  */
@@ -125,10 +147,18 @@ export function spawnBackgroundExec(
   pid: number | null;
   child: ReturnType<typeof spawn>;
 } {
-  const isWin = os.platform() === 'win32';
-
-  // Resolve .cmd/.bat on Windows - these require shell: true
-  const isBatchFile = isWin && (command.endsWith('.cmd') || command.endsWith('.bat'));
+  // Resolve .cmd/.bat on Windows — these require shell: true.  The resolver
+  // also finds the full path for .exe binaries so spawn doesn't need PATHEXT.
+  const resolved = resolveWin32Command(command);
+  const needsShell = isWin && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
+  // When using shell: true, the shell resolves the command through PATH —
+  // passing the full resolved path (which may contain spaces, e.g.
+  // "C:\Program Files\nodejs\npx.cmd") breaks because cmd.exe splits on
+  // the space. Use the original command name so the shell finds it.
+  const cmd = needsShell ? command : resolved;
+  // verbatim args reach cmd.exe unquoted — reject injection metacharacters
+  // before spawning.  This is the same guard used by _spawn-stream.ts / exec.ts.
+  if (needsShell) assertSafeWin32ShellArgs(args);
 
   // Same win32 rule as spawnBackground: detached + windowsHide conflict, and
   // the hidden console from CREATE_NO_WINDOW is what keeps any children of
@@ -139,10 +169,10 @@ export function spawnBackgroundExec(
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: !isWin,
     windowsHide: true,
-    ...(isBatchFile ? { shell: true } : {}),
+    ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}),
   };
 
-  const child = spawn(command, args, spawnOpts);
+  const child = spawn(cmd, args, spawnOpts);
 
   // Fire-and-forget: an unhandled 'error' event (e.g. ENOENT) would crash the
   // host process. Callers can still attach their own listener on `child`.

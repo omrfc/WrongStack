@@ -181,6 +181,7 @@ export class DefaultPluginAPI implements PluginAPI {
     const pr = init.providerRegistry;
     this.providers = {
       register: (f: ProviderFactory) => pr.register(f),
+      unregister: (type: string) => pr.unregister(type),
       create: (cfg) => pr.create(cfg as { type: string }),
       list: () => pr.list(),
     };

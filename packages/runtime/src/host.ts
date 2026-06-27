@@ -72,25 +72,61 @@ export async function applyWrongStackPack(
   const owner = opts.owner ?? pack.name;
   const unregisterExtensions: Array<() => void> = [];
 
+  // Track registered tool names, command names, and provider types so teardown
+  // can reverse everything in registration order.
+  const registeredToolNames: string[] = [];
+  const registeredCommandNames: string[] = [];
+  const registeredProviderTypes: string[] = [];
+
   if (pack.tools) {
-    host.tools.registerAllOrThrow([...pack.tools], owner);
+    const tools = [...pack.tools];
+    host.tools.registerAllOrThrow(tools, owner);
+    for (const t of tools) registeredToolNames.push(t.name);
   }
   if (pack.providers) {
-    host.providers.registerAll([...pack.providers]);
+    const providers = [...pack.providers];
+    host.providers.registerAll(providers);
+    for (const p of providers) registeredProviderTypes.push(p.type);
   }
   if (pack.slashCommands) {
-    host.slashCommands.registerAll([...pack.slashCommands], owner);
+    const cmds = [...pack.slashCommands];
+    host.slashCommands.registerAll(cmds, owner);
+    for (const c of cmds) registeredCommandNames.push(c.name);
   }
   if (pack.extensions && host.extensions) {
     for (const ext of pack.extensions) {
       unregisterExtensions.push(host.extensions.register(ext));
     }
   }
+
+  // If setup() throws after registration, roll back everything we registered above.
+  // This makes applyWrongStackPack() transactional from the caller's perspective —
+  // either the pack is fully applied or it is not.
   if (pack.setup) {
     if (!opts.api) {
       throw new Error(`Pack "${pack.name}" defines setup() but no PluginAPI was provided`);
     }
-    await pack.setup(opts.api);
+    try {
+      await pack.setup(opts.api);
+    } catch (setupErr) {
+      // Roll back in reverse order: extensions first, then commands,
+      // then tools, then providers. Extensions are unregistered before
+      // tools/commands because extensions may depend on those capabilities;
+      // tearing them down first avoids dangling refs.
+      for (const unregister of unregisterExtensions.reverse()) {
+        unregister();
+      }
+      for (const name of registeredCommandNames.reverse()) {
+        host.slashCommands.unregister(name);
+      }
+      for (const name of registeredToolNames.reverse()) {
+        host.tools.unregister(name);
+      }
+      for (const type of registeredProviderTypes.reverse()) {
+        host.providers.unregister(type);
+      }
+      throw setupErr;
+    }
   }
 
   return {
@@ -99,6 +135,17 @@ export async function applyWrongStackPack(
     async teardown() {
       for (const unregister of unregisterExtensions.reverse()) {
         unregister();
+      }
+      // Unregister commands, tools, and providers so the same pack can be
+      // re-loaded cleanly without name/type conflicts.
+      for (const name of registeredCommandNames.reverse()) {
+        host.slashCommands.unregister(name);
+      }
+      for (const name of registeredToolNames.reverse()) {
+        host.tools.unregister(name);
+      }
+      for (const type of registeredProviderTypes.reverse()) {
+        host.providers.unregister(type);
       }
       if (pack.teardown) {
         if (!opts.api) {
