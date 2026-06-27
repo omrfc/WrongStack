@@ -18,15 +18,32 @@ export async function mkSandbox(): Promise<Sandbox> {
     projectRoot: dir,
     readFiles: new Set<string>(),
     fileMtimes: new Map<string, number>(),
+    writtenFiles: new Set<string>(),
+    sideEffects: [],
     hasRead(p: string) {
       return this.readFiles.has(p);
+    },
+    hasWritten(p: string) {
+      return (this as { writtenFiles: Set<string> }).writtenFiles.has(p);
     },
     lastReadMtime(p: string) {
       return this.fileMtimes.get(p);
     },
-    recordRead(p: string, m: number) {
-      this.readFiles.add(p);
+    recordRead(p: string, m: number, source: 'user' | 'write' = 'user') {
       this.fileMtimes.set(p, m);
+      if (source === 'write') {
+        (this as { writtenFiles: Set<string> }).writtenFiles.add(p);
+      } else {
+        this.readFiles.add(p);
+      }
+    },
+    recordSideEffect(se: unknown) {
+      (this as { sideEffects: unknown[] }).sideEffects.push(se);
+    },
+    clearFileTracking() {
+      this.readFiles.clear();
+      this.fileMtimes.clear();
+      (this as { sideEffects: unknown[] }).sideEffects = [];
     },
     todos,
     meta: {},
@@ -35,6 +52,7 @@ export async function mkSandbox(): Promise<Sandbox> {
       append: async () => undefined,
       close: async () => undefined,
       recordFileChange: () => {},
+      recordSideEffect: () => {},
     },
     messages,
   } as never as Context;

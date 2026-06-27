@@ -353,6 +353,15 @@ export const bashTool: Tool<BashInput, BashOutput> = {
           pid,
         },
       };
+      // P2 #5: record the background launch as a structured side effect.
+      ctx.recordSideEffect({
+        toolUseId: `bash-bg-${Date.now()}`,
+        toolName: 'bash',
+        ts: new Date().toISOString(),
+        input: { command: redactCommand(input.command), background: true },
+        outcome: `launched (pid ${pid ?? 'unknown'})`,
+        risk: 'shell',
+      });
       return;
     }
 
@@ -577,6 +586,17 @@ export const bashTool: Tool<BashInput, BashOutput> = {
               timed_out: timedOut,
             },
           };
+          // P2 #5: record the command execution as a structured side effect.
+          ctx.recordSideEffect({
+            toolUseId: `bash-${Date.now()}`,
+            toolName: 'bash',
+            ts: new Date().toISOString(),
+            input: { command: redactCommand(input.command) },
+            outcome: timedOut
+              ? `timed out (exit ${c.code})`
+              : `exit ${c.code}`,
+            risk: 'shell',
+          });
           return;
         }
         const now = Date.now();
