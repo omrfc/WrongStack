@@ -76,6 +76,11 @@ function normalizeVariables(raw, slug) {
     if (typeof v.description === 'string') entry.description = v.description;
     if (typeof v.default === 'string') entry.default = v.default;
     if (v.required === true) entry.required = true;
+    if (Array.isArray(v.enum) && v.enum.length > 0) {
+      if (!v.enum.every((x) => typeof x === 'string')) fail(`${slug}: variable ${v.name} enum must be strings`);
+      entry.enum = v.enum;
+    }
+    if (v.multiline === true) entry.multiline = true;
     out.push(entry);
   }
   return out;

@@ -78,6 +78,7 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
     memory: true,
     modelsRegistry: true,
     skills: true,
+    prompts: true,
     tokenSavingMode: 'off',
     allowOutsideProjectRoot: true,
   },

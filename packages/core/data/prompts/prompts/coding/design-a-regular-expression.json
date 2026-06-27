@@ -23,7 +23,17 @@
     {
       "name": "flavor",
       "description": "Regex flavor (PCRE, JS, Python)",
-      "required": true
+      "required": true,
+      "enum": [
+        "PCRE",
+        "JavaScript",
+        "Python",
+        "Go",
+        "Java",
+        ".NET",
+        "Rust",
+        "RE2"
+      ]
     }
   ]
 }

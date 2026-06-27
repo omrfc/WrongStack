@@ -19,7 +19,8 @@
     {
       "name": "diff",
       "description": "The change to assess",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

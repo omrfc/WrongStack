@@ -20,7 +20,8 @@
     {
       "name": "code",
       "description": "The UI markup or component",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

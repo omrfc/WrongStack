@@ -19,7 +19,8 @@
     {
       "name": "diff",
       "description": "The diff or code to review",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

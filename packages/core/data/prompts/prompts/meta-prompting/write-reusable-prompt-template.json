@@ -19,7 +19,8 @@
     {
       "name": "example",
       "description": "An example of the prompt you keep rewriting",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

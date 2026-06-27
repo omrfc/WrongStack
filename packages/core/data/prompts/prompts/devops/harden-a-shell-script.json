@@ -19,7 +19,8 @@
     {
       "name": "script",
       "description": "The shell script",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

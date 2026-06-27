@@ -810,17 +810,28 @@ export async function startWebUI(
         skillLoader,
       })
     : undefined;
-  // Prompt library — always available. Resolve the bundled dataset shipped with
-  // @wrongstack/core (sibling of dist) so the 100+ builtin prompts show up.
-  const bundledPromptsDir = (() => {
-    try {
-      const req = createRequire(import.meta.url);
-      return path.join(path.dirname(req.resolve('@wrongstack/core/package.json')), 'data', 'prompts');
-    } catch {
-      return undefined;
-    }
-  })();
-  const promptLoader = new DefaultPromptLoader({ paths: wpaths, bundledDir: bundledPromptsDir });
+  // Prompt library — on by default; `features.prompts: false` disables it
+  // (the loader is withheld so handlers report it unavailable). Resolve the
+  // bundled dataset shipped with @wrongstack/core (sibling of dist) so the
+  // builtin prompts show up.
+  const promptsEnabled = config.features.prompts !== false;
+  const bundledPromptsDir = promptsEnabled
+    ? (() => {
+        try {
+          const req = createRequire(import.meta.url);
+          return path.join(
+            path.dirname(req.resolve('@wrongstack/core/package.json')),
+            'data',
+            'prompts',
+          );
+        } catch {
+          return undefined;
+        }
+      })()
+    : undefined;
+  const promptLoader = promptsEnabled
+    ? new DefaultPromptLoader({ paths: wpaths, bundledDir: bundledPromptsDir })
+    : undefined;
   const promptUsage = new PromptUsageStore(wpaths.promptUsage);
   const promptsCtx = { promptLoader, promptUsage };
   const systemPromptBuilder = new DefaultSystemPromptBuilder({

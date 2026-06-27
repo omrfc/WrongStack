@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "The code to refactor",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

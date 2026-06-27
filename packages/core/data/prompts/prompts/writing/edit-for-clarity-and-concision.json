@@ -19,7 +19,8 @@
     {
       "name": "text",
       "description": "The text to edit",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

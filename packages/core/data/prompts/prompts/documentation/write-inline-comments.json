@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "The code to comment",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

@@ -19,7 +19,8 @@
     {
       "name": "code_or_function",
       "description": "What to test",
-      "required": true
+      "required": true,
+      "multiline": true
     },
     {
       "name": "framework",

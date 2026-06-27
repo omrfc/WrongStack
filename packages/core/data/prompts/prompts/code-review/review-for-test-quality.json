@@ -18,7 +18,8 @@
     {
       "name": "diff",
       "description": "The change to review",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "Code with untested error handling",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

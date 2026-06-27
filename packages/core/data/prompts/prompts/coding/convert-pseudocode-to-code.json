@@ -23,7 +23,8 @@
     {
       "name": "pseudocode",
       "description": "The algorithm or pseudocode",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

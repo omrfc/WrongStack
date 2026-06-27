@@ -24,7 +24,8 @@
     {
       "name": "changes",
       "description": "The changes in this release",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

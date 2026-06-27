@@ -19,7 +19,8 @@
     {
       "name": "regression",
       "description": "What regressed",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

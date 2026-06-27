@@ -456,6 +456,13 @@ export interface FeaturesConfig {
   /** Discover + load skills from disk. */
   skills: boolean;
   /**
+   * Enable the prompt library (`/prompt`, `/prompts`, `/prompt-gen`, the WebUI
+   * modal and the bundled 168-prompt dataset). Defaults to on; set to false to
+   * disable the subsystem entirely (the loader is withheld so every surface
+   * reports it unavailable).
+   */
+  prompts?: boolean | undefined;
+  /**
    * Token-saving mode tier. Controls how aggressively the system prompt
    * is compacted to reduce per-request token consumption.
    *

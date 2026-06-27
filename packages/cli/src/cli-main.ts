@@ -947,7 +947,7 @@ export async function main(argv: string[]): Promise<number> {
     metricsSink,
     healthRegistry,
     skillLoader: config.features.skills ? skillLoader : undefined,
-    promptLoader,
+    promptLoader: config.features.prompts === false ? undefined : promptLoader,
     configStore,
     vault,
     paths: wpaths,
@@ -2954,7 +2954,7 @@ export async function main(argv: string[]): Promise<number> {
       return false;
     },
     skillLoader: config.features.skills ? skillLoader : undefined,
-    promptLoader,
+    promptLoader: config.features.prompts === false ? undefined : promptLoader,
     modeId,
     sessionStore,
     memoryStore,

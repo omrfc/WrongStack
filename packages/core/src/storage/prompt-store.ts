@@ -86,11 +86,17 @@ function normalizeVariables(v: unknown): PromptVariable[] | undefined {
       typeof (item as Record<string, unknown>)['name'] === 'string'
     ) {
       const o = item as Record<string, unknown>;
+      const enumVals =
+        Array.isArray(o['enum']) && o['enum'].every((x) => typeof x === 'string')
+          ? (o['enum'] as string[])
+          : undefined;
       out.push({
         name: o['name'] as string,
         description: typeof o['description'] === 'string' ? o['description'] : undefined,
         default: typeof o['default'] === 'string' ? o['default'] : undefined,
         required: o['required'] === true ? true : undefined,
+        enum: enumVals && enumVals.length > 0 ? enumVals : undefined,
+        multiline: o['multiline'] === true ? true : undefined,
       });
     }
   }

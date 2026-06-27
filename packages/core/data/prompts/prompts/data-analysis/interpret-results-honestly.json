@@ -19,7 +19,8 @@
     {
       "name": "results",
       "description": "The results to interpret",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

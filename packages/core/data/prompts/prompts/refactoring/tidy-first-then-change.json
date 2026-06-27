@@ -23,7 +23,8 @@
     {
       "name": "code",
       "description": "The code to change",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

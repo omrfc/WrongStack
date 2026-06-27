@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "The module's public API",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

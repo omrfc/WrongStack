@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "The function to document",
-      "required": true
+      "required": true,
+      "multiline": true
     },
     {
       "name": "language",

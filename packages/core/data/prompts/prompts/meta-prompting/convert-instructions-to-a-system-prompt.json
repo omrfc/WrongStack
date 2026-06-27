@@ -18,7 +18,8 @@
     {
       "name": "instructions",
       "description": "The ad-hoc instructions",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

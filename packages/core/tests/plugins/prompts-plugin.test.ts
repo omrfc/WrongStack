@@ -155,6 +155,19 @@ describe('/prompts add structured flags', () => {
     expect(entry.variables).toEqual([{ name: 'name', description: 'who', required: true }]);
   });
 
+  it('parses --var ::multiline and ::enum= richness suffixes', async () => {
+    const { cmd } = await withCommand();
+    await cmd.run!(
+      'add --var "code:Paste it::multiline,flavor:Regex flavor::enum=PCRE|JS|Python" "Rich" "Use {{flavor}} on {{code}}"',
+      ctx(),
+    );
+    const entry = (await store.list())[0]!;
+    expect(entry.variables).toEqual([
+      { name: 'code', description: 'Paste it', required: true, multiline: true },
+      { name: 'flavor', description: 'Regex flavor', required: true, enum: ['PCRE', 'JS', 'Python'] },
+    ]);
+  });
+
   it('favorite verb sets favorite via the store fallback', async () => {
     const { cmd } = await withCommand();
     await store.save(store.createNew('Star Me', 'x'));

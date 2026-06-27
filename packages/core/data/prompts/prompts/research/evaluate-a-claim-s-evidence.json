@@ -24,7 +24,8 @@
     {
       "name": "source",
       "description": "Where the claim comes from",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

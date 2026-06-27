@@ -23,7 +23,8 @@
     {
       "name": "text",
       "description": "The text to adapt",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

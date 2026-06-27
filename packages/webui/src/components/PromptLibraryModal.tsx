@@ -7,6 +7,8 @@ interface PromptVar {
   description?: string;
   default?: string;
   required?: boolean;
+  enum?: string[];
+  multiline?: boolean;
 }
 interface PromptMeta {
   id: string;
@@ -279,22 +281,61 @@ export function PromptLibraryModal() {
                 {(selected.variables ?? []).length > 0 && (
                   <div className="mt-3 space-y-2">
                     <div className="text-xs font-semibold text-muted-foreground">Variables</div>
-                    {selected.variables.map((v) => (
-                      <div key={v.name}>
+                    {selected.variables.map((v) => {
+                      const label = (
                         <label className="text-xs text-muted-foreground">
                           {v.name}
                           {v.required ? ' *' : ''}
                           {v.description ? ` — ${v.description}` : ''}
                         </label>
-                        <input
-                          value={varValues[v.name] ?? ''}
-                          onChange={(e) =>
-                            setVarValues((prev) => ({ ...prev, [v.name]: e.target.value }))
-                          }
-                          className="mt-0.5 w-full rounded border border-border bg-background px-2 py-1 text-xs outline-none"
-                        />
-                      </div>
-                    ))}
+                      );
+                      const set = (val: string) =>
+                        setVarValues((prev) => ({ ...prev, [v.name]: val }));
+                      const fieldClass =
+                        'mt-0.5 w-full rounded border border-border bg-background px-2 py-1 text-xs outline-none';
+                      if (v.enum && v.enum.length > 0) {
+                        return (
+                          <div key={v.name}>
+                            {label}
+                            <select
+                              value={varValues[v.name] ?? ''}
+                              onChange={(e) => set(e.target.value)}
+                              className={fieldClass}
+                            >
+                              <option value="">— select —</option>
+                              {v.enum.map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      }
+                      if (v.multiline) {
+                        return (
+                          <div key={v.name}>
+                            {label}
+                            <textarea
+                              value={varValues[v.name] ?? ''}
+                              onChange={(e) => set(e.target.value)}
+                              rows={4}
+                              className={`${fieldClass} resize-y font-mono`}
+                            />
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={v.name}>
+                          {label}
+                          <input
+                            value={varValues[v.name] ?? ''}
+                            onChange={(e) => set(e.target.value)}
+                            className={fieldClass}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "The under-tested code",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

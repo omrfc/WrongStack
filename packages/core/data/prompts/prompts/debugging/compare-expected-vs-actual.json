@@ -18,12 +18,14 @@
     {
       "name": "expected",
       "description": "What you expected",
-      "required": true
+      "required": true,
+      "multiline": true
     },
     {
       "name": "actual",
       "description": "What you got",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

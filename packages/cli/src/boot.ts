@@ -233,7 +233,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
       logger,
       modelsRegistry,
       bundledSkillsDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
-      bundledPromptsDir: resolveBundledPromptsDir(),
+      bundledPromptsDir: config.features.prompts === false ? undefined : resolveBundledPromptsDir(),
     });
     const sessionStore = container.resolve(TOKENS.SessionStore);
     const skillLoader = container.resolve(TOKENS.SkillLoader);

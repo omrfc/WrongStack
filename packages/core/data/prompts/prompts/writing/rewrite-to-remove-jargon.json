@@ -23,7 +23,8 @@
     {
       "name": "text",
       "description": "The jargon-heavy text",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

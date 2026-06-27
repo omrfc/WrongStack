@@ -310,11 +310,23 @@ function buildPromptSearchCommand(
         const entry = await loader.find(slug);
         if (!entry) return { message: `No prompt with slug/id "${slug}". Try /prompt ${slug}` };
         const values = parseKeyValues(kvs);
-        const { text, missing } = renderPrompt(entry, values);
+        const { text, missing, invalid } = renderPrompt(entry, values);
+        if (invalid.length > 0) {
+          const hint = (entry.variables ?? [])
+            .filter((v) => invalid.includes(v.name))
+            .map((v) => `  ${v.name}: one of ${(v.enum ?? []).join(' | ')}`)
+            .join('\n');
+          return {
+            message: `"${entry.title}" got an out-of-range value for: ${invalid.join(', ')}\n${hint}`,
+          };
+        }
         if (missing.length > 0) {
           const hint = (entry.variables ?? [])
             .filter((v) => missing.includes(v.name))
-            .map((v) => `  ${v.name}=…${v.description ? `  (${v.description})` : ''}`)
+            .map((v) => {
+              const opts = v.enum && v.enum.length > 0 ? `  [${v.enum.join(' | ')}]` : '';
+              return `  ${v.name}=…${v.description ? `  (${v.description})` : ''}${opts}`;
+            })
             .join('\n');
           return {
             message: `"${entry.title}" needs values for: ${missing.join(', ')}\n${hint}\n\nRe-run: /prompt insert ${entry.slug} ${missing.map((m) => `${m}=…`).join(' ')}`,
@@ -511,17 +523,42 @@ function parseTags(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/** `--var name:description` may repeat; we accept a comma-separated list too. */
+/**
+ * `--var name:description` may repeat; we accept a comma-separated list too.
+ * An optional `::meta` suffix declares richness: `::multiline` for a textarea
+ * hint and `::enum=a|b|c` for a closed value set. Examples:
+ *   name:What it does
+ *   code:Paste the snippet::multiline
+ *   flavor:Regex flavor::enum=PCRE|JS|Python
+ */
 function parseVarFlags(raw: string | undefined): PromptVariable[] | undefined {
   if (!raw) return undefined;
   const out: PromptVariable[] = [];
   for (const part of raw.split(',')) {
     const trimmed = part.trim();
     if (!trimmed) continue;
-    const colon = trimmed.indexOf(':');
-    const name = colon === -1 ? trimmed : trimmed.slice(0, colon).trim();
-    const description = colon === -1 ? undefined : trimmed.slice(colon + 1).trim();
-    if (name) out.push({ name, description, required: true });
+    // Split the optional `::meta` tail off first so a `:` in the description
+    // (before `::`) still parses as part of the description.
+    const metaAt = trimmed.indexOf('::');
+    const head = metaAt === -1 ? trimmed : trimmed.slice(0, metaAt).trim();
+    const meta = metaAt === -1 ? '' : trimmed.slice(metaAt + 2).trim();
+    const colon = head.indexOf(':');
+    const name = colon === -1 ? head : head.slice(0, colon).trim();
+    const description = colon === -1 ? undefined : head.slice(colon + 1).trim();
+    if (!name) continue;
+    const v: PromptVariable = { name, description, required: true };
+    for (const token of meta.split('::').map((t) => t.trim()).filter(Boolean)) {
+      if (token === 'multiline') v.multiline = true;
+      else if (token.startsWith('enum=')) {
+        const opts = token
+          .slice(5)
+          .split('|')
+          .map((o) => o.trim())
+          .filter(Boolean);
+        if (opts.length > 0) v.enum = opts;
+      }
+    }
+    out.push(v);
   }
   return out.length > 0 ? out : undefined;
 }

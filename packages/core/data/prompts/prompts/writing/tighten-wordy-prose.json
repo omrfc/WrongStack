@@ -18,7 +18,8 @@
     {
       "name": "text",
       "description": "The text to tighten",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

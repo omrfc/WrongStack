@@ -261,14 +261,17 @@ function isSubsequence(needle: string, hay: string): boolean {
 /**
  * Fill a prompt's `{{variable}}` placeholders with `values`. Unknown
  * placeholders are left intact unless a declared variable supplies a `default`.
- * Returns the rendered string plus any required variables left unfilled.
+ * Returns the rendered string, any required variables left unfilled
+ * (`missing`), and any supplied values outside a variable's declared `enum`
+ * (`invalid`).
  */
 export function renderPrompt(
   entry: PromptEntry,
   values: Record<string, string> = {},
-): { text: string; missing: string[] } {
+): { text: string; missing: string[]; invalid: string[] } {
   const declared = new Map((entry.variables ?? []).map((v) => [v.name, v]));
   const missing: string[] = [];
+  const invalid: string[] = [];
 
   const text = entry.content.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (whole, rawName: string) => {
     const name = rawName.trim();
@@ -289,9 +292,20 @@ export function renderPrompt(
         missing.push(v.name);
       }
     }
+    // Reject a supplied value that isn't one of the declared enum options.
+    if (
+      v.enum &&
+      v.enum.length > 0 &&
+      Object.hasOwn(values, v.name) &&
+      values[v.name] !== undefined &&
+      values[v.name] !== '' &&
+      !v.enum.includes(values[v.name] as string)
+    ) {
+      invalid.push(v.name);
+    }
   }
 
-  return { text, missing };
+  return { text, missing, invalid };
 }
 
 function escapeRegExp(s: string): string {

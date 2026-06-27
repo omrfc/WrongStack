@@ -203,5 +203,24 @@ describe('renderPrompt', () => {
     const r = renderPrompt(e, {});
     expect(r.text).toBe('no {{unknown}} here');
     expect(r.missing).toEqual([]);
+    expect(r.invalid).toEqual([]);
+  });
+
+  it('reports an enum value outside the declared set as invalid', () => {
+    const e = entry('enm', {
+      content: 'Use {{flavor}} syntax',
+      variables: [{ name: 'flavor', required: true, enum: ['PCRE', 'JavaScript'] }],
+    });
+    // A value inside the set renders cleanly.
+    const ok = renderPrompt(e, { flavor: 'PCRE' });
+    expect(ok.text).toBe('Use PCRE syntax');
+    expect(ok.invalid).toEqual([]);
+    expect(ok.missing).toEqual([]);
+    // A value outside the set is flagged (and still substituted into text).
+    const bad = renderPrompt(e, { flavor: 'Perl6' });
+    expect(bad.invalid).toEqual(['flavor']);
+    // An empty value is "not chosen yet" — never flagged invalid.
+    const empty = renderPrompt(e, { flavor: '' });
+    expect(empty.invalid).toEqual([]);
   });
 });

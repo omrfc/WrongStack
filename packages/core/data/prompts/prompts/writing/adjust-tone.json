@@ -29,7 +29,8 @@
     {
       "name": "text",
       "description": "The text to rewrite",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

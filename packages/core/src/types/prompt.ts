@@ -73,6 +73,18 @@ export interface PromptVariable {
   description?: string | undefined;
   default?: string | undefined;
   required?: boolean | undefined;
+  /**
+   * Closed set of allowed values. When present, surfaces render a dropdown
+   * instead of a free text field and a supplied value outside the set is
+   * reported as invalid by {@link renderPrompt}.
+   */
+  enum?: string[] | undefined;
+  /**
+   * UI hint: the value is expected to span multiple lines (pasted code, a
+   * diff, a long passage). Surfaces render a textarea instead of a one-line
+   * input. Has no effect on rendering — purely presentational.
+   */
+  multiline?: boolean | undefined;
 }
 
 /**

@@ -19,7 +19,8 @@
     {
       "name": "code",
       "description": "The code to harden",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

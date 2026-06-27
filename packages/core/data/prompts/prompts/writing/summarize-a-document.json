@@ -23,7 +23,8 @@
     {
       "name": "text",
       "description": "The document to summarize",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

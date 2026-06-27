@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "The conditional-heavy code",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "Code with suspected duplication",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

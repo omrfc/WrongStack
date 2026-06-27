@@ -19,7 +19,8 @@
     {
       "name": "test_and_output",
       "description": "The test code and its failure output",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

@@ -19,7 +19,8 @@
     {
       "name": "prompt",
       "description": "The prompt to slim down",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

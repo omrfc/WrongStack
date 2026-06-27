@@ -19,7 +19,8 @@
     {
       "name": "migration",
       "description": "The migration to review",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

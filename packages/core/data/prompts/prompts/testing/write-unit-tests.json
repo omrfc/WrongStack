@@ -23,7 +23,8 @@
     {
       "name": "code",
       "description": "The code under test",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }

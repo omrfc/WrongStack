@@ -95,7 +95,8 @@ export function wireContainer(deps: WireContainerDeps): {
       eliseThreshold: deps.config.context.eliseThreshold,
     },
     bundledSkillsDir: deps.config.features.skills ? resolveBundledSkillsDir() : undefined,
-    bundledPromptsDir: resolveBundledPromptsDir(),
+    bundledPromptsDir:
+      deps.config.features.prompts === false ? undefined : resolveBundledPromptsDir(),
   });
 
   // Bootstrap-level overrides on top of `createDefaultContainer`'s

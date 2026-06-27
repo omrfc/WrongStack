@@ -18,7 +18,8 @@
     {
       "name": "code",
       "description": "The oversized unit",
-      "required": true
+      "required": true,
+      "multiline": true
     }
   ]
 }
