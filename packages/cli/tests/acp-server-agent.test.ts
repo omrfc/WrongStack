@@ -41,9 +41,14 @@ vi.mock('@wrongstack/runtime', () => ({
   }),
 }));
 
-import { AcpServerConfigError, buildAcpServerAgentFactory } from '../src/acp-server-agent.js';
+import {
+  ACPClientPermissionPolicy,
+  AcpServerConfigError,
+  buildAcpServerAgentFactory,
+} from '../src/acp-server-agent.js';
 import type { RunTurnApi } from '@wrongstack/acp/agent';
 import type { SubcommandDeps } from '../src/subcommands/index.js';
+import { ToolCapabilities, type Tool } from '@wrongstack/core';
 
 function makeStubProvider(): Provider {
   return {
@@ -220,5 +225,173 @@ describe('buildAcpServerAgentFactory', () => {
     await agentFor('sess-c', '/tmp');
 
     expect(mockSetupProvider).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Direct unit tests for ACPClientPermissionPolicy.
+ *
+ * Regression coverage for the malformed-response bug at acp-server-agent.ts:94.
+ * Pre-fix, a client response shaped like the `'selected'` variant of
+ * `RequestPermissionOutcome` (`{ outcome: 'selected'; optionId: string }`) but
+ * missing the typed `optionId` field would dereference
+ * `outcome.optionId.startsWith('allow')` and throw a TypeError; the
+ * surrounding try/catch swallowed the throw and returned a misleading
+ * `{ permission: 'deny', source: 'deny', reason: 'no permission channel' }`,
+ * hiding a protocol violation as a transport failure. The fix narrows the
+ * permission decision to `typeof optionId === 'string'` so a missing
+ * `optionId` falls through to the user-deny branch with the correct reason.
+ *
+ * The earlier `describe('buildAcpServerAgentFactory')` block tests through
+ * the factory + Agent + ToolRegistry — fine for the happy paths but heavy
+ * enough that exercising the policy directly is much cleaner for the
+ * malformed-response corner case.
+ */
+describe('ACPClientPermissionPolicy', () => {
+  // A minimal tool stub whose capabilities are NOT in the safe set, so the
+  // policy doesn't short-circuit on the `isSafe` early return and actually
+  // reaches `requestPermission`. Mirrors the builtin's bash tool — its
+  // SHELL_ARBITRARY capability is what causes the production policy to
+  // route the call through the ACP client for approval.
+  const sideEffectingTool: Tool = {
+    name: 'bash',
+    description: 'stub',
+    inputSchema: { type: 'object' },
+    permission: 'confirm',
+    mutating: true,
+    capabilities: [ToolCapabilities.SHELL_ARBITRARY],
+    execute: async () => ({}),
+  };
+
+  it('denies (with "rejected by ACP client" reason) when a malformed "selected" response omits optionId', async () => {
+    // Regression: pre-fix, a client response shaped like the `'selected'`
+    // variant of RequestPermissionOutcome but missing the typed `optionId`
+    // field used to throw a TypeError at `outcome.optionId.startsWith(...)`.
+    // The fix narrows the access so the permission decision is
+    // `{ permission: 'deny', source: 'user' }` — NOT the catch-all
+    // `{ source: 'deny', reason: 'no permission channel' }` path, which
+    // would hide a real protocol violation as a transport failure.
+    //
+    // We cast through `never` because the malformed shape does not match
+    // either variant of the union — that mismatch is exactly what the bug
+    // is about. The runtime check is what defends against it.
+    const requestPermission = vi.fn(async () => ({
+      outcome: 'selected',
+    } as never));
+    const policy = new ACPClientPermissionPolicy(requestPermission);
+
+    const decision = await policy.evaluate(sideEffectingTool, { path: 'a.ts' });
+
+    expect(decision).toEqual({
+      permission: 'deny',
+      source: 'user',
+      reason: 'rejected by ACP client',
+    });
+    // Make sure the test double was actually invoked — without this, the
+    // test could pass for the wrong reason if `isSafe` ever started
+    // short-circuiting for our stub.
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+  });
+
+  it('approves with source "user" when the response carries a valid allow_* optionId', async () => {
+    // Locks in the happy-path contract on the post-fix side, so a future
+    // change to the typeof guard (e.g. reverting to a non-narrowed check)
+    // can't silently break legitimate approvals.
+    const requestPermission = vi.fn(async () => ({
+      outcome: 'selected',
+      optionId: 'allow_once',
+    }));
+    const policy = new ACPClientPermissionPolicy(requestPermission);
+
+    const decision = await policy.evaluate(sideEffectingTool, { path: 'a.ts' });
+
+    expect(decision).toEqual({ permission: 'auto', source: 'user' });
+  });
+
+  it('approves with source "user" when the client selects allow_always', async () => {
+    // Same shape as the above, but with allow_always — confirms the
+    // `startsWith('allow')` check accepts both allow_once and allow_always.
+    const requestPermission = vi.fn(async () => ({
+      outcome: 'selected',
+      optionId: 'allow_always',
+    }));
+    const policy = new ACPClientPermissionPolicy(requestPermission);
+
+    const decision = await policy.evaluate(sideEffectingTool, { path: 'a.ts' });
+
+    expect(decision).toEqual({ permission: 'auto', source: 'user' });
+  });
+
+  it('denies (with "rejected by ACP client" reason) when the user picks reject_once', async () => {
+    // Confirm that an explicit user-rejection is still attributed to the
+    // user, not to "no permission channel". A regression in the optionId
+    // extraction could otherwise conflate these two deny paths.
+    const requestPermission = vi.fn(async () => ({
+      outcome: 'selected',
+      optionId: 'reject_once',
+    }));
+    const policy = new ACPClientPermissionPolicy(requestPermission);
+
+    const decision = await policy.evaluate(sideEffectingTool, { path: 'a.ts' });
+
+    expect(decision).toEqual({
+      permission: 'deny',
+      source: 'user',
+      reason: 'rejected by ACP client',
+    });
+  });
+
+  it('denies (with "rejected by ACP client" reason) when the client cancels the prompt', async () => {
+    // Cancelled outcome carries no optionId; the narrowed access still
+    // denies with the user-rejection reason rather than the catch-all path.
+    const requestPermission = vi.fn(async () => ({
+      outcome: 'cancelled',
+    }));
+    const policy = new ACPClientPermissionPolicy(requestPermission);
+
+    const decision = await policy.evaluate(sideEffectingTool, { path: 'a.ts' });
+
+    expect(decision).toEqual({
+      permission: 'deny',
+      source: 'user',
+      reason: 'rejected by ACP client',
+    });
+  });
+
+  it('returns the catch-all "no permission channel" deny when requestPermission throws', async () => {
+    // Distinct from the malformed-response path: a thrown promise lands in
+    // the `catch` block (e.g. client disconnected, RPC timeout). We want
+    // this to keep its existing distinct reason so operators can tell the
+    // two failure modes apart in logs.
+    const requestPermission = vi.fn(async () => {
+      throw new Error('client disconnected');
+    });
+    const policy = new ACPClientPermissionPolicy(requestPermission);
+
+    const decision = await policy.evaluate(sideEffectingTool, { path: 'a.ts' });
+
+    expect(decision).toEqual({
+      permission: 'deny',
+      source: 'deny',
+      reason: 'no permission channel',
+    });
+  });
+
+  it('auto-approves safe tools without consulting the client', async () => {
+    // Tools whose capabilities are all in the safe set bypass the channel
+    // entirely. Locking this in keeps the regression coverage honest: if the
+    // policy ever changed to consult the client for safe tools, that change
+    // would need a deliberate test update rather than silently sliding in.
+    const requestPermission = vi.fn();
+    const policy = new ACPClientPermissionPolicy(requestPermission);
+    const safeTool: Tool = {
+      ...sideEffectingTool,
+      capabilities: [ToolCapabilities.FS_READ],
+    };
+
+    const decision = await policy.evaluate(safeTool, { path: 'a.ts' });
+
+    expect(decision).toEqual({ permission: 'auto', source: 'default' });
+    expect(requestPermission).not.toHaveBeenCalled();
   });
 });

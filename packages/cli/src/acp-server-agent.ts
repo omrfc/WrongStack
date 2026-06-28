@@ -67,8 +67,16 @@ const SAFE_CAPS = new Set<string>([
  * while auto-approving read-only/safe tools. This replaces the blanket
  * auto-approve so an editor driving WrongStack-as-agent gets a real
  * permission prompt before file writes / shell commands run.
+ *
+ * Exported for direct regression testing of the malformed-response path —
+ * `acp-server-agent.test.ts` injects a response whose `optionId` is missing
+ * (which previously threw a TypeError at `outcome.optionId.startsWith(...)`
+ * and was misattributed to "no permission channel" by the surrounding
+ * try/catch). Production callers go through `buildAcpServerAgentFactory`,
+ * which constructs this internally when the client exposes a permission
+ * channel.
  */
-class ACPClientPermissionPolicy implements PermissionPolicy {
+export class ACPClientPermissionPolicy implements PermissionPolicy {
   constructor(private readonly requestPermission: RunTurnApi['requestPermission']) {}
 
   async evaluate(tool: Tool, input: unknown): Promise<PermissionDecision> {
@@ -90,8 +98,8 @@ class ACPClientPermissionPolicy implements PermissionPolicy {
           { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
         ],
       });
-      const allowed =
-        outcome.outcome === 'selected' && outcome.optionId.startsWith('allow');
+      const optionId = outcome.outcome === 'selected' ? outcome.optionId : undefined;
+      const allowed = typeof optionId === 'string' && optionId.startsWith('allow');
       return allowed
         ? { permission: 'auto', source: 'user' }
         : { permission: 'deny', source: 'user', reason: 'rejected by ACP client' };
