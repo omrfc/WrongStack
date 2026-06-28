@@ -1281,14 +1281,7 @@ export function reducer(state: State, action: Action): State {
       return { ...state, sendModePicker: null };
     case 'resetContextChip':
       return { ...state, contextChipVersion: state.contextChipVersion + 1 };
-    // fleetBatch must run BEFORE the fleet delegation because it re-dispatches
-    // individual actions through the main reducer (cannot be extracted).
-    case 'fleetBatch': {
-      let s = state;
-      for (const a of action.actions) s = reducer(s, a);
-      return s;
-    }
-
+    // fleetBatch runs below (cannot be extracted because it needs the reducer ref).
     // --- Fleet & leader (delegated to reducers/fleet.ts) ---
     case 'fleetSeed':
     case 'fleetSpawn':
