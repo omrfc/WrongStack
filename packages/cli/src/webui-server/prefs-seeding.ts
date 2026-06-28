@@ -81,6 +81,17 @@ export const PREF_KEYS = [
   'indexOnStart',
   'contextAutoCompact',
   'contextStrategy',
+  'contextMode',
+  'tokenSavingTier',
+  'maxConcurrent',
+  'titleAnimation',
+  // Model-runtime reasoning/cache — parity with the standalone server, which
+  // already persists these. Without them, `wrongstack --webui` silently drops
+  // reasoning/cache changes made in the browser (lost on restart).
+  'reasoningMode',
+  'reasoningEffort',
+  'reasoningPreserve',
+  'cacheTtl',
   'logLevel',
   'auditLevel',
   'hqEnabled',
@@ -148,6 +159,22 @@ export async function seedConfigToMeta(opts: CliWebUIOptions): Promise<void> {
     meta['contextAutoCompact'] =
       (cfg.context as Record<string, unknown>)?.['autoCompact'] !== false;
     meta['contextStrategy'] = (cfg.context as Record<string, unknown>)?.['strategy'] ?? 'hybrid';
+    meta['contextMode'] = (cfg.context as Record<string, unknown>)?.['mode'] ?? 'balanced';
+    {
+      const tsm = (features as Record<string, unknown>)['tokenSavingMode'];
+      meta['tokenSavingTier'] = typeof tsm === 'string' ? tsm : tsm ? 'medium' : 'off';
+    }
+    meta['maxConcurrent'] = typeof cfg.maxConcurrent === 'number' ? cfg.maxConcurrent : 10;
+    meta['titleAnimation'] = autonomyCfg['terminalTitleAnimation'] !== false;
+    {
+      const mr = (cfg.modelRuntime as Record<string, unknown> | undefined) ?? {};
+      const reasoning = (mr['reasoning'] as Record<string, unknown> | undefined) ?? {};
+      const cache = (mr['cache'] as Record<string, unknown> | undefined) ?? {};
+      meta['reasoningMode'] = (reasoning['mode'] as string) ?? 'auto';
+      meta['reasoningEffort'] = (reasoning['effort'] as string) ?? 'high';
+      meta['reasoningPreserve'] = reasoning['preserve'] === true;
+      meta['cacheTtl'] = (cache['ttl'] as string) ?? 'default';
+    }
     meta['logLevel'] = (cfg.log as Record<string, unknown>)?.['level'] ?? 'info';
     meta['auditLevel'] = (cfg.session as Record<string, unknown>)?.['auditLevel'] ?? 'standard';
     meta['maxIterations'] = (cfg.tools as Record<string, unknown>)?.['maxIterations'] ?? 500;
@@ -263,6 +290,11 @@ export function createPrefsSeeding(opts: CliWebUIOptions): PrefsSeeding {
       if ('enhanceDelayMs' in payload) autonomy['enhanceDelayMs'] = payload['enhanceDelayMs'];
       if ('enhanceLanguage' in payload) autonomy['enhanceLanguage'] = payload['enhanceLanguage'];
       if ('nextPrediction' in payload) decrypted['nextPrediction'] = payload['nextPrediction'];
+      // Active provider/model — written by model.switch so a browser model
+      // change survives restart (parity with the standalone server, which
+      // persists provider+model in its model.switch handler).
+      if (typeof payload['provider'] === 'string') decrypted['provider'] = payload['provider'];
+      if (typeof payload['model'] === 'string') decrypted['model'] = payload['model'];
       if ('fallbackModels' in payload) decrypted['fallbackModels'] = payload['fallbackModels'];
       if ('fallbackProfiles' in payload)
         decrypted['fallbackProfiles'] = payload['fallbackProfiles'];
@@ -296,11 +328,44 @@ export function createPrefsSeeding(opts: CliWebUIOptions): PrefsSeeding {
         decrypted['indexing'] = idx;
       }
 
-      if ('contextAutoCompact' in payload || 'contextStrategy' in payload) {
+      if ('contextAutoCompact' in payload || 'contextStrategy' in payload || 'contextMode' in payload) {
         const ctx2 = (decrypted.context as Record<string, unknown>) ?? {};
         if ('contextAutoCompact' in payload) ctx2['autoCompact'] = payload['contextAutoCompact'];
         if ('contextStrategy' in payload) ctx2['strategy'] = payload['contextStrategy'];
+        if ('contextMode' in payload) ctx2['mode'] = payload['contextMode'];
         decrypted['context'] = ctx2;
+      }
+
+      if ('tokenSavingTier' in payload) {
+        const feats = (decrypted.features as Record<string, unknown>) ?? {};
+        feats['tokenSavingMode'] = payload['tokenSavingTier'];
+        decrypted['features'] = feats;
+      }
+
+      if ('maxConcurrent' in payload) decrypted['maxConcurrent'] = payload['maxConcurrent'];
+
+      if ('titleAnimation' in payload) {
+        autonomy['terminalTitleAnimation'] = payload['titleAnimation'];
+        decrypted['autonomy'] = autonomy;
+      }
+
+      if (
+        'reasoningMode' in payload ||
+        'reasoningEffort' in payload ||
+        'reasoningPreserve' in payload ||
+        'cacheTtl' in payload
+      ) {
+        const mr = (decrypted.modelRuntime as Record<string, unknown>) ?? {};
+        const reasoning = (mr['reasoning'] as Record<string, unknown>) ?? {};
+        if ('reasoningMode' in payload) reasoning['mode'] = payload['reasoningMode'];
+        if ('reasoningEffort' in payload) reasoning['effort'] = payload['reasoningEffort'];
+        if ('reasoningPreserve' in payload) reasoning['preserve'] = payload['reasoningPreserve'];
+        mr['reasoning'] = reasoning;
+        if ('cacheTtl' in payload) {
+          if (payload['cacheTtl'] === 'default') delete mr['cache'];
+          else mr['cache'] = { ttl: payload['cacheTtl'] };
+        }
+        decrypted['modelRuntime'] = mr;
       }
 
       if ('logLevel' in payload) {

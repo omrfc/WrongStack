@@ -978,6 +978,25 @@ export async function startWebUI(
     context.meta['logLevel'] = config.log?.level ?? 'info';
     context.meta['auditLevel'] = config.session?.auditLevel ?? 'standard';
     context.meta['maxIterations'] = config.tools?.maxIterations ?? 500;
+    context.meta['contextMode'] = config.context?.mode ?? 'balanced';
+    {
+      const tsm = config.features?.tokenSavingMode;
+      context.meta['tokenSavingTier'] =
+        typeof tsm === 'string' ? tsm : tsm ? 'medium' : 'off';
+    }
+    context.meta['maxConcurrent'] =
+      typeof config.maxConcurrent === 'number' ? config.maxConcurrent : 10;
+    context.meta['titleAnimation'] = autonomyCfg['terminalTitleAnimation'] !== false;
+    {
+      const mr = (config.modelRuntime ?? {}) as {
+        reasoning?: { mode?: string; effort?: string; preserve?: boolean };
+        cache?: { ttl?: string };
+      };
+      context.meta['reasoningMode'] = mr.reasoning?.mode ?? 'auto';
+      context.meta['reasoningEffort'] = mr.reasoning?.effort ?? 'high';
+      context.meta['reasoningPreserve'] = mr.reasoning?.preserve === true;
+      context.meta['cacheTtl'] = mr.cache?.ttl ?? 'default';
+    }
     const hqConfig = (config as { hq?: { enabled?: boolean; url?: string; token?: string; rawContent?: boolean } }).hq;
     context.meta['hqEnabled'] = hqConfig?.enabled === true;
     context.meta['hqUrl'] = hqConfig?.url ?? '';
@@ -1003,7 +1022,8 @@ export async function startWebUI(
     'enhanceEnabled', 'enhanceDelayMs', 'enhanceLanguage',
     'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
     'featureModelsRegistry', 'indexOnStart',
-    'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+    'contextAutoCompact', 'contextStrategy', 'contextMode', 'tokenSavingTier',
+    'maxConcurrent', 'titleAnimation', 'logLevel', 'auditLevel',
     'hqEnabled', 'hqUrl', 'hqToken', 'hqRawContent',
     'tgConfigured', 'tgSessionEnd', 'tgDelegate', 'tgLongToolMs',
     'reasoningMode', 'reasoningEffort', 'reasoningPreserve', 'cacheTtl',
@@ -1090,11 +1110,29 @@ export async function startWebUI(
         }
       }
 
-      if (typeof payload['contextAutoCompact'] === 'boolean' || typeof payload['contextStrategy'] === 'string') {
+      if (
+        typeof payload['contextAutoCompact'] === 'boolean' ||
+        typeof payload['contextStrategy'] === 'string' ||
+        typeof payload['contextMode'] === 'string'
+      ) {
         const ctxCfg = (decrypted.context as Record<string, unknown>) ?? {};
         if (typeof payload['contextAutoCompact'] === 'boolean') ctxCfg.autoCompact = payload['contextAutoCompact'];
         if (typeof payload['contextStrategy'] === 'string') ctxCfg.strategy = payload['contextStrategy'];
+        if (typeof payload['contextMode'] === 'string') ctxCfg.mode = payload['contextMode'];
         decrypted.context = ctxCfg;
+      }
+      if (typeof payload['tokenSavingTier'] === 'string') {
+        const featsCfg = (decrypted.features as Record<string, unknown>) ?? {};
+        featsCfg.tokenSavingMode = payload['tokenSavingTier'];
+        decrypted.features = featsCfg;
+      }
+      if (typeof payload['maxConcurrent'] === 'number') {
+        decrypted.maxConcurrent = payload['maxConcurrent'];
+      }
+      if (typeof payload['titleAnimation'] === 'boolean') {
+        const autoCfg = (decrypted.autonomy as Record<string, unknown>) ?? {};
+        autoCfg.terminalTitleAnimation = payload['titleAnimation'];
+        decrypted.autonomy = autoCfg;
       }
       if (typeof payload['logLevel'] === 'string') {
         const logCfg = (decrypted.log as Record<string, unknown>) ?? {};

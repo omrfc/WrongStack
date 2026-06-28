@@ -36,7 +36,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     '  /settings context-auto-compact on|off   Auto-compact context when thresholds crossed',
     '  /settings token-saving off|minimal|light|medium|aggressive   Token-saving mode',
     '  /settings max-concurrent <n>   Max concurrent subagents (0 = default)',
-    '  /settings title-animation on|off   Terminal title animation',
+    '  /settings title-animation on|off   Animate the terminal/window title while the agent is active',
     '  /settings reasoning auto|on|off   Reasoning mode (auto = provider default)',
     '  /settings reasoning-effort none|minimal|low|medium|high|xhigh|max   Reasoning effort',
     '  /settings reasoning-preserve on|off   Preserve thinking across turns',
@@ -84,6 +84,9 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     const features = opts.configStore.get().features as never as Record<string, unknown> | undefined;
     const tokenSavingTier = (features?.tokenSavingMode as string) ?? 'off';
     const maxConcurrent = opts.configStore.get().maxConcurrent ?? 4;
+    const titleAnimation =
+      (autonomy as { terminalTitleAnimation?: boolean } | undefined)?.terminalTitleAnimation !==
+      false;
     const modelRuntime = opts.configStore.get().modelRuntime as
       | { reasoning?: { mode?: string; effort?: string; preserve?: boolean }; cache?: { ttl?: string } }
       | undefined;
@@ -120,6 +123,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       `  context auto-compact: ${contextAutoCompact ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings context-auto-compact on|off')}`,
       `  token-saving:       ${color.cyan(tokenSavingTier)}   ${color.dim('change: /settings token-saving off|minimal|light|medium|aggressive')}`,
       `  max-concurrent:     ${color.cyan(maxConcurrent === 0 ? 'default' : String(maxConcurrent))}   ${color.dim('change: /settings max-concurrent <n>')}`,
+      `  title animation:    ${titleAnimation ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings title-animation on|off')}`,
       `  reasoning mode:     ${color.cyan(reasoningMode)}   ${color.dim('change: /settings reasoning auto|on|off')}`,
       `  reasoning effort:   ${color.cyan(reasoningEffort)}   ${color.dim('change: /settings reasoning-effort <level>')}`,
       `  reasoning preserve: ${reasoningPreserve ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings reasoning-preserve on|off')}`,
@@ -557,8 +561,12 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
             return { message: `${color.amber('Usage:')} /settings title-animation on|off` };
           }
           const on = raw === 'on';
-          await persistConfigSetting(persistDeps, (cfg) => {
-            cfg.titleAnimation = on;
+          // Canonical key is autonomy.terminalTitleAnimation — the same field
+          // the TUI picker writes and execution.ts reads. (The old top-level
+          // cfg.titleAnimation key does not exist in the Config schema and was
+          // never read by anything.)
+          await persistAutonomySetting(persistDeps, (autonomy) => {
+            (autonomy as Record<string, unknown>).terminalTitleAnimation = on;
           });
           return {
             message: `${color.green('✓')} title animation → ${on ? color.cyan('on') : color.dim('off')}   ${color.dim('terminal title animation')}`,

@@ -43,6 +43,13 @@ export interface AgentConfigContext extends WsCommon {
   onMaxContextResolved?:
     | ((providerId: string, modelId: string, maxContext: number) => void)
     | undefined;
+  /**
+   * Persist durable keys to config.json (runWebUI's createPrefsSeeding closure).
+   * Used by model.switch to write the new provider+model so the choice survives
+   * restart — parity with the standalone server. Optional: when absent the
+   * switch still applies live, it just doesn't persist.
+   */
+  persistPrefs?: ((payload: Record<string, unknown>) => Promise<void>) | undefined;
 }
 
 function sendResult(ctx: WsCommon, ws: WebSocket, success: boolean, message: string): void {
@@ -144,6 +151,10 @@ export async function handleModelSwitch(
       .catch(() => undefined);
     const maxContext = resolved?.capabilities.maxContext ?? actx.provider.capabilities.maxContext;
     actx.provider.capabilities.maxContext = maxContext;
+
+    // Persist the new provider+model to config.json so the choice survives a
+    // restart (the standalone server does this in its own model.switch handler).
+    await ctx.persistPrefs?.({ provider: newProvider, model: newModel });
 
     sendResult(ctx, ws, true, `Switched to ${newProvider} / ${newModel}`);
     if (ctx.onMaxContextResolved) {

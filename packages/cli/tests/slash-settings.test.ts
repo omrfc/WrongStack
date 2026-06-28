@@ -189,4 +189,26 @@ describe('/settings slash command', () => {
     expect(cmd.help).toContain('breaker on|off');
     expect(cmd.help).toContain('breaker-timeout');
   });
+
+  it('title-animation off persists autonomy.terminalTitleAnimation (NOT top-level titleAnimation)', async () => {
+    const { ctx, globalConfig } = makeCtx();
+    const res = await buildSettingsCommand(ctx).run!('title-animation off');
+    expect(stripAnsi(res!.message!)).toContain('title animation → off');
+
+    const written = JSON.parse(readFileSync(globalConfig, 'utf8'));
+    // Canonical key — the one execution.ts reads and the TUI picker writes.
+    expect(written.autonomy.terminalTitleAnimation).toBe(false);
+    // The old broken key must NOT be written.
+    expect(written.titleAnimation).toBeUndefined();
+  });
+
+  it('view reflects title animation (default on) and disabled state', async () => {
+    const onCtx = makeCtx();
+    const onRes = await buildSettingsCommand(onCtx.ctx).run!('');
+    expect(stripAnsi(onRes!.message!)).toContain('title animation:    on');
+
+    const offCtx = makeCtx({ autonomy: { terminalTitleAnimation: false } });
+    const offRes = await buildSettingsCommand(offCtx.ctx).run!('');
+    expect(stripAnsi(offRes!.message!)).toContain('title animation:    off');
+  });
 });

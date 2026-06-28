@@ -1557,6 +1557,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     buildSessionStart: (overrides) => buildSessionStartPayload(overrides),
     modelsRegistry: opts.modelsRegistry,
     onMaxContextResolved: opts.onModelContextResolved,
+    persistPrefs,
     send,
     broadcast,
     log: (m) => console.log(m),

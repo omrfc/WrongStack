@@ -242,6 +242,16 @@ const PROJECT_SAFE_FIELDS = new Set([
   'provider',
   'model',
   'fallbackModels',
+  // Kept in sync with core's IN_PROJECT_ALLOWED_KEYS (config-loader.ts): these
+  // model-routing prefs are explicitly safe to READ from a per-project config,
+  // so the writer must not strip them — otherwise a scope=project /fallback
+  // profile/fav write (or a TUI full-config write under project scope) would be
+  // silently dropped while the loader would happily accept them on next boot.
+  'fallbackProfiles',
+  'favoriteModels',
+  'favoriteModelsOnly',
+  'fallbackAuto',
+  'models',
   'modelMatrix',
   'maxConcurrent',
   'autonomy',
@@ -258,6 +268,7 @@ const PROJECT_SAFE_FIELDS = new Set([
   'tools',
   'launch',
   'circuitBreaker',
+  'adaptiveConcurrency',
   'modelRuntime',
 ]);
 
