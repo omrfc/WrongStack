@@ -214,7 +214,7 @@ export function buildCspHeader(
     `ws://127.0.0.1:${wsPort}`,
     `wss://127.0.0.1:${wsPort}`,
   ]);
-  if (requestHost && requestHost !== '127.0.0.1') {
+  if (requestHost && requestHost !== '127.0.0.1' && requestHost !== '::1' && requestHost !== '[::1]') {
     const host = formatCspHostname(requestHost);
     connect.add(`ws://${host}:${wsPort}`);
     connect.add(`wss://${host}:${wsPort}`);

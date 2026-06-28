@@ -51,7 +51,7 @@ export default defineConfig({
         "script-src 'self' 'unsafe-inline'",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: https:",
-        "connect-src 'self' ws://127.0.0.1:* wss://127.0.0.1:* ws://localhost:* wss://localhost:* ws://[::1]:* wss://[::1]:*",
+        "connect-src 'self' ws://127.0.0.1:* wss://127.0.0.1:* ws://localhost:* wss://localhost:*",
         "worker-src 'self' blob:",
         "font-src 'self' data:",
         "object-src 'none'",

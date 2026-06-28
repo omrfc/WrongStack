@@ -6716,6 +6716,7 @@ export function App({
                 return (
                   <SendModePicker
                     selected={info.selected}
+                    messagePreview={info.displayText}
                     onMove={(delta) => dispatch({ type: 'sendModePickerMove', delta })}
                     onSelect={finish}
                   />

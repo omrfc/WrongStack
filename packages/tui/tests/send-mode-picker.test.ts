@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SEND_MODE_OPTIONS,
+  formatSendModeMessagePreview,
   nextSendModeIndex,
   sendModeFromKey,
   type SendModeKey,
@@ -57,5 +58,15 @@ describe('sendModeFromKey', () => {
     expect(sendModeFromKey('', k({ upArrow: true }), 0)).toBeNull();
     expect(sendModeFromKey('', k({ downArrow: true }), 0)).toBeNull();
     expect(sendModeFromKey('x', KEY, 0)).toBeNull();
+  });
+});
+
+describe('formatSendModeMessagePreview', () => {
+  it('collapses whitespace so multi-line prompts fit in the picker', () => {
+    expect(formatSendModeMessagePreview('first line\n\n  second\tline')).toBe('first line second line');
+  });
+
+  it('truncates long prompts with an ellipsis', () => {
+    expect(formatSendModeMessagePreview('abcdefghijklmnopqrstuvwxyz', 10)).toBe('abcdefghi…');
   });
 });

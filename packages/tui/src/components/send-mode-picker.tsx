@@ -84,8 +84,16 @@ export function sendModeFromKey(
   return null;
 }
 
+export function formatSendModeMessagePreview(text: string, maxChars = 120): string {
+  const singleLine = text.replace(/\s+/g, ' ').trim();
+  if (singleLine.length <= maxChars) return singleLine;
+  return `${singleLine.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
 export interface SendModePickerProps {
   selected: number;
+  /** The message being routed, shown so the modal question has context. */
+  messagePreview?: string | undefined;
   /** Move the highlight by `delta` (caller clamps/wraps via nextSendModeIndex). */
   onMove: (delta: number) => void;
   /** Commit a decision (quick-key / Enter) or cancel (Esc → 'cancel'). */
@@ -104,6 +112,7 @@ export interface SendModePickerProps {
  */
 export function SendModePicker({
   selected,
+  messagePreview,
   onMove,
   onSelect,
 }: SendModePickerProps): React.ReactElement {
@@ -125,6 +134,12 @@ export function SendModePicker({
       <Text color="cyan" bold>
         ━━ Deliver this message how? ━━
       </Text>
+      {messagePreview ? (
+        <Text>
+          <Text dimColor>Message: </Text>
+          <Text color="white">{formatSendModeMessagePreview(messagePreview)}</Text>
+        </Text>
+      ) : null}
       <Text dimColor>
         q/b/s pick · ↑/↓ move · Enter select · Esc → queue
       </Text>

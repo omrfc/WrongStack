@@ -12,9 +12,24 @@
  * imports (`import type { Usage } from '@wrongstack/core'`) are unaffected —
  * they are erased before Vite ever resolves them.
  *
- * Re-export the narrow helper subpath so the implementation still has a
- * single source of truth without pulling in the Node-oriented core barrel.
+ * Keep these helpers local and dependency-free. Even some narrow core subpaths
+ * import server-only prompt/instruction loaders, which pulls Node built-ins into
+ * the browser bundle.
  */
-export { expectDefined } from '@wrongstack/core/utils/expect-defined';
-export { normalizedEqual } from '@wrongstack/core/execution/prompt-enhancer';
-export { toErrorMessage } from '@wrongstack/core/utils/error';
+export function expectDefined<T>(value: T | null | undefined, label?: string): T {
+  if (value === null || value === undefined) {
+    const err = new Error(label ? `Expected ${label} to be defined` : 'Expected value to be defined');
+    err.name = 'ExpectDefinedError';
+    throw err;
+  }
+  return value;
+}
+
+export function normalizedEqual(a: string, b: string): boolean {
+  const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+  return norm(a) === norm(b);
+}
+
+export function toErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
