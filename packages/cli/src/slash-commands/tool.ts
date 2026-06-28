@@ -1,11 +1,14 @@
 import {
   color,
   getToolDescriptionMode,
-  normalizeToolDescriptionMode,
+  getToolResultRenderMode,
   noOpVault,
-  setToolDescriptionMode,
+  normalizeToolDescriptionMode,
+  normalizeToolResultRenderMode,
+  setToolResultRenderMode,
   type SlashCommand,
   type ToolDescriptionMode,
+  type ToolResultRenderMode,
   type ToolsConfig,
 } from '@wrongstack/core';
 import { toErrorMessage } from '@wrongstack/core/utils';
@@ -22,25 +25,37 @@ function formatDescriptionMode(mode: ToolDescriptionMode): string {
   return mode === 'simple' ? color.amber(raw) : color.cyan(raw);
 }
 
+function formatResultRenderMode(mode: ToolResultRenderMode): string {
+  const raw = `result:${mode}`;
+  return mode === 'simple' ? color.amber(raw) : color.cyan(raw);
+}
+
+type ModeAxis = 'desc' | 'result';
+
 export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
   const help = [
     'Usage:',
-    '  /tool                         Show tool description-mode overrides',
-    '  /tool list                    List every tool and its description mode',
-    '  /tool <name>                  Show one tool mode',
-    '  /tool <name> simple           Use a 1-2 line tool description',
-    '  /tool <name> extend           Use the full/extended tool description',
-    '  /tool disable <name>          Hide a tool from the registry and system prompt',
-    '  /tool enable <name>           Restore a disabled tool',
-    '  /tool enable-all              Restore all disabled tools',
+    '  /tool                                  Show tool description + result-mode overrides',
+    '  /tool list                             List every tool and its two modes',
+    '  /tool <name>                           Show one tool mode (both axes)',
+    '  /tool <name> simple|extend             Set BOTH description and result modes (legacy alias)',
+    '  /tool <name> desc simple|extend        Set ONLY the description mode (LLM prompt)',
+    '  /tool <name> result simple|extend      Set ONLY the on-screen result mode',
+    '  /tool disable <name>                   Hide a tool from the registry and system prompt',
+    '  /tool enable <name>                    Restore a disabled tool',
+    '  /tool enable-all                       Restore all disabled tools',
     '',
     'Modes:',
-    '  simple   Short top-level description and usage hint',
-    '  extend   Full description (default)',
+    '  simple   short prose / meta-only display',
+    '  extend   full description / full preview (default)',
+    '',
+    'Axes are independent — `/tool read result simple` does NOT affect the LLM-side',
+    'description, and `/tool read desc simple` does NOT change on-screen rendering.',
+    'The legacy form `/tool read simple` sets both axes at once.',
     '',
     'Examples:',
-    '  /tool read simple',
-    '  /tool bash extend',
+    '  /tool read result simple',
+    '  /tool bash desc simple',
     '  /tool disable bash',
     '  /tool enable bash',
     '  /tool enable-all',
@@ -50,24 +65,72 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
     return opts.configStore.get().tools;
   }
 
-  function nextToolsConfig(name: string, mode: ToolDescriptionMode): ToolsConfig {
-    const current = getCurrentTools();
-    const descriptionMode = { ...(current.descriptionMode ?? {}) };
-    if (mode === 'simple') {
-      descriptionMode[name] = 'simple';
-    } else {
-      delete descriptionMode[name];
+  /**
+   * Compute the next ToolsConfig snapshot when toggling a single axis
+   * (description or result) for a single tool. The other axis is left
+   * untouched — `/tool read desc simple` must NOT wipe out a previously
+   * set `resultRenderMode[read]`.
+   *
+   * `from` is an optional seed snapshot; pass it to chain multiple axis
+   * updates onto one ToolsConfig (used by the legacy both-at-once alias
+   * `/tool <name> simple` which sets desc + result in one pass).
+   */
+  function nextToolsConfigForAxis(
+    name: string,
+    axis: ModeAxis,
+    mode: ToolDescriptionMode | ToolResultRenderMode,
+    from?: ToolsConfig,
+  ): ToolsConfig {
+    const current = from ?? getCurrentTools();
+    if (axis === 'desc') {
+      const descriptionMode = { ...(current.descriptionMode ?? {}) };
+      if (mode === 'extend') delete descriptionMode[name];
+      else descriptionMode[name] = mode as ToolDescriptionMode;
+      return { ...current, descriptionMode };
     }
-    return { ...current, descriptionMode };
+    const resultRenderMode = { ...(current.resultRenderMode ?? {}) };
+    if (mode === 'extend') delete resultRenderMode[name];
+    else resultRenderMode[name] = mode as ToolResultRenderMode;
+    return { ...current, resultRenderMode };
   }
 
-  async function persistMode(name: string, mode: ToolDescriptionMode): Promise<boolean> {
-    const nextTools = nextToolsConfig(name, mode);
+  /**
+   * Variant of `nextToolsConfigForAxis` that always builds off the
+   * supplied snapshot (does not re-read `getCurrentTools()`). Used to
+   * chain multiple axis updates onto one immutable ToolsConfig.
+   */
+  function nextToolsConfigForAxisFrom(
+    from: ToolsConfig,
+    name: string,
+    axis: ModeAxis,
+    mode: ToolDescriptionMode | ToolResultRenderMode,
+  ): ToolsConfig {
+    return nextToolsConfigForAxis(name, axis, mode, from);
+  }
+
+  /**
+   * Legacy alias: `/tool <name> simple|extend` sets BOTH axes at once.
+   * Used by users who still rely on the pre-split command shape. Goes
+   * through the same per-axis persistence path so the config stays
+   * canonical (no combined field).
+   */
+  function nextToolsConfigBoth(
+    name: string,
+    mode: ToolDescriptionMode,
+  ): ToolsConfig {
+    // Both axes in one immutable ToolsConfig: start from a snapshot with
+    // the desc entry set, then chain the result axis on top so the final
+    // object carries both. Each helper reads `getCurrentTools()` itself,
+    // so chaining on `withDesc` is required to preserve the desc entry.
+    const withDesc = nextToolsConfigForAxis(name, 'desc', mode);
+    return nextToolsConfigForAxisFrom(withDesc, name, 'result', mode);
+  }
+
+  async function persistConfig(next: ToolsConfig): Promise<boolean> {
     if (!opts.paths) {
-      opts.configStore.update({ tools: nextTools });
+      opts.configStore.update({ tools: next });
       return false;
     }
-
     await persistConfigSetting(
       {
         configStore: opts.configStore,
@@ -76,10 +139,25 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
         vault: noOpVault,
       },
       (cfg) => {
-        cfg.tools = nextTools;
+        cfg.tools = next;
       },
     );
     return true;
+  }
+
+  async function persistModeForAxis(
+    name: string,
+    axis: ModeAxis,
+    mode: ToolDescriptionMode | ToolResultRenderMode,
+  ): Promise<boolean> {
+    return persistConfig(nextToolsConfigForAxis(name, axis, mode));
+  }
+
+  async function persistModeBoth(
+    name: string,
+    mode: ToolDescriptionMode,
+  ): Promise<boolean> {
+    return persistConfig(nextToolsConfigBoth(name, mode));
   }
 
   // ── Disable / enable helpers ─────────────────────────────────────
@@ -111,18 +189,25 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
   // ── Formatting helpers ───────────────────────────────────────────
 
   function formatOverrides(): string {
-    const configured = opts.configStore.get().tools.descriptionMode ?? {};
-    const simple = Object.entries(configured)
+    const configured = opts.configStore.get().tools;
+    const descSimple = Object.entries(configured.descriptionMode ?? {})
       .filter(([, mode]) => normalizeToolDescriptionMode(mode) === 'simple')
+      .map(([name]) => name)
+      .sort();
+    const resultSimple = Object.entries(configured.resultRenderMode ?? {})
+      .filter(([, mode]) => normalizeToolResultRenderMode(mode) === 'simple')
       .map(([name]) => name)
       .sort();
     const disabled = opts.toolRegistry.listDisabled();
     const lines: string[] = [
-      `${color.bold('Tool descriptions')} ${color.dim(`(default: desc:extend)`)}`,
+      `${color.bold('Tool modes')} ${color.dim('(default: extend on both axes)')}`,
       '',
-      simple.length > 0
-        ? `  ${formatDescriptionMode('simple')}: ${simple.map((name) => color.cyan(name)).join(', ')}`
-        : `  ${formatDescriptionMode('simple')}: ${color.dim('none')}`,
+      `${formatDescriptionMode('simple')}: ${
+        descSimple.length > 0 ? descSimple.map((n) => color.cyan(n)).join(', ') : color.dim('none')
+      }`,
+      `${formatResultRenderMode('simple')}: ${
+        resultSimple.length > 0 ? resultSimple.map((n) => color.cyan(n)).join(', ') : color.dim('none')
+      }`,
       '',
     ];
     if (disabled.length > 0) {
@@ -133,7 +218,11 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
         '',
       );
     }
-    lines.push(color.dim('  /tool <name> simple · /tool <name> extend · /tool list · /tool disable|enable <name>'));
+    lines.push(
+      color.dim(
+        '  /tool <name> desc simple · /tool <name> result simple · /tool list · /tool disable|enable <name>',
+      ),
+    );
     return lines.join('\n');
   }
 
@@ -142,20 +231,25 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
       `  ${color.dim(fit('tool', 28))} ` +
       `${color.dim(fit('owner', 28))} ` +
       `${color.dim(fit('status', 10))} ` +
-      color.dim('description');
+      `${color.dim(fit('desc', 14))} ` +
+      color.dim('result');
     const rows = opts.toolRegistry.listWithOwner().map(({ tool }) => {
-      const mode = getToolDescriptionMode(opts.toolRegistry, tool.name);
+      const descMode = getToolDescriptionMode(opts.toolRegistry, tool.name);
+      const resultMode = getToolResultRenderMode(opts.toolRegistry, tool.name);
       const owner = opts.toolRegistry.ownerOf(tool.name) ?? 'core';
-      const status = opts.toolRegistry.isDisabled(tool.name) ? color.red('disabled') : color.green('active');
+      const status = opts.toolRegistry.isDisabled(tool.name)
+        ? color.red('disabled')
+        : color.green('active');
       return (
         `  ${fit(tool.name, 28)} ` +
         `${color.dim(fit(`[${owner}]`, 28))} ` +
         `${fit(status, 10)} ` +
-        formatDescriptionMode(mode)
+        `${fit(formatDescriptionMode(descMode), 14)} ` +
+        formatResultRenderMode(resultMode)
       );
     });
     return [
-      `${color.bold('Tool description modes')} ${color.dim('(default: desc:extend)')}`,
+      `${color.bold('Tool modes')} ${color.dim('(default: extend on both axes)')}`,
       '',
       header,
       ...rows,
@@ -171,11 +265,13 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
       }
       return `${color.red('Unknown tool')}: ${name}. Use ${color.dim('/tools')} to list registered tools.`;
     }
-    const mode = getToolDescriptionMode(reg, name);
+    const descMode = getToolDescriptionMode(reg, name);
+    const resultMode = getToolResultRenderMode(reg, name);
     const status = reg.isDisabled(name) ? color.red('disabled') : color.green('active');
     return [
       `${color.bold(name)} ${status}`,
-      `description mode: ${formatDescriptionMode(mode)}`,
+      `description mode: ${formatDescriptionMode(descMode)}`,
+      `result mode:     ${formatResultRenderMode(resultMode)}`,
       '',
       color.dim(tool.description),
     ].join('\n');
@@ -225,11 +321,33 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
     return `${color.green('✓')} ${color.cyan(name)} disabled — removed from system prompt and tool registry.`;
   }
 
+  /**
+   * Apply the desc-mode change for `name` to the in-memory tool
+   * registry so the next provider request picks it up. Persists to
+   * config first so the boot path re-applies it on the next launch.
+   */
+  function applyDescMode(name: string, mode: ToolDescriptionMode): void {
+    // Reuse the description-mode utility — it wraps the tool with the
+    // simplified description. Same call site as the original /tool
+    // command, kept here so this remains the single entry point for
+    // desc-mode toggling.
+    opts.toolRegistry.setDescriptionMode?.(name, mode);
+  }
+
+  /**
+   * Apply the result-render-mode change for `name` to the registry
+   * so the executor reads it on the next tool invocation.
+   */
+  function applyResultMode(name: string, mode: ToolResultRenderMode): void {
+    setToolResultRenderMode(opts.toolRegistry, name, mode);
+  }
+
   return {
     name: 'tool',
     category: 'Config',
-    description: 'Set per-tool description detail: simple or extend. Disable/enable tools.',
-    argsHint: '[<name> simple|extend|disable|enable]',
+    description:
+      'Set per-tool description mode (LLM prompt) and/or on-screen result mode. Disable/enable tools.',
+    argsHint: '[<name> desc|result simple|extend | disable | enable]',
     help,
     async run(args) {
       if (!opts.configStore) {
@@ -279,7 +397,7 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
         }
       }
 
-      // ── Existing description mode commands ───────────────────────
+      // ── Tool lookup gate (for desc/result/bare-simple) ─────────
 
       if (!opts.toolRegistry.get(name) && !opts.toolRegistry.isDisabled(name)) {
         return {
@@ -287,21 +405,69 @@ export function buildToolCommand(opts: SlashCommandContext): SlashCommand {
         };
       }
 
+      // `/tool <name>` — show both axes for one tool
       if (parts.length === 1) return { message: formatOne(name) };
 
-      const mode = normalizeToolDescriptionMode(parts[1]);
-      if (!mode) {
-        return { message: `${color.amber('Usage:')} /tool ${name} simple|extend` };
+      // `/tool <name> desc|result simple|extend`
+      const axis = parts[1]?.toLowerCase();
+      if (axis === 'desc' || axis === 'result') {
+        const rawMode = parts[2];
+        if (!rawMode) {
+          return {
+            message: `${color.amber('Usage:')} /tool ${name} ${axis} simple|extend`,
+          };
+        }
+        const mode = normalizeToolDescriptionMode(rawMode);
+        if (!mode) {
+          return {
+            message: `${color.amber('Usage:')} /tool ${name} ${axis} simple|extend`,
+          };
+        }
+        try {
+          if (axis === 'desc') {
+            const persisted = await persistModeForAxis(name, 'desc', mode);
+            applyDescMode(name, mode);
+            const persistence = persisted
+              ? color.dim('saved')
+              : color.dim('runtime only; config paths unavailable');
+            return {
+              message: `${color.green('✓')} ${color.cyan(name)} ${formatDescriptionMode(mode)} ${persistence}`,
+            };
+          }
+          const persisted = await persistModeForAxis(name, 'result', mode);
+          applyResultMode(name, mode);
+          const persistence = persisted
+            ? color.dim('saved')
+            : color.dim('runtime only; config paths unavailable');
+          return {
+            message: `${color.green('✓')} ${color.cyan(name)} ${formatResultRenderMode(mode)} ${persistence}`,
+          };
+        } catch (err) {
+          return {
+            message: `${color.red('Could not save tool setting')}: ${toErrorMessage(err)}`,
+          };
+        }
       }
 
+      // `/tool <name> simple|extend` — legacy alias that sets BOTH
+      // axes at once. Intentionally NOT split: users who already have
+      // muscle memory for the old form keep working. New users get the
+      // explicit desc/result form from the help text.
+      const mode = normalizeToolDescriptionMode(axis);
+      if (!mode) {
+        return {
+          message: `${color.amber('Usage:')} /tool ${name} [desc|result] simple|extend`,
+        };
+      }
       try {
-        const persisted = await persistMode(name, mode);
-        setToolDescriptionMode(opts.toolRegistry, name, mode);
+        const persisted = await persistModeBoth(name, mode);
+        applyDescMode(name, mode);
+        applyResultMode(name, mode);
         const persistence = persisted
-          ? color.dim('saved')
+          ? color.dim('saved (both axes)')
           : color.dim('runtime only; config paths unavailable');
         return {
-          message: `${color.green('✓')} ${color.cyan(name)} description mode -> ${formatDescriptionMode(mode)} ${persistence}`,
+          message: `${color.green('✓')} ${color.cyan(name)} ${formatDescriptionMode(mode)} + ${formatResultRenderMode(mode)} ${persistence}`,
         };
       } catch (err) {
         return {

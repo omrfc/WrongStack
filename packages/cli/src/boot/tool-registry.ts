@@ -41,8 +41,15 @@
 //     (extracted to `wiring/metrics.ts` already) and is
 //     not a tool-registry concern.
 
-import type { EventBus, MemoryStore, ToolDescriptionModeConfig, ToolRegistry, WstackPaths } from '@wrongstack/core';
-import { applyToolDescriptionModes, createContextManagerTool, makeMailboxTool, makeMailInboxTool, makeMailSendTool, normalizeTokenSavingTier } from '@wrongstack/core';
+import type {
+  EventBus,
+  MemoryStore,
+  ToolDescriptionModeConfig,
+  ToolRegistry,
+  ToolResultRenderModeConfig,
+  WstackPaths,
+} from '@wrongstack/core';
+import { applyToolDescriptionModes, applyToolResultRenderModes, createContextManagerTool, makeMailboxTool, makeMailInboxTool, makeMailSendTool, normalizeTokenSavingTier } from '@wrongstack/core';
 import { builtinToolsPack, configureExecPolicy, forgetTool, relatedMemoryTool, rememberTool, searchMemoryTool, TIER1_TOOLS, TIER2_TOOLS, TIER3_TOOLS } from '@wrongstack/tools';
 import { configureAutophasePolicy } from '../autophase-host.js';
 import type { TokenSavingTier } from '@wrongstack/core';
@@ -56,6 +63,7 @@ export interface RegisterBuiltinToolsDeps {
     tools?:
       | {
           descriptionMode?: ToolDescriptionModeConfig | undefined;
+          resultRenderMode?: ToolResultRenderModeConfig | undefined;
           disabledTools?: string[] | undefined;
           exec?: { allow?: string[] | undefined; deny?: string[] | undefined } | undefined;
         }
@@ -140,6 +148,11 @@ export function registerBuiltinTools(deps: RegisterBuiltinToolsDeps): void {
     makeMailInboxTool({ projectDir: deps.wpaths.projectDir, events: deps.events }),
   );
   applyToolDescriptionModes(deps.toolRegistry, deps.config.tools?.descriptionMode);
+  // Apply on-screen result render modes. Independent of descriptionMode —
+  // the user can toggle one without affecting the other via `/tool <name>
+  // desc simple|extend` and `/tool <name> result simple|extend`. The
+  // legacy `/tool <name> simple` writes both at once.
+  applyToolResultRenderModes(deps.toolRegistry, deps.config.tools?.resultRenderMode);
   // Apply disabled tools from config. Tools not yet registered are silently
   // skipped — the registry's disable() returns false for unknown names, which
   // is fine: the tool will be registered later (e.g. MCP / plugin tools) and

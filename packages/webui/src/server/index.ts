@@ -119,6 +119,7 @@ import {
   DEFAULT_SESSION_PRUNE_DAYS,
   DEFAULT_TOOLS_CONFIG,
   applyToolDescriptionModes,
+  applyToolResultRenderModes,
   resolveContextWindowPolicy,
   enhanceUserPrompt,
   gatedEnhancerReasoning,
@@ -623,6 +624,7 @@ export async function startWebUI(
   toolRegistry.register(makeMailSendTool({ projectDir: wpaths.projectDir, events }));
   toolRegistry.register(makeMailInboxTool({ projectDir: wpaths.projectDir, events }));
   applyToolDescriptionModes(toolRegistry, config.tools?.descriptionMode);
+  applyToolResultRenderModes(toolRegistry, config.tools?.resultRenderMode);
   // Apply the configured exec command policy (DEFAULT ∪ allow − deny). `allow`
   // is trusted-config-only; the config loader strips `tools.exec.allow` from
   // any in-project repo config before it reaches here.

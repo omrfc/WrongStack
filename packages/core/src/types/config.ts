@@ -244,6 +244,13 @@ export interface ToolsConfig {
    */
   descriptionMode?: ToolDescriptionModeConfig | undefined;
   /**
+   * Per-tool on-screen result rendering mode (terminal / WebUI / TUI).
+   * Missing entries default to "extend". Independent of `descriptionMode`:
+   * `/tool <name> result simple` toggles this without touching the
+   * LLM-side description length.
+   */
+  resultRenderMode?: ToolResultRenderModeConfig | undefined;
+  /**
    * Tool names to disable. Disabled tools are excluded from the tool registry
    * (`ToolRegistry.list()` / `get()`), so they do NOT appear in the system
    * prompt's "## Tool usage" block — reducing per-request token consumption.
@@ -293,6 +300,24 @@ export interface ExecToolConfig {
 
 export type ToolDescriptionMode = 'extend' | 'simple';
 export type ToolDescriptionModeConfig = Record<string, ToolDescriptionMode | undefined>;
+
+/**
+ * Per-tool on-screen result rendering mode. Independent of
+ * {@link ToolDescriptionMode}: `descriptionMode` controls the prose the
+ * model sees in the system prompt, `resultRenderMode` controls how the
+ * tool's RESULT is printed to the user (terminal / WebUI / TUI).
+ *
+ * - `simple` — meta only (filename, line count, exit code). Body is hidden
+ *   by default; the user can still expand on demand where the renderer
+ *   supports it.
+ * - `extend` — full preview, up to 10 lines for read-like tools.
+ *
+ * The two modes are toggled independently via `/tool <name> desc simple`
+ * and `/tool <name> result simple`. The legacy `/tool <name> simple`
+ * command sets BOTH at once for backward compatibility.
+ */
+export type ToolResultRenderMode = 'extend' | 'simple';
+export type ToolResultRenderModeConfig = Record<string, ToolResultRenderMode | undefined>;
 
 export interface ProviderApiKey {
   /** Short human-readable label (e.g. "personal", "work", "rate-limit-backup"). */
@@ -676,6 +701,21 @@ export interface Config {
   context: ContextConfig;
   tools: ToolsConfig;
   mcpServers?: Record<string, MCPServerConfig>;
+  /**
+   * Per-agent ACP invocation overrides, keyed by catalog agent id
+   * (`claude-code`, `codex-cli`, `gemini-cli`, …). Lets a user correct an
+   * agent's ACP entry command — e.g. point `claude-code` at the right
+   * adapter — without a code change. Consumed by `/acp`, `/ensemble`, and
+   * `wstack acp`. SECURITY: this is an arbitrary-command exec surface, so it
+   * is in the in-project config DENY list — only honoured from the user's
+   * `~/.wrongstack/config.json`, never from a repo-committed config.
+   */
+  acp?: {
+    agents?: Record<
+      string,
+      { command: string; args?: string[]; env?: Record<string, string> }
+    >;
+  };
   /**
    * Ordered list of fallback model references tried, in order, when the
    * primary model is overloaded (HTTP 429/529/5xx) and its own retries are

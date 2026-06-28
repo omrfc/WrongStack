@@ -72,9 +72,9 @@ describe('TerminalRenderer', () => {
     r.renderer.writeToolResult('read', lines, false);
     const out = r.out();
     expect(out).toContain('line-1');
-    expect(out).toContain('line-6');
-    expect(out).not.toContain('line-7'); // capped at 6 preview lines
-    expect(out).toContain('+14 more');
+    expect(out).toContain('line-10');
+    expect(out).not.toContain('line-11'); // capped at 10 preview lines
+    expect(out).toContain('+10 more');
   });
 
   it('writeToolResult is compact (2-line preview) for unknown tools', () => {
@@ -185,6 +185,115 @@ describe('TerminalRenderer.setSilent', () => {
     r.renderer.write('visible');
     expect(r.out()).not.toContain('hidden');
     expect(r.out()).toContain('visible');
+  });
+});
+
+describe('TerminalRenderer.setResultRenderMode', () => {
+  it('defaults to extend: read shows full multi-line preview', () => {
+    const r = mkRenderer();
+    const payload = JSON.stringify({
+      path: '/p/foo.ts',
+      total_lines: 50,
+      truncated: true,
+      text: Array.from({ length: 30 }, (_, i) => `line-${i + 1}`).join('\n'),
+    });
+    r.renderer.writeToolResult('read', payload, false);
+    const out = r.out();
+    expect(out).toContain('/p/foo.ts');
+    expect(out).toContain('line-1');
+    expect(out).toContain('line-10');
+    expect(out).not.toContain('line-11');
+  });
+
+  it('simple: read hides content lines, shows only meta (path + line count)', () => {
+    const r = mkRenderer();
+    const payload = JSON.stringify({
+      path: '/p/foo.ts',
+      total_lines: 50,
+      truncated: true,
+      text: Array.from({ length: 30 }, (_, i) => `line-${i + 1}`).join('\n'),
+    });
+    r.renderer.setResultRenderMode('read', 'simple');
+    r.renderer.writeToolResult('read', payload, false);
+    const out = r.out();
+    // Meta is shown.
+    expect(out).toContain('/p/foo.ts');
+    expect(out).toContain('50 lines');
+    expect(out).toContain('truncated');
+    // Content lines are hidden.
+    expect(out).not.toContain('line-1');
+    expect(out).not.toContain('line-10');
+    expect(out).not.toContain('line-30');
+    // No +N more indicator in simple mode (we're not previewing at all).
+    expect(out).not.toContain('more line');
+  });
+
+  it('simple: bash hides stdout/stderr, shows only exit + size', () => {
+    const r = mkRenderer();
+    const payload = JSON.stringify({
+      exitCode: 0,
+      stdout: 'a\nb\nc\nd\ne',
+      stderr: '',
+    });
+    r.renderer.setResultRenderMode('bash', 'simple');
+    r.renderer.writeToolResult('bash', payload, false);
+    const out = r.out();
+    expect(out).toContain('exit=0');
+    expect(out).toContain('5 stdout lines');
+    // Raw stdout lines never rendered.
+    expect(out).not.toContain('a');
+    expect(out).not.toContain('b');
+    expect(out).not.toContain('c');
+  });
+
+  it('simple: one-shot — mode is consumed after one write', () => {
+    const r = mkRenderer();
+    const payload = JSON.stringify({
+      path: '/p/foo.ts',
+      total_lines: 50,
+      text: Array.from({ length: 5 }, (_, i) => `line-${i + 1}`).join('\n'),
+    });
+    r.renderer.setResultRenderMode('read', 'simple');
+    r.renderer.writeToolResult('read', payload, false);
+    // Second write without re-hint should be extend (default) again.
+    r.renderer.writeToolResult('read', payload, false);
+    const out = r.out();
+    // Both writes happened, second one shows content.
+    expect(out).toContain('line-1');
+  });
+
+  it('simple: applies to grep/glob when content is structured (count meta)', () => {
+    const r = mkRenderer();
+    // Realistic grep result shape: structured `{count, matches}` or a JSON
+    // array of files. Simple mode should show only the count line, not
+    // every file.
+    const payload = JSON.stringify({
+      count: 42,
+      matches: Array.from({ length: 42 }, (_, i) => `file-${i}.ts`),
+    });
+    r.renderer.setResultRenderMode('grep', 'simple');
+    r.renderer.writeToolResult('grep', payload, false);
+    const out = r.out();
+    expect(out).toContain('42 matches');
+    // Individual file names from the structured payload must not be shown.
+    expect(out).not.toContain('file-0.ts');
+    expect(out).not.toContain('file-19.ts');
+    expect(out).not.toContain('file-41.ts');
+  });
+
+  it('extend: still renders the full preview after a prior simple hint was consumed', () => {
+    const r = mkRenderer();
+    const payload = JSON.stringify({
+      path: '/p/foo.ts',
+      total_lines: 5,
+      text: 'a\nb\nc\nd\ne',
+    });
+    r.renderer.setResultRenderMode('read', 'simple');
+    r.renderer.writeToolResult('read', payload, false); // consumed
+    r.renderer.writeToolResult('read', payload, false); // extend default
+    const out = r.out();
+    expect(out).toContain('a');
+    expect(out).toContain('b');
   });
 });
 

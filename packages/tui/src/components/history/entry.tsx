@@ -260,9 +260,9 @@ export const Entry = React.memo(function Entry({
             <Text dimColor>{`  ·  ${fmtDuration(entry.durationMs)}`}</Text>
             {sizeChip ? <Text dimColor>{`  ·  ${sizeChip}`}</Text> : null}
           </Text>
-          {visualLines ? (
+          {visualLines && entry.resultRenderMode !== 'simple' ? (
             <ToolOutputLines lines={visualLines} hasFollowingBlock={Boolean(diff || multiDiffs)} />
-          ) : (
+          ) : visualLines ? null : entry.resultRenderMode === 'simple' ? null : (
             outLines.map((line, i) => (
               <Text key={i}>
                 <Text dimColor>{i === outLines.length - 1 && !diff && !multiDiffs ? '  └─ ' : '  ├─ '}</Text>
@@ -275,7 +275,10 @@ export const Entry = React.memo(function Entry({
               </Text>
             ))
           )}
-          {multiDiffs ? (
+          {/* `simple` mode: hide diff blocks too — only the meta chip
+              stays visible. Diff bodies can re-flow onto the screen on
+              demand via the chip expansion hook (future work). */}
+          {entry.resultRenderMode !== 'simple' && multiDiffs ? (
             <Box flexDirection="column">
               {(() => {
                 const summaryLine = formatMultiDiffSummary(
@@ -290,7 +293,7 @@ export const Entry = React.memo(function Entry({
                 <DiffFileBlock key={item.path} path={item.path} preview={item.preview} />
               ))}
             </Box>
-          ) : diff ? (
+          ) : entry.resultRenderMode !== 'simple' && diff ? (
             <DiffBlock
               rows={diff.rows}
               hidden={diff.hidden}

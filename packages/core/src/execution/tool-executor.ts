@@ -25,6 +25,9 @@ import { createToolOutputSerializer } from '../utils/tool-output-serializer.js';
 import { wstackGlobalRoot } from '../utils/wstack-paths.js';
 import { FetchError, ToolValidationError } from '../types/errors.js';
 import { MALFORMED_ARG_MARKERS } from '../types/tool-markers.js';
+import type { ToolResultRenderMode } from '../types/config.js';
+import { resolveToolResultRenderMode } from '../utils/tool-result-render-mode.js';
+import type { ToolResultRenderModeConfig } from '../types/config.js';
 export class ToolExecutor {
   /** Minimum gap between coalesced `partial_output` tool.progress emits. */
   static readonly PROGRESS_EMIT_INTERVAL_MS = 100;
@@ -56,6 +59,26 @@ export class ToolExecutor {
    */
   clearConfirmAwaiter(): void {
     this.opts.confirmAwaiter = undefined;
+  }
+
+  /**
+   * Push the tool's per-tool result-render mode into the renderer as the
+   * next-result render mode. The config key is `tools.resultRenderMode[name]`
+   * — independent of the LLM-side `descriptionMode` so the two can be
+   * toggled separately (`/tool read desc simple` vs `/tool read result
+   * simple`). Defaults to `extend` when no entry is set.
+   *
+   * The hint is one-shot: the renderer consumes it on the next
+   * `writeToolResult` call so an unset follow-up doesn't inherit a
+   * previous tool's mode. Safe no-op when the renderer doesn't implement
+   * `setResultRenderMode` (e.g. headless/test renderers).
+   */
+  private hintRenderMode(toolName: string): void {
+    const renderer = this.opts.renderer;
+    if (!renderer || typeof renderer.setResultRenderMode !== 'function') return;
+    const modes: ToolResultRenderModeConfig | undefined = this.opts.resultRenderModes;
+    const mode: ToolResultRenderMode = resolveToolResultRenderMode(modes, toolName);
+    renderer.setResultRenderMode(toolName, mode);
   }
 
   /**
@@ -320,6 +343,7 @@ export class ToolExecutor {
         const msg = toErrorMessage(err);
         const scrubbed = this.opts.secretScrubber.scrub(msg);
         const { category, retryable, detail } = classifyToolError(err);
+        this.hintRenderMode(tool.name);
         this.opts.renderer?.writeToolResult(tool.name, scrubbed, true);
         const result = {
           type: 'tool_result' as const,
@@ -353,7 +377,9 @@ export class ToolExecutor {
         const scrubbed = this.opts.secretScrubber.scrub(msg);
         const { category, retryable, detail } = classifyToolError(err);
         const tool = this.registry.get(use.name);
-        this.opts.renderer?.writeToolResult(tool?.name ?? use.name, scrubbed, true);
+        const toolName = tool?.name ?? use.name;
+        this.hintRenderMode(toolName);
+        this.opts.renderer?.writeToolResult(toolName, scrubbed, true);
         const result = {
           type: 'tool_result' as const,
           tool_use_id: use.id,
@@ -430,6 +456,7 @@ export class ToolExecutor {
     // deduct the spend without a second `Buffer.byteLength` walk — and
     // never falls back to `JSON.stringify` on a structured value.
     const { text: capped, newBudget } = this.serializer.enforceCap(withArtifact, budget);
+    this.hintRenderMode(tool.name);
     this.opts.renderer?.writeToolResult(tool.name, capped, false);
     return {
       block: {

@@ -71,6 +71,13 @@ export interface ToolExecutorOptions {
    * to the result the model sees).
    */
   hookRunner?: import('../hooks/runner.js').HookRunner | undefined;
+  /**
+   * Per-tool on-screen result render mode map (`tools.resultRenderMode[name]`).
+   * When set, the executor reads this map to decide whether the next
+   * `writeToolResult` call should render in `simple` (meta only) or `extend`
+   * (full preview) mode. Independent of the LLM-side `descriptionMode`.
+   */
+  resultRenderModes?: import('./config.js').ToolResultRenderModeConfig | undefined;
 }
 
 export interface ToolExecutorInit {

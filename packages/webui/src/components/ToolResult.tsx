@@ -8,6 +8,13 @@ import { memo, useMemo, useState } from 'react';
 const LONG_OUTPUT_THRESHOLD = 25;
 const LONG_PEEK_LINES = 12;
 
+/** Per-tool on-screen render mode. Mirrors the LLM-side descriptionMode
+ *  (config `tools.descriptionMode[name]`) but is independent of token-saving
+ *  tiers. `simple` collapses the body by default — meta only, content hidden
+ *  until the user clicks "Show all". `extend` shows the full preview with the
+ *  usual LONG_PEEK_LINES cap. */
+export type ToolResultRenderMode = 'simple' | 'extend';
+
 /**
  * Render `text` as a monospace block, auto-collapsing when it exceeds
  * LONG_OUTPUT_THRESHOLD lines. The first LONG_PEEK_LINES stay visible;
@@ -21,6 +28,7 @@ function CollapsibleText({
   className,
   wrapClass,
   showLineNumbers,
+  defaultCollapsed,
 }: {
   text: string;
   isError?: boolean | undefined;
@@ -31,10 +39,16 @@ function CollapsibleText({
    *  own line numbers in the content) and for wrap-mode bodies where a
    *  fixed gutter can't stay aligned with wrapped lines. */
   showLineNumbers?: boolean | undefined;
+  /** Force the initial state to collapsed even when the body is short.
+   *  Used by the `simple` render mode so users see only meta until they
+   *  explicitly expand. */
+  defaultCollapsed?: boolean | undefined;
 }) {
   const lines = useMemo(() => text.split('\n'), [text]);
   const isLong = lines.length > LONG_OUTPUT_THRESHOLD;
-  const [expanded, setExpanded] = useState(!isLong);
+  // simple mode wants collapsed-by-default even for short bodies; extend
+  // mode keeps the historical behaviour (collapsed only when long).
+  const [expanded, setExpanded] = useState(defaultCollapsed ? false : !isLong);
   const shown = expanded ? text : lines.slice(0, LONG_PEEK_LINES).join('\n');
   // Only emit the gutter when the body won't wrap (alignment would break
   // otherwise) AND the user actually expanded it / it's not super short.
@@ -101,6 +115,16 @@ interface Props {
   result: string;
   isError?: boolean | undefined;
   className?: string | undefined;
+  /**
+   * On-screen result render mode. Mirrors the CLI/terminal behaviour:
+   * `simple` starts the body collapsed (meta only) so the chat stays
+   * scannable; `extend` follows the historical "auto-expand short bodies,
+   * auto-collapse long ones" rule. Driven by `tools.resultRenderMode[name]`
+   * on the backend (toggled via `/tool <name> result simple`); passed
+   * here as a prop so the WebUI doesn't have to know about the config
+   * map.
+   */
+  renderMode?: 'simple' | 'extend' | undefined;
 }
 
 /**
@@ -116,11 +140,25 @@ export const ToolResult = memo(function ToolResult({
   result,
   isError,
   className,
+  renderMode,
 }: Props) {
   const shape = useMemo(() => detectShape(toolName, result), [toolName, result]);
+  // `simple` starts the body collapsed so the user sees only the meta
+  // (line count / exit code) until they explicitly expand. `extend`
+  // (the default) preserves the historical auto-collapse behaviour for
+  // long bodies. Both modes let the user expand on demand — `simple`
+  // is just a different initial state, not a permanent gate.
+  const defaultCollapsed = renderMode === 'simple';
 
   if (shape.kind === 'json') {
-    return <JsonResult value={shape.value} isError={isError} className={className} />;
+    return (
+      <JsonResult
+        value={shape.value}
+        isError={isError}
+        className={className}
+        defaultCollapsed={defaultCollapsed}
+      />
+    );
   }
   if (shape.kind === 'numbered') {
     return (
@@ -129,6 +167,7 @@ export const ToolResult = memo(function ToolResult({
         isError={isError}
         className={className}
         wrapClass="whitespace-pre"
+        defaultCollapsed={defaultCollapsed}
       />
     );
   }
@@ -144,6 +183,7 @@ export const ToolResult = memo(function ToolResult({
             className="border-0 rounded-none bg-transparent"
             wrapClass="whitespace-pre-wrap break-all"
             showLineNumbers
+            defaultCollapsed={defaultCollapsed}
           />
         )}
         {(shape.exitCode !== undefined || shape.duration) && (
@@ -171,6 +211,7 @@ export const ToolResult = memo(function ToolResult({
       className={className}
       wrapClass="whitespace-pre-wrap break-all"
       showLineNumbers
+      defaultCollapsed={defaultCollapsed}
     />
   );
 });
@@ -227,10 +268,14 @@ function JsonResult({
   value,
   isError,
   className,
+  defaultCollapsed,
 }: {
   value: unknown;
   isError?: boolean | undefined;
   className?: string | undefined;
+  /** Force the initial state to collapsed. Used by `simple` render mode
+   *  so the user sees only the line-count badge until they expand. */
+  defaultCollapsed?: boolean | undefined;
 }) {
   const pretty = useMemo(() => {
     try {
@@ -240,7 +285,11 @@ function JsonResult({
     }
   }, [value]);
   const lineCount = pretty.split('\n').length;
-  const [expanded, setExpanded] = useState(lineCount < 30);
+  // `simple` forces collapsed; otherwise follow the historical
+  // "expand small JSON, collapse big" rule.
+  const [expanded, setExpanded] = useState(
+    defaultCollapsed ? false : lineCount < 30,
+  );
   return (
     <div
       className={cn(

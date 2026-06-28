@@ -1,4 +1,4 @@
-import type { ContentBlock, Renderer, TextBlock } from '@wrongstack/core';
+import type { ContentBlock, Renderer, TextBlock, ToolResultRenderMode } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
 import { renderDiff } from './diff-renderer.js';
 import { theme } from './theme.js';
@@ -21,6 +21,19 @@ export class TerminalRenderer implements Renderer {
    * go to a different stream Ink does not manage.
    */
   private silent = false;
+  /**
+   * Per-tool on-screen result render mode. Defaults to `'extend'` so
+   * existing callers without `setResultRenderMode` see full content.
+   * `setResultRenderMode(name, mode)` overrides the entry for `name`; the
+   * override is one-shot for that name (the default reasserts after the
+   * next write) so callers can set the mode right before each tool call
+   * without leaking state across unrelated tool calls.
+   */
+  private renderModes = new Map<string, ToolResultRenderMode>();
+  /** Mode applied when no entry is set for a given tool name. */
+  private static readonly DEFAULT_RENDER_MODE: ToolResultRenderMode = 'extend';
+  /** Lines kept per tool family in `extend` mode. */
+  private static readonly EXTEND_PREVIEW_LINES = 10;
 
   constructor(opts: TerminalRendererOptions = {}) {
     this.out = opts.out ?? process.stdout;
@@ -38,6 +51,19 @@ export class TerminalRenderer implements Renderer {
 
   isSilent(): boolean {
     return this.silent;
+  }
+
+  setResultRenderMode(name: string, mode: ToolResultRenderMode): void {
+    if (this.silent) return;
+    this.renderModes.set(name, mode);
+  }
+
+  private getRenderMode(name: string): ToolResultRenderMode {
+    return this.renderModes.get(name) ?? TerminalRenderer.DEFAULT_RENDER_MODE;
+  }
+
+  private clearRenderMode(name: string): void {
+    this.renderModes.delete(name);
   }
 
   write(input: string | TextBlock): void {
@@ -83,6 +109,18 @@ export class TerminalRenderer implements Renderer {
     if (this.silent) return;
     const txt = typeof content === 'string' ? content : safeStringify(content);
     const prefix = isError ? theme.error('✘') : theme.success('✓');
+    const renderMode = this.getRenderMode(name);
+    // One-shot mode: consume the override so an unset call doesn't carry
+    // the previous tool's mode into the next one.
+    this.clearRenderMode(name);
+
+    // Tools that embed user-visible text in a `text` field (read, etc.)
+    // arrive here as a JSON-string like `{"path":"…","text":"line-1\nline-2"}`.
+    // For the extend-mode preview we want to slice the *body* lines, not the
+    // serialised JSON. `summarize` already parses the structured value;
+    // pull `text` out here when present so the preview head/tail match
+    // what the user actually saw.
+    const bodyText = extractBodyText(content, name);
 
     if (isError) {
       const firstLine = txt.split('\n')[0] ?? '';
@@ -92,12 +130,8 @@ export class TerminalRenderer implements Renderer {
       return;
     }
 
-    // Tool-specific rendering.
-    const isEditLike = name === 'edit' || name === 'write';
-    const isReadLike = name === 'read' || name === 'grep' || name === 'glob' || name === 'bash';
-    const previewLines = isEditLike ? 0 : isReadLike ? 6 : 2;
-
     // Edit-like tools: pull the embedded diff if present.
+    const isEditLike = name === 'edit' || name === 'write';
     const diff = extractDiff(content);
     if (isEditLike && diff) {
       this.out.write(`  ${prefix} ${color.dim(summarize(content, name))}\n`);
@@ -110,11 +144,31 @@ export class TerminalRenderer implements Renderer {
       return;
     }
 
-    // Generic preview: show up to N lines, then "+X more" if truncated.
-    const lines = txt.split('\n');
+    const summary = summarize(content, name);
+    const isReadLike = name === 'read' || name === 'grep' || name === 'glob' || name === 'bash';
+
+    // SIMPLE mode: meta only — no content lines. For tools whose result
+    // already carries structured metadata (read/grep/glob/bash), the
+    // summary line is the entire on-screen rendering. For unknown tools,
+    // show the first line as a tiny preview to avoid hiding failure modes
+    // that aren't summarised.
+    if (renderMode === 'simple') {
+      this.out.write(`  ${prefix} ${color.dim(summary || compactSingleLine(bodyText))}\n`);
+      this.lineStart = true;
+      return;
+    }
+
+    // EXTEND mode: full preview, up to 10 lines for read-like tools.
+    const previewLines = isEditLike
+      ? 0
+      : isReadLike
+        ? TerminalRenderer.EXTEND_PREVIEW_LINES
+        : 2;
+
+    const lines = bodyText.split('\n');
     const head = lines.slice(0, previewLines).map((l: string) => l.replace(/\s+$/, ''));
     const moreCount = Math.max(0, lines.length - head.length);
-    this.out.write(`  ${prefix} ${color.dim(summarize(content, name))}\n`);
+    this.out.write(`  ${prefix} ${color.dim(summary)}\n`);
     for (const l of head) {
       const capped = l.length > 200 ? `${l.slice(0, 197)}…` : l;
       this.out.write(`      ${color.dim(capped)}\n`);
@@ -291,6 +345,46 @@ function safeStringify(value: unknown): string {
 }
 
 /**
+ * Pull the user-visible body text out of a structured tool result so the
+ * extend-mode preview slices real lines, not serialised JSON.
+ *
+ * - `read` returns `{text, total_lines, ...}` — the body is `text`.
+ * - Bash/text-output tools that serialise `{stdout, stderr, ...}` get a
+ *   joined stdout/stderr string so multi-line output is previewable.
+ * - Plain strings and structured payloads without a body field fall back
+ *   to the serialised form (existing behaviour).
+ */
+function extractBodyText(value: unknown, name: string): string {
+  let v: unknown = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trimStart();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        v = JSON.parse(value);
+      } catch {
+        return value;
+      }
+    } else {
+      return value;
+    }
+  }
+  if (typeof v !== 'object' || v === null) {
+    return safeStringify(value);
+  }
+  const o = v as Record<string, unknown>;
+  if (name === 'read' && typeof o['text'] === 'string') return o['text'] as string;
+  if (name === 'bash') {
+    const stdout = typeof o['stdout'] === 'string' ? (o['stdout'] as string) : '';
+    const stderr = typeof o['stderr'] === 'string' ? (o['stderr'] as string) : '';
+    if (stdout && stderr) return `${stdout}\n${stderr}`;
+    return stdout || stderr || '';
+  }
+  // No body field recognised — return the serialised form so the preview
+  // still shows something rather than going blank.
+  return safeStringify(value);
+}
+
+/**
  * If the tool result is an object with a `diff` field (e.g. from the edit
  * tool), return that. If it's a string containing a unified diff header,
  * return it as-is. Otherwise return null and the caller falls back to a
@@ -323,6 +417,11 @@ function extractDiff(value: unknown): string | null {
 /**
  * Short summary shown next to the ✓: file path + count for edit, line count
  * for read/grep, etc. Falls back to nothing if the shape isn't recognised.
+ *
+ * For `read`, returns `path  N lines (truncated|cached)`. For `bash`,
+ * returns `exit=N  X lines / Y bytes`. For tools without structured meta,
+ * returns an empty string and the renderer falls back to a single-line
+ * preview so unknown shapes still get some on-screen signal.
  */
 function summarize(value: unknown, name: string): string {
   // Tool results arrive at the renderer already serialised to a JSON string.
@@ -351,9 +450,63 @@ function summarize(value: unknown, name: string): string {
       const bytes = typeof o['bytes'] === 'number' ? (o['bytes'] as number) : undefined;
       return bytes !== undefined ? `${path}  ${bytes}B` : path;
     }
+    if (name === 'read') {
+      return summarizeRead(o);
+    }
+    if (name === 'bash') {
+      return summarizeBash(o);
+    }
     if (typeof o['count'] === 'number') {
       return `${o['count']} match${o['count'] === 1 ? '' : 'es'}`;
     }
   }
   return '';
+}
+
+function summarizeRead(o: Record<string, unknown>): string {
+  const path = typeof o['path'] === 'string' ? (o['path'] as string) : '';
+  const total = typeof o['total_lines'] === 'number' ? (o['total_lines'] as number) : undefined;
+  const truncated = o['truncated'] === true;
+  const cached = o['cached'] === true;
+  const note = typeof o['note'] === 'string' ? (o['note'] as string) : undefined;
+  const parts: string[] = [];
+  if (path) parts.push(path);
+  if (total !== undefined) parts.push(`${total} line${total === 1 ? '' : 's'}`);
+  const flags: string[] = [];
+  if (truncated) flags.push('truncated');
+  if (cached) flags.push('cached');
+  if (flags.length > 0) parts.push(`(${flags.join(', ')})`);
+  let summary = parts.join('  ').trim();
+  if (note) summary = summary ? `${summary} — ${note}` : note;
+  return summary;
+}
+
+function summarizeBash(o: Record<string, unknown>): string {
+  const exit = typeof o['exitCode'] === 'number'
+    ? (o['exitCode'] as number)
+    : typeof o['exit_code'] === 'number'
+      ? (o['exit_code'] as number)
+      : undefined;
+  const stdout = typeof o['stdout'] === 'string' ? (o['stdout'] as string) : '';
+  const stderr = typeof o['stderr'] === 'string' ? (o['stderr'] as string) : '';
+  const outLines = stdout ? stdout.split('\n').length : 0;
+  const errLines = stderr ? stderr.split('\n').length : 0;
+  const totalBytes = stdout.length + stderr.length;
+  const parts: string[] = [];
+  if (exit !== undefined) parts.push(`exit=${exit}`);
+  if (outLines > 0) parts.push(`${outLines} stdout line${outLines === 1 ? '' : 's'}`);
+  if (errLines > 0) parts.push(`${errLines} stderr line${errLines === 1 ? '' : 's'}`);
+  if (totalBytes > 0) parts.push(`${totalBytes}B`);
+  return parts.join('  ');
+}
+
+/**
+ * Last-resort single-line preview used when `summarize` returns nothing
+ * (e.g. unknown tool result shape). Trims whitespace, takes the first
+ * line, and caps at 200 chars to match the per-line cap in extend mode.
+ */
+function compactSingleLine(text: string): string {
+  const first = text.split('\n')[0]?.trim() ?? '';
+  if (!first) return '(no output)';
+  return first.length > 200 ? `${first.slice(0, 197)}…` : first;
 }

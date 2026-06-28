@@ -119,6 +119,98 @@ describe('buildToolCommand', () => {
 
     const res = await command.run('read tiny', {} as Context);
 
-    expect(res?.message).toContain('/tool read simple|extend');
+    expect(res?.message).toContain('/tool read [desc|result] simple|extend');
+  });
+
+  it('legacy `/tool <name> simple` sets BOTH description and result axes', async () => {
+    const { command, toolRegistry, configStore, globalConfig } = makeCommand();
+
+    const res = await command.run('read simple', {} as Context);
+
+    // Both axes land in config.
+    expect(configStore.get().tools.descriptionMode?.read).toBe('simple');
+    expect(configStore.get().tools.resultRenderMode?.read).toBe('simple');
+    // Both axes applied in-memory via the registry.
+    expect(toolRegistry.getDescriptionMode('read')).toBe('simple');
+    // Both axes persisted to disk.
+    const saved = JSON.parse(await fs.readFile(globalConfig, 'utf8')) as Config;
+    expect(saved.tools.descriptionMode?.read).toBe('simple');
+    expect(saved.tools.resultRenderMode?.read).toBe('simple');
+    expect(res?.message).toContain('desc:simple');
+    expect(res?.message).toContain('result:simple');
+  });
+
+  it('`/tool <name> desc simple` only changes the description axis', async () => {
+    const { command, toolRegistry, configStore, globalConfig } = makeCommand();
+
+    const res = await command.run('read desc simple', {} as Context);
+
+    expect(configStore.get().tools.descriptionMode?.read).toBe('simple');
+    // The result axis MUST stay at the default (no entry in the map).
+    expect(configStore.get().tools.resultRenderMode?.read).toBeUndefined();
+    expect(toolRegistry.getDescriptionMode('read')).toBe('simple');
+    const saved = JSON.parse(await fs.readFile(globalConfig, 'utf8')) as Config;
+    expect(saved.tools.descriptionMode?.read).toBe('simple');
+    expect(saved.tools.resultRenderMode?.read).toBeUndefined();
+    expect(res?.message).toContain('desc:simple');
+    expect(res?.message).not.toContain('result:');
+  });
+
+  it('`/tool <name> result simple` only changes the result axis', async () => {
+    const { command, configStore, globalConfig } = makeCommand();
+
+    const res = await command.run('read result simple', {} as Context);
+
+    expect(configStore.get().tools.resultRenderMode?.read).toBe('simple');
+    expect(configStore.get().tools.descriptionMode?.read).toBeUndefined();
+    const saved = JSON.parse(await fs.readFile(globalConfig, 'utf8')) as Config;
+    expect(saved.tools.resultRenderMode?.read).toBe('simple');
+    expect(saved.tools.descriptionMode?.read).toBeUndefined();
+    expect(res?.message).toContain('result:simple');
+    expect(res?.message).not.toContain('desc:');
+  });
+
+  it('desc and result toggles are independent — one does not wipe the other', async () => {
+    const { command, configStore } = makeCommand();
+
+    await command.run('read desc simple', {} as Context);
+    await command.run('read result simple', {} as Context);
+
+    expect(configStore.get().tools.descriptionMode?.read).toBe('simple');
+    expect(configStore.get().tools.resultRenderMode?.read).toBe('simple');
+
+    // Now flip just one axis back. The other must survive.
+    await command.run('read desc extend', {} as Context);
+
+    expect(configStore.get().tools.descriptionMode?.read).toBeUndefined();
+    expect(configStore.get().tools.resultRenderMode?.read).toBe('simple');
+  });
+
+  it('legacy `/tool <name> extend` resets both axes at once', async () => {
+    const { command, configStore, globalConfig } = makeCommand();
+
+    await command.run('read simple', {} as Context); // both → simple
+    const res = await command.run('read extend', {} as Context); // both → cleared
+
+    expect(configStore.get().tools.descriptionMode?.read).toBeUndefined();
+    expect(configStore.get().tools.resultRenderMode?.read).toBeUndefined();
+    const saved = JSON.parse(await fs.readFile(globalConfig, 'utf8')) as Config;
+    expect(saved.tools.descriptionMode?.read).toBeUndefined();
+    expect(saved.tools.resultRenderMode?.read).toBeUndefined();
+    expect(res?.message).toContain('desc:extend');
+    expect(res?.message).toContain('result:extend');
+  });
+
+  it('`/tool <name> result extend` only resets the result axis', async () => {
+    const { command, configStore } = makeCommand();
+
+    await command.run('read simple', {} as Context); // both → simple
+    const res = await command.run('read result extend', {} as Context);
+
+    // Desc stays simple, result cleared.
+    expect(configStore.get().tools.descriptionMode?.read).toBe('simple');
+    expect(configStore.get().tools.resultRenderMode?.read).toBeUndefined();
+    expect(res?.message).toContain('result:extend');
+    expect(res?.message).not.toContain('desc:');
   });
 });

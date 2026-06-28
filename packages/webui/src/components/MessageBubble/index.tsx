@@ -250,7 +250,16 @@ export const MessageBubble = memo(function MessageBubble({
                 })()}
                 {expanded && message.toolResult !== undefined && message.toolResult.length > 0 && (
                   <div className="relative group/tool">
-                    <ToolResult toolName={message.toolName} result={message.toolResult} isError={message.isError} />
+                    <ToolResult
+                      toolName={message.toolName}
+                      result={message.toolResult}
+                      isError={message.isError}
+                      // TODO: wire to backend — pass the per-tool
+                      // `tools.resultRenderMode[name]` value down through
+                      // the WS tool.executed event so the WebUI mirrors
+                      // the CLI's `/tool <name> result simple|extend`
+                      // toggle. Until then, always extend (default).
+                    />
                     <div className="absolute top-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover/tool:opacity-100 transition-opacity">
                       <CopyButton text={message.toolResult} label="" className="bg-background/80 border rounded px-1.5 py-0.5" />
                       {message.toolResult.split('\n').length > 5 && (

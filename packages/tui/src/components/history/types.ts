@@ -26,6 +26,14 @@ export type HistoryEntry =
        *  numbered prefixes, shell/grep/logs count newlines. Undefined for
        *  tools without a line notion (json, fetch, …). */
       outputLines?: number | undefined;
+      /**
+       * Per-tool on-screen result render mode. `simple` hides the body
+       * preview and shows only meta (line count, byte size); `extend`
+       * shows the full preview. Mirrors the CLI's `setResultRenderMode`
+       * state. The frontend TUI reads this off the same
+       * `tools.resultRenderMode[name]` config the CLI uses.
+       */
+      resultRenderMode?: 'simple' | 'extend' | undefined;
     }
   | { id: number; kind: 'info'; text: string }
   | { id: number; kind: 'warn'; text: string }

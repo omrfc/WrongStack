@@ -79,6 +79,15 @@ export {
   type ToolDescriptionRegistryLike,
 } from './tool-description-mode.js';
 export {
+  DEFAULT_TOOL_RESULT_RENDER_MODE,
+  applyToolResultRenderModes,
+  getToolResultRenderMode,
+  normalizeToolResultRenderMode,
+  resolveToolResultRenderMode,
+  setToolResultRenderMode,
+  type ToolResultRenderModeRegistryLike,
+} from './tool-result-render-mode.js';
+export {
   type CompactToolDefinitionForWireOptions,
   type CompactWireToolDefinition,
   compactSchemaDescriptions,
