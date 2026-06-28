@@ -38,6 +38,7 @@ import {
 import { WorkDashboard } from './WorkDashboard';
 import { WorktreeGraph } from './WorktreeGraph';
 import { WorktreeLanes } from './WorktreeLanes';
+import { WorktreeOrphans } from './WorktreeOrphans';
 
 // ── Chip ──────────────────────────────────────────────────────────────
 
@@ -330,6 +331,7 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
               </button>
             ))}
           </div>
+          <WorktreeOrphans />
           {worktreeView === 'graph' ? (
             <WorktreeGraph worktrees={worktrees} baseBranch={baseBranch || 'HEAD'} />
           ) : (

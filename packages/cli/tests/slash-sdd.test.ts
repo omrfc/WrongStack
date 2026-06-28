@@ -420,13 +420,39 @@ describe('buildSddCommand verbs without an active session', () => {
     let called = 0;
     const onSddDestroy = async () => {
       called++;
-      return { worktreesRemoved: 2, deleted: ['specs', 'boards'] };
+      return { worktreesRemoved: 2, deleted: ['specs', 'boards'], reverted: 0 };
     };
     const res = await build({ onSddDestroy }).run('destroy');
     expect(called).toBe(1);
     expect(res?.message).toContain('SDD project destroyed');
     expect(res?.message).toContain('Removed 2 worktrees');
     expect(res?.message).toContain('specs, boards');
+    // Default destroy leaves merged commits.
+    expect(res?.message).toMatch(/Merged commits left intact/i);
+  });
+
+  it('destroy --revert forwards revertMerged and reports the reverted count', async () => {
+    let seen: { revertMerged?: boolean } | undefined;
+    const onSddDestroy = async (o?: { revertMerged?: boolean }) => {
+      seen = o;
+      return { worktreesRemoved: 1, deleted: ['boards'], reverted: 3, revertOk: true };
+    };
+    const res = await build({ onSddDestroy }).run('destroy --revert');
+    expect(seen?.revertMerged).toBe(true);
+    expect(res?.message).toContain('Reverted 3 merged commits');
+  });
+
+  it('destroy --revert surfaces a refused revert', async () => {
+    const onSddDestroy = async () => ({
+      worktreesRemoved: 0,
+      deleted: ['boards'],
+      reverted: 0,
+      revertOk: false,
+      revertReason: 'working tree has uncommitted changes',
+    });
+    const res = await build({ onSddDestroy }).run('destroy --revert');
+    expect(res?.message).toMatch(/revert refused/i);
+    expect(res?.message).toContain('uncommitted');
   });
 
   it('abort is an alias of stop', async () => {

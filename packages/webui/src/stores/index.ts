@@ -43,6 +43,7 @@ export {
   type SddBoardSummary,
   type SddBoardStatus,
   type SddBoardFeedEntry,
+  type SddLifecycleResultUI,
 } from './sdd-board-store.js';
 export {
   useSddWizardStore,

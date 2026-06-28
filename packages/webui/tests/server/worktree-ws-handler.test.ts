@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { EventBus } from '@wrongstack/core';
 import { WorktreeWebSocketHandler } from '../../src/server/worktree-ws-handler.js';
 import { deriveWorktreeGraph } from '../../src/components/WorktreeGraph.js';
@@ -78,6 +81,81 @@ describe('WorktreeWebSocketHandler', () => {
     expect(s.worktrees).toHaveLength(1);
     expect(s.worktrees[0].status).toBe('needs-review');
     expect(s.worktrees[0].conflictFiles).toEqual(['db.sql']);
+    h.dispose();
+  });
+});
+
+describe('WorktreeWebSocketHandler — orphan management', () => {
+  const dirs: string[] = [];
+  async function tmpDir(): Promise<string> {
+    const d = await fs.mkdtemp(path.join(os.tmpdir(), 'wt-ws-'));
+    dirs.push(d);
+    return d;
+  }
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) await fs.rm(d, { recursive: true, force: true }).catch(() => undefined);
+  });
+  const lastOf = (ws: ReturnType<typeof fakeWs>, type: string) => {
+    const m = ws.sent.filter((x: any) => x.type === type);
+    return m[m.length - 1];
+  };
+
+  it('broadcasts a worktree.orphans inventory on a scan (empty outside a repo)', async () => {
+    const root = await tmpDir();
+    const h = new WorktreeWebSocketHandler(new EventBus(), noopLogger, {
+      projectRoot: root,
+      boardsDir: path.join(root, 'sdd-boards'),
+    });
+    const ws = fakeWs();
+    h.addClient(ws);
+    await h.handleMessage({ type: 'worktree.scan' });
+    const msg = lastOf(ws, 'worktree.orphans');
+    expect(msg?.payload).toMatchObject({ orphans: [], canClean: true });
+    h.dispose();
+  });
+
+  it('refuses cleanup while a worktree is actively owned by a live run', async () => {
+    const root = await tmpDir();
+    const events = new EventBus();
+    const h = new WorktreeWebSocketHandler(events, noopLogger, {
+      projectRoot: root,
+      boardsDir: path.join(root, 'sdd-boards'),
+    });
+    const ws = fakeWs();
+    h.addClient(ws);
+    events.emit('worktree.allocated', {
+      handleId: 'h1', ownerId: 'o1', ownerLabel: 'task', slug: 's1',
+      dir: path.join(root, '.wrongstack', 'worktrees', 's1'), branch: 'wstack/ap/s1', baseBranch: 'main',
+    } as never);
+
+    await h.handleMessage({ type: 'worktree.cleanup' });
+    const res = lastOf(ws, 'worktree.cleanup_result');
+    expect(res?.payload.ok).toBe(false);
+    expect(String(res?.payload.reason)).toMatch(/live/i);
+    h.dispose();
+  });
+
+  it('cleans when idle and reports the outcome (0 removed outside a repo)', async () => {
+    const root = await tmpDir();
+    const h = new WorktreeWebSocketHandler(new EventBus(), noopLogger, {
+      projectRoot: root,
+      boardsDir: path.join(root, 'sdd-boards'),
+    });
+    const ws = fakeWs();
+    h.addClient(ws);
+    await h.handleMessage({ type: 'worktree.cleanup' });
+    const res = lastOf(ws, 'worktree.cleanup_result');
+    expect(res?.payload).toMatchObject({ ok: true, removed: 0 });
+    h.dispose();
+  });
+
+  it('handleMessage returns false for unrelated message types', async () => {
+    const root = await tmpDir();
+    const h = new WorktreeWebSocketHandler(new EventBus(), noopLogger, {
+      projectRoot: root,
+      boardsDir: path.join(root, 'sdd-boards'),
+    });
+    expect(await h.handleMessage({ type: 'something.else' })).toBe(false);
     h.dispose();
   });
 });

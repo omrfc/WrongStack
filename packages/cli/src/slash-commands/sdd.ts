@@ -362,7 +362,9 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
           if (!opts.onSddDestroy) {
             return { message: 'Destroy is not available in this session.' };
           }
-          const res = await opts.onSddDestroy();
+          // `/sdd destroy --revert` also reverts merged commits before wiping.
+          const revertMerged = restArgs.some((a) => a === '--revert' || a === '--rollback');
+          const res = await opts.onSddDestroy({ revertMerged });
           // Mirror /sdd cancel's in-memory cleanup so the session is fully gone.
           const builder = sddState.getBuilder();
           if (builder) {
@@ -370,13 +372,20 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
             sddState.setBuilder(null);
           }
           sddState.clearTaskState();
+          const mergedNote = revertMerged
+            ? res.revertOk === false
+              ? `  Merged-commit revert refused: ${res.revertReason ?? 'unknown reason'}.`
+              : res.reverted > 0
+                ? `  Reverted ${res.reverted} merged commit${res.reverted === 1 ? '' : 's'}.`
+                : '  No merged commits to revert.'
+            : `  (Merged commits left intact — use /sdd destroy --revert or /sdd rollback to undo them.)`;
           const parts = [
             `SDD project destroyed.`,
             res.worktreesRemoved > 0
               ? `  Removed ${res.worktreesRemoved} worktree${res.worktreesRemoved === 1 ? '' : 's'}.`
               : '',
             res.deleted.length ? `  Deleted: ${res.deleted.join(', ')}.` : '',
-            `  (Merged commits left intact — use /sdd rollback to undo them.)`,
+            mergedNote,
           ].filter(Boolean);
           return { message: parts.join('\n') };
         }

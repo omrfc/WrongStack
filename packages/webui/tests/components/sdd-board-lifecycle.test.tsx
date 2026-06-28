@@ -34,7 +34,7 @@ function snapshot(over: Partial<SddBoardSnapshotUI> = {}): SddBoardSnapshotUI {
 
 afterEach(() => {
   sent.length = 0;
-  useSddBoardStore.setState({ snapshot: null });
+  useSddBoardStore.setState({ snapshot: null, lifecycleResult: null, destroying: false });
 });
 
 describe('SddBoardView — lifecycle controls', () => {
@@ -63,5 +63,34 @@ describe('SddBoardView — lifecycle controls', () => {
     useSddBoardStore.setState({ snapshot: snapshot({ status: 'running' }) });
     render(<SddBoardView onClose={() => {}} />);
     expect(screen.queryByText('Clean worktrees')).toBeNull();
+  });
+
+  it('Destroy opens a confirm dialog and sends sdd.board.destroy when stopped', () => {
+    useSddBoardStore.setState({ snapshot: snapshot() });
+    render(<SddBoardView onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Destroy'));
+    // The confirmation dialog appears, then confirm fires the wipe immediately
+    // (run is already stopped).
+    fireEvent.click(screen.getByText('Destroy everything'));
+    expect(sent.some((m) => m.type === 'sdd.board.destroy')).toBe(true);
+  });
+
+  it('Destroy on an active run sends stop first (not destroy yet)', () => {
+    useSddBoardStore.setState({ snapshot: snapshot({ status: 'running' }) });
+    render(<SddBoardView onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Destroy'));
+    fireEvent.click(screen.getByText('Destroy everything'));
+    expect(sent.some((m) => m.type === 'sdd.board.stop')).toBe(true);
+    expect(sent.some((m) => m.type === 'sdd.board.destroy')).toBe(false);
+    expect(useSddBoardStore.getState().destroying).toBe(true);
+  });
+
+  it('renders a result banner from a lifecycle_result', () => {
+    useSddBoardStore.setState({
+      snapshot: snapshot(),
+      lifecycleResult: { op: 'cleanup_worktrees', ok: true, removed: 3, at: 1 },
+    });
+    render(<SddBoardView onClose={() => {}} />);
+    expect(screen.getByText(/3 worktrees removed/)).toBeTruthy();
   });
 });

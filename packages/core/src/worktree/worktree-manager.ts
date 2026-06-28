@@ -376,6 +376,62 @@ export class WorktreeManager {
   }
 
   /**
+   * Read-only inventory of this project's managed git artifacts: every worktree
+   * checkout under the `.wrongstack/worktrees` root (with its branch, when the
+   * checkout has one) plus every `wstack/ap/*` branch. Unlike `cleanupStale` /
+   * `cleanupAllManaged` this removes nothing — it powers the WebUI worktree panel
+   * so the user can SEE orphans before deciding to clean them. Never throws.
+   */
+  async listManaged(): Promise<{
+    worktrees: Array<{ dir: string; branch?: string | undefined }>;
+    branches: string[];
+  }> {
+    const root = resolve(this.worktreesRoot());
+    const worktrees: Array<{ dir: string; branch?: string | undefined }> = [];
+    try {
+      const listed = await this.runGit(['worktree', 'list', '--porcelain'], this.projectRoot);
+      // Porcelain emits blank-line-separated records: `worktree <dir>` then
+      // optional `HEAD <sha>` / `branch refs/heads/<name>` lines.
+      let curDir: string | null = null;
+      let curBranch: string | undefined;
+      const flush = (): void => {
+        if (curDir) {
+          const d = resolve(curDir);
+          if (d !== root && d.startsWith(root + sep)) {
+            worktrees.push({ dir: curDir, branch: curBranch });
+          }
+        }
+        curDir = null;
+        curBranch = undefined;
+      };
+      for (const line of listed.stdout.split('\n')) {
+        if (line.startsWith('worktree ')) {
+          flush();
+          curDir = line.slice('worktree '.length).trim();
+        } else if (line.startsWith('branch ')) {
+          curBranch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
+        } else if (line.trim() === '') {
+          flush();
+        }
+      }
+      flush();
+    } catch {
+      // best-effort
+    }
+    let branches: string[] = [];
+    try {
+      const b = await this.runGit(
+        ['branch', '--list', '--format=%(refname:short)', 'wstack/ap/*'],
+        this.projectRoot,
+      );
+      branches = b.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+    } catch {
+      // best-effort
+    }
+    return { worktrees, branches };
+  }
+
+  /**
    * Detect and clean up stale worktrees left behind by crashed subagents.
    *
    * P2 #B6 (sprint2 audit): when a subagent crashes (OOM, SIGKILL), its
@@ -408,10 +464,26 @@ export class WorktreeManager {
       // git not available or not a repo — nothing to clean
       return { removed: 0, detected: 0 };
     }
+    // Also catch dangling `wstack/ap/*` branches whose worktree checkout is
+    // already gone (e.g. a crash between `worktree remove` and `branch -D`, or a
+    // merged task whose checkout was released but the branch lingered). These
+    // are orphans too — without this the worktree-dir-only probe would report
+    // "clean" and the branch would accumulate across runs.
+    if (detected === 0) {
+      try {
+        const branches = await this.runGit(
+          ['branch', '--list', '--format=%(refname:short)', 'wstack/ap/*'],
+          this.projectRoot,
+        );
+        detected += branches.stdout.split('\n').map((s) => s.trim()).filter(Boolean).length;
+      } catch {
+        // best-effort
+      }
+    }
     if (detected === 0) {
       return { removed: 0, detected: 0 };
     }
-    // Stale worktrees found — delegate to the full sweep.
+    // Stale worktrees / branches found — delegate to the full sweep.
     const { removed } = await this.cleanupAllManaged();
     return { removed, detected };
   }

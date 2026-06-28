@@ -1665,6 +1665,14 @@ export async function main(argv: string[]): Promise<number> {
   // and slash hooks steer the run through this; the run itself is CLI-owned.
   const sddRunRegistry = new SddRunRegistry();
 
+  // One-shot orphan sweep on boot — remove worktrees/branches a crashed or
+  // abandoned SDD run left behind so they never accumulate across sessions.
+  // Liveness-guarded (skips a run live in another process) + best-effort;
+  // fire-and-forget so it never delays startup.
+  void import('@wrongstack/core')
+    .then((m) => m.cleanupStaleSddWorktrees({ projectRoot, boardsDir: wpaths.projectSddBoards }))
+    .catch(() => undefined);
+
   const slashCmds = buildBuiltinSlashCommands({
     registry: slashRegistry,
     toolRegistry,
@@ -2545,7 +2553,15 @@ export async function main(argv: string[]): Promise<number> {
             settle(false);
           }
         });
-        if (inGit) worktrees = new core.WorktreeManager({ projectRoot, events });
+        if (inGit) {
+          // Clean slate before allocating: sweep orphaned worktrees/branches a
+          // prior crashed/abandoned run left behind. Liveness-guarded so it
+          // never disturbs a run live in another process.
+          await core
+            .cleanupStaleSddWorktrees({ projectRoot, boardsDir: wpaths.projectSddBoards })
+            .catch(() => undefined);
+          worktrees = new core.WorktreeManager({ projectRoot, events });
+        }
       }
 
       const boardStore = new core.SddBoardStore({ baseDir: wpaths.projectSddBoards });
@@ -2680,12 +2696,13 @@ export async function main(argv: string[]): Promise<number> {
       const core = await import('@wrongstack/core');
       return core.rollbackSddRunFromDisk({ projectRoot, boardsDir: wpaths.projectSddBoards });
     },
-    onSddDestroy: async () => {
+    onSddDestroy: async (destroyOpts) => {
       // Stop any live run first so nothing writes while we delete.
       sddRunRegistry.getActive()?.stop();
       const core = await import('@wrongstack/core');
       return core.destroySddProject({
         projectRoot,
+        revertMerged: destroyOpts?.revertMerged === true,
         paths: {
           projectSpecs: wpaths.projectSpecs,
           projectTaskGraphs: wpaths.projectTaskGraphs,
@@ -2958,6 +2975,27 @@ export async function main(argv: string[]): Promise<number> {
     // running `/sdd parallel` mid-flight — without this the run is unreachable
     // from Ctrl+C (it has its own coordinator, not the autonomy engines).
     getSddRun: () => sddRunRegistry.getActive(),
+    // Uniform lifecycle entry point for the TUI board overlay keys (c / z / x).
+    // Stops a live run for destroy; refuses clean/rollback while one is still
+    // running. Reuses the same disk-backed core helper as the WebUI + /sdd.
+    onSddLifecycle: async (op, lcOpts) => {
+      const active = sddRunRegistry.getActive();
+      if (op === 'destroy') active?.stop();
+      else if (active?.isRunning()) {
+        return { op, ok: false, reason: 'Stop the run first (Ctrl+C), then retry.' };
+      }
+      const core = await import('@wrongstack/core');
+      return core.applySddLifecycle(op, {
+        projectRoot,
+        revertMerged: lcOpts?.revertMerged === true,
+        paths: {
+          projectSpecs: wpaths.projectSpecs,
+          projectTaskGraphs: wpaths.projectTaskGraphs,
+          projectSddSession: wpaths.projectSddSession,
+          projectSddBoards: wpaths.projectSddBoards,
+        },
+      });
+    },
     subscribeEternalIteration: (fn) => {
       eternalListeners.add(fn);
       return () => eternalListeners.delete(fn);

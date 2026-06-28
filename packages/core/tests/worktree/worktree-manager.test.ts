@@ -192,6 +192,92 @@ describe('WorktreeManager (stubbed git)', () => {
     expect(calls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'prune')).toBe(true);
   });
 
+  it('cleanupStale() sweeps when a worktree dir is detected', async () => {
+    const root = path.join(path.resolve('/proj'), '.wrongstack', 'worktrees');
+    const { calls, run } = stubRunner((args) => {
+      if (args[0] === 'worktree' && args[1] === 'list') {
+        return {
+          code: 0,
+          stdout: [`worktree ${path.resolve('/proj')}`, '', `worktree ${path.join(root, 'a-111111')}`, ''].join('\n'),
+          stderr: '',
+        };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const wm = new WorktreeManager({ projectRoot: '/proj', run });
+    const res = await wm.cleanupStale();
+    expect(res.detected).toBe(1);
+    expect(calls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'remove')).toBe(true);
+  });
+
+  it('cleanupStale() also detects branch-only orphans (no worktree dir)', async () => {
+    const { calls, run } = stubRunner((args) => {
+      // No managed worktree dirs (only the main checkout) …
+      if (args[0] === 'worktree' && args[1] === 'list') {
+        return { code: 0, stdout: `worktree ${path.resolve('/proj')}\n`, stderr: '' };
+      }
+      // … but a dangling wstack/ap branch remains.
+      if (args[0] === 'branch' && args[1] === '--list') {
+        return { code: 0, stdout: 'wstack/ap/ghost-abcdef\n', stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const wm = new WorktreeManager({ projectRoot: '/proj', run });
+    const res = await wm.cleanupStale();
+    expect(res.detected).toBe(1);
+    // The sweep deletes the dangling branch.
+    expect(calls.some((c) => c.args[0] === 'branch' && c.args[1] === '-D')).toBe(true);
+  });
+
+  it('listManaged() returns managed worktrees (with branch) + wstack/ap branches, removes nothing', async () => {
+    const root = path.join(path.resolve('/proj'), '.wrongstack', 'worktrees');
+    const { calls, run } = stubRunner((args) => {
+      if (args[0] === 'worktree' && args[1] === 'list') {
+        return {
+          code: 0,
+          stdout: [
+            `worktree ${path.resolve('/proj')}`,
+            'HEAD aaa',
+            'branch refs/heads/main',
+            '',
+            `worktree ${path.join(root, 'a-111111')}`,
+            'HEAD bbb',
+            'branch refs/heads/wstack/ap/a-111111',
+            '',
+          ].join('\n'),
+          stderr: '',
+        };
+      }
+      if (args[0] === 'branch' && args[1] === '--list') {
+        return { code: 0, stdout: 'wstack/ap/a-111111\nwstack/ap/ghost-222222\n', stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const wm = new WorktreeManager({ projectRoot: '/proj', run });
+    const res = await wm.listManaged();
+
+    // Only the managed checkout (not the main one) is returned, with its branch.
+    expect(res.worktrees).toEqual([
+      { dir: path.join(root, 'a-111111'), branch: 'wstack/ap/a-111111' },
+    ]);
+    expect(res.branches).toEqual(['wstack/ap/a-111111', 'wstack/ap/ghost-222222']);
+    // Read-only: never removes/prunes.
+    expect(calls.some((c) => c.args[1] === 'remove' || c.args[1] === 'prune' || c.args[1] === '-D')).toBe(false);
+  });
+
+  it('cleanupStale() is a no-op when nothing is managed', async () => {
+    const { calls, run } = stubRunner((args) => {
+      if (args[0] === 'worktree' && args[1] === 'list') {
+        return { code: 0, stdout: `worktree ${path.resolve('/proj')}\n`, stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const wm = new WorktreeManager({ projectRoot: '/proj', run });
+    const res = await wm.cleanupStale();
+    expect(res).toEqual({ removed: 0, detected: 0 });
+    expect(calls.some((c) => c.args[0] === 'worktree' && c.args[1] === 'remove')).toBe(false);
+  });
+
   it('revertCommits() reverts each sha newest→oldest on the base branch', async () => {
     const { calls, run } = stubRunner(() => ({ code: 0, stdout: '', stderr: '' }));
     const wm = new WorktreeManager({ projectRoot: '/proj', run });

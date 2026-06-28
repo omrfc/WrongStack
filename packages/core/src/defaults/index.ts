@@ -357,12 +357,19 @@ export {
   type SddInterviewSnapshot,
 } from '../sdd/sdd-interview-driver.js';
 export {
+  applySddLifecycle,
   cleanupSddWorktrees,
+  cleanupStaleSddWorktrees,
+  type CleanupStaleSddOptions,
+  type CleanupStaleSddResult,
   type DestroySddProjectOptions,
   type DestroySddProjectResult,
   destroySddProject,
   type RollbackFromDiskOptions,
   rollbackSddRunFromDisk,
+  type SddLifecycleOp,
+  type SddLifecycleOptions,
+  type SddLifecycleResult,
 } from '../sdd/sdd-lifecycle.js';
 export {
   type RunResult,

@@ -923,6 +923,33 @@ export interface WSWorktreeEvent {
   payload: { kind: string; handleId: string; text: string; at: number };
 }
 
+/** One orphaned git artifact left by a previous/crashed run. */
+export interface WorktreeOrphanView {
+  /** Absolute checkout path (omitted for a branch-only orphan). */
+  dir?: string | undefined;
+  /** Branch name (`wstack/ap/*`), when known. */
+  branch?: string | undefined;
+  kind: 'worktree' | 'branch';
+}
+
+/** Disk-scanned orphan inventory + whether it is safe to clean right now. */
+export interface WSWorktreeOrphans {
+  type: 'worktree.orphans';
+  payload: {
+    orphans: WorktreeOrphanView[];
+    /** False while a run is live (in this session or another process). */
+    canClean: boolean;
+    /** Why cleaning is blocked, when canClean is false. */
+    reason?: string | undefined;
+  };
+}
+
+/** Outcome of a worktree-panel orphan cleanup. */
+export interface WSWorktreeCleanupResult {
+  type: 'worktree.cleanup_result';
+  payload: { ok: boolean; removed: number; reason?: string | undefined };
+}
+
 export type WSClientMessage =
   | WSUserMessage
   | WSToolConfirmResult
@@ -1007,6 +1034,12 @@ export type WSClientMessage =
     }
   | { type: 'sdd.board.cleanup_worktrees'; payload?: { runId?: string | undefined } }
   | { type: 'sdd.board.rollback'; payload?: { runId?: string | undefined } }
+  | {
+      type: 'sdd.board.destroy';
+      payload?: { runId?: string | undefined; revertMerged?: boolean | undefined };
+    }
+  | { type: 'worktree.scan'; payload?: Record<string, never> }
+  | { type: 'worktree.cleanup'; payload?: Record<string, never> }
   | { type: 'sdd.spec.start'; payload: { goal: string } }
   | { type: 'sdd.spec.message'; payload: { text: string } }
   | { type: 'sdd.spec.approve'; payload?: Record<string, never> }
@@ -1261,8 +1294,19 @@ export type WSServerMessage =
   | WSAutoPhaseList
   | { type: 'specs.list'; payload: { specs: unknown[] } }
   | { type: 'specs.detail'; payload: Record<string, unknown> }
-  | { type: 'sdd.board.snapshot'; payload: Record<string, unknown> }
+  | { type: 'sdd.board.snapshot'; payload: Record<string, unknown> | null }
   | { type: 'sdd.board.list'; payload: { boards: unknown[] } }
+  | {
+      type: 'sdd.board.lifecycle_result';
+      payload: {
+        op: 'cleanup_worktrees' | 'rollback' | 'destroy';
+        ok: boolean;
+        removed?: number;
+        reverted?: number;
+        deleted?: string[];
+        reason?: string;
+      };
+    }
   | { type: 'sdd.spec.snapshot'; payload: Record<string, unknown> }
   | { type: 'sdd.spec.agent_text'; payload: { text: string } }
   | { type: 'sdd.spec.error'; payload: { message: string } }
@@ -1273,6 +1317,8 @@ export type WSServerMessage =
   | { type: 'subagent.event'; payload: Record<string, unknown> & { kind: string } }
   | WSWorktreeState
   | WSWorktreeEvent
+  | WSWorktreeOrphans
+  | WSWorktreeCleanupResult
   | WSCollabState
   | WSCollabParticipantJoined
   | WSCollabParticipantLeft

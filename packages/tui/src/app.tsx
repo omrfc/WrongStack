@@ -409,6 +409,16 @@ export interface AppProps {
    */
   getSddRun?: (() => import('@wrongstack/core').SddRunControl | null) | undefined;
   /**
+   * Apply a post-run SDD lifecycle op (clean / rollback / destroy) from the host.
+   * Drives board overlay keys c / z / x so they work after the run finished.
+   */
+  onSddLifecycle?:
+    | ((
+        op: 'cleanup_worktrees' | 'rollback' | 'destroy',
+        opts?: { revertMerged?: boolean },
+      ) => Promise<import('@wrongstack/core').SddLifecycleResult>)
+    | undefined;
+  /**
    * Subscribe to live per-iteration events from the eternal engine. The
    * TUI installs this on mount to render each iteration as a timeline
    * entry the moment it lands — strictly more responsive than reading
@@ -776,6 +786,56 @@ export { buildSteeringPreamble } from './steering-preamble.js';
 // where `/goal …` is wired into the chat-input handler.
 export { buildGoalPreamble } from '@wrongstack/core';
 
+/**
+ * Normalize an SDD lifecycle outcome into a chat entry. Accepts the live
+ * `SddRunControl` return shapes (a bare worktree count from `cleanupWorktrees`,
+ * the `{ ok, reverted, reason }` from `rollback`) and the host's uniform
+ * `SddLifecycleResult` so the c / z / x keys read identically either way.
+ */
+function sddLifecycleEntry(
+  op: 'cleanup_worktrees' | 'rollback' | 'destroy',
+  r: number | { ok: boolean; reverted: number; reason?: string | undefined } | import('@wrongstack/core').SddLifecycleResult,
+): { kind: 'info' | 'warn'; text: string } {
+  // Live cleanupWorktrees() → bare count.
+  if (typeof r === 'number') {
+    return {
+      kind: r > 0 ? 'info' : 'warn',
+      text: r > 0 ? `Cleaned ${r} SDD worktree${r === 1 ? '' : 's'}.` : 'No SDD worktrees to clean (stop the run first if it is live).',
+    };
+  }
+  // Live rollback() → { ok, reverted, reason } (no `op` field).
+  if (!('op' in r)) {
+    return {
+      kind: r.ok ? 'info' : 'warn',
+      text: r.ok
+        ? r.reverted > 0
+          ? `Rolled back ${r.reverted} run commit${r.reverted === 1 ? '' : 's'} (revert commits added).`
+          : 'Nothing to roll back.'
+        : `Rollback failed: ${r.reason ?? 'unknown error'}`,
+    };
+  }
+  // Host SddLifecycleResult.
+  if (!r.ok) {
+    const label = op === 'cleanup_worktrees' ? 'Clean' : op === 'rollback' ? 'Rollback' : 'Destroy';
+    return { kind: 'warn', text: `${label} failed: ${r.reason ?? 'unknown error'}` };
+  }
+  if (op === 'cleanup_worktrees') {
+    const n = r.removed ?? 0;
+    return { kind: n > 0 ? 'info' : 'warn', text: n > 0 ? `Cleaned ${n} SDD worktree${n === 1 ? '' : 's'}.` : 'No SDD worktrees to clean.' };
+  }
+  if (op === 'rollback') {
+    const n = r.reverted ?? 0;
+    return { kind: 'info', text: n > 0 ? `Rolled back ${n} run commit${n === 1 ? '' : 's'}.` : 'Nothing to roll back.' };
+  }
+  // destroy
+  const parts = [
+    `${r.removed ?? 0} worktree${(r.removed ?? 0) === 1 ? '' : 's'} removed`,
+    r.deleted?.length ? `deleted ${r.deleted.join(', ')}` : '',
+    (r.reverted ?? 0) > 0 ? `${r.reverted} commit${r.reverted === 1 ? '' : 's'} reverted` : '',
+  ].filter(Boolean);
+  return { kind: 'info', text: `SDD project destroyed — ${parts.join(' · ')}.${r.reason ? ` (${r.reason})` : ''}` };
+}
+
 export function App({
   agent,
   slashRegistry,
@@ -803,6 +863,7 @@ export function App({
   getEternalEngine,
   getParallelEngine,
   getSddRun,
+  onSddLifecycle,
   subscribeEternalIteration,
   subscribeEternalStage,
   subscribeAutoPhase,
@@ -4635,8 +4696,9 @@ export function App({
     }
     // While the SDD board overlay is open, ←/→ drive the per-phase drill-down
     // (→ focuses a single topological column, ← steps back / exits to the
-    // all-phases view) and plain `c` / `z` drive run lifecycle (both refuse
-    // while the run is still live — stop it first with Ctrl+C).
+    // all-phases view) and `c` / `z` / `x` drive run lifecycle — clean worktrees
+    // / rollback commits / destroy. clean+rollback refuse while the run is still
+    // live (stop it first with Ctrl+C); destroy stops it for you.
     if (state.sddBoard?.monitorOpen && !key.ctrl && !key.meta) {
       if (key.rightArrow) {
         dispatch({ type: 'sddBoardFocusNext' });
@@ -4646,36 +4708,28 @@ export function App({
         dispatch({ type: 'sddBoardFocusPrev' });
         return;
       }
-      if (input === 'c') {
+      if (input === 'c' || input === 'z' || input === 'x') {
+        // c = clean worktrees · z = rollback merged commits · x = destroy.
+        // Prefer the live run control (it self-refuses while running and works
+        // between stop and registry-clear); fall back to the host's disk-backed
+        // applySddLifecycle so the keys keep working once the run has finished.
+        const op = input === 'c' ? 'cleanup_worktrees' : input === 'z' ? 'rollback' : 'destroy';
         const run = getSddRun?.();
-        if (run) {
-          void run.cleanupWorktrees().then((n) => {
-            dispatch({
-              type: 'addEntry',
-              entry: {
-                kind: n > 0 ? 'info' : 'warn',
-                text: n > 0 ? `Cleaned ${n} SDD worktree${n === 1 ? '' : 's'}.` : 'No SDD worktrees to clean (stop the run first if it is live).',
-              },
-            });
+        if (op !== 'destroy' && run) {
+          const fn = op === 'cleanup_worktrees' ? run.cleanupWorktrees() : run.rollback();
+          void Promise.resolve(fn).then((r) => {
+            dispatch({ type: 'addEntry', entry: sddLifecycleEntry(op, r) });
           });
+          return;
         }
-        return;
-      }
-      if (input === 'z') {
-        const run = getSddRun?.();
-        if (run) {
-          void run.rollback().then((r) => {
-            dispatch({
-              type: 'addEntry',
-              entry: {
-                kind: r.ok ? 'info' : 'warn',
-                text: r.ok
-                  ? r.reverted > 0
-                    ? `Rolled back ${r.reverted} run commit${r.reverted === 1 ? '' : 's'} (revert commits added).`
-                    : 'Nothing to roll back.'
-                  : `Rollback failed: ${r.reason ?? 'unknown error'}`,
-              },
-            });
+        if (onSddLifecycle) {
+          void onSddLifecycle(op).then((r) => {
+            dispatch({ type: 'addEntry', entry: sddLifecycleEntry(op, r) });
+          });
+        } else {
+          dispatch({
+            type: 'addEntry',
+            entry: { kind: 'warn', text: 'SDD lifecycle is not available in this session.' },
           });
         }
         return;

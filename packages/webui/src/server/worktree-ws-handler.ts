@@ -1,9 +1,19 @@
 import type { WebSocket } from 'ws';
 import type { EventBus, Logger } from '@wrongstack/core';
-import type { WorktreeHandleView, WSServerMessage } from '../types.js';
+import { cleanupStaleSddWorktrees, WorktreeManager } from '@wrongstack/core';
+import type { WorktreeHandleView, WorktreeOrphanView, WSServerMessage } from '../types.js';
 import { toErrorMessage } from '@wrongstack/core/utils';
 
 const MAX_ACTIVITY = 6;
+
+/** Statuses that mean a worktree is actively owned by a live in-session run. */
+const ACTIVE_STATUSES = new Set(['allocating', 'active', 'committing', 'merging']);
+
+export interface WorktreeManagementDeps {
+  projectRoot: string;
+  /** Board snapshot dir — powers the cross-process liveness guard on cleanup. */
+  boardsDir: string;
+}
 
 /**
  * WorktreeWebSocketHandler — mirrors AutoPhaseWebSocketHandler. Subscribes to
@@ -22,6 +32,7 @@ export class WorktreeWebSocketHandler {
   constructor(
     private readonly events: EventBus,
     private readonly logger: Logger,
+    private readonly management?: WorktreeManagementDeps | undefined,
   ) {
     this.subscribe();
   }
@@ -31,12 +42,123 @@ export class WorktreeWebSocketHandler {
     ws.on('close', () => this.clients.delete(ws));
     ws.on('error', () => this.clients.delete(ws));
     this.send(ws, this.stateMessage());
+    // Push the current orphan inventory to the freshly-connected client.
+    void this.scanAndBroadcast();
+  }
+
+  /** Handle worktree-panel control messages (scan / clean orphans). */
+  async handleMessage(msg: { type: string }): Promise<boolean> {
+    if (msg.type === 'worktree.scan') {
+      await this.scanAndBroadcast();
+      return true;
+    }
+    if (msg.type === 'worktree.cleanup') {
+      await this.cleanupOrphans();
+      return true;
+    }
+    return false;
   }
 
   dispose(): void {
     for (const off of this.offs) off();
     this.offs.length = 0;
     this.stopBroadcast();
+  }
+
+  // ── orphan management ─────────────────────────────────────────────────────
+
+  /** Branches of worktrees a live in-session run currently owns. */
+  private liveActiveBranches(): Set<string> {
+    const live = new Set<string>();
+    for (const h of this.handles.values()) {
+      if (ACTIVE_STATUSES.has(h.status) && h.branch) live.add(h.branch);
+    }
+    return live;
+  }
+
+  /**
+   * Scan the disk for managed worktrees/branches NOT owned by a live in-session
+   * run and broadcast them as orphans, with whether it is safe to clean now.
+   * No-op (empty inventory) when management deps were not wired.
+   */
+  private async scanAndBroadcast(): Promise<void> {
+    if (!this.management) {
+      this.broadcast({ type: 'worktree.orphans', payload: { orphans: [], canClean: false } });
+      return;
+    }
+    try {
+      const wt = new WorktreeManager({ projectRoot: this.management.projectRoot });
+      const { worktrees, branches } = await wt.listManaged();
+      const live = this.liveActiveBranches();
+      const orphans: WorktreeOrphanView[] = [];
+      const seenBranches = new Set<string>();
+      for (const w of worktrees) {
+        if (w.branch && live.has(w.branch)) continue; // owned by a live run
+        if (w.branch) seenBranches.add(w.branch);
+        orphans.push({ kind: 'worktree', dir: w.dir, branch: w.branch });
+      }
+      // Branch-only orphans (no checkout) — skip those a live run owns or that a
+      // listed worktree already covers.
+      for (const b of branches) {
+        if (live.has(b) || seenBranches.has(b)) continue;
+        orphans.push({ kind: 'branch', branch: b });
+      }
+      // Safe to clean when no live in-session worktree exists. (The cross-process
+      // board guard is additionally enforced at cleanup time.)
+      const canClean = this.liveActiveBranches().size === 0;
+      this.broadcast({
+        type: 'worktree.orphans',
+        payload: {
+          orphans,
+          canClean,
+          reason: canClean ? undefined : 'a run is live in this session',
+        },
+      });
+    } catch (err) {
+      this.logger.debug?.(`worktree orphan scan failed: ${toErrorMessage(err)}`);
+      this.broadcast({ type: 'worktree.orphans', payload: { orphans: [], canClean: false } });
+    }
+  }
+
+  /**
+   * Force-remove every orphaned worktree + branch. Refused while a run is live —
+   * in this session (active handles) OR another process (the SDD board liveness
+   * guard inside cleanupStaleSddWorktrees). Best-effort; reports the outcome.
+   */
+  private async cleanupOrphans(): Promise<void> {
+    if (!this.management) {
+      this.broadcast({
+        type: 'worktree.cleanup_result',
+        payload: { ok: false, removed: 0, reason: 'cleanup is not available in this session' },
+      });
+      return;
+    }
+    if (this.liveActiveBranches().size > 0) {
+      this.broadcast({
+        type: 'worktree.cleanup_result',
+        payload: { ok: false, removed: 0, reason: 'a run is live in this session — stop it first' },
+      });
+      return;
+    }
+    const res = await cleanupStaleSddWorktrees({
+      projectRoot: this.management.projectRoot,
+      boardsDir: this.management.boardsDir,
+    });
+    if (res.skippedReason) {
+      this.broadcast({
+        type: 'worktree.cleanup_result',
+        payload: { ok: false, removed: 0, reason: res.skippedReason },
+      });
+      await this.scanAndBroadcast();
+      return;
+    }
+    // Drop any kept-for-review handles we held — their checkouts are gone now.
+    for (const [id, h] of [...this.handles]) {
+      if (!ACTIVE_STATUSES.has(h.status)) this.handles.delete(id);
+    }
+    this.broadcast({ type: 'worktree.cleanup_result', payload: { ok: true, removed: res.removed } });
+    this.broadcastState();
+    await this.scanAndBroadcast();
   }
 
   // ── internals ───────────────────────────────────────────────────────────

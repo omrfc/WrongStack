@@ -1,11 +1,12 @@
-import { Activity, AlertTriangle, Cpu, Eraser, Pause, Play, RotateCcw, Square, Undo2, X, Zap } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Activity, AlertTriangle, CheckCircle2, Cpu, Eraser, Pause, Play, RotateCcw, Square, Trash2, Undo2, X, XCircle, Zap } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useProviderModels } from '@/hooks/useProviderModels';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { agentInitials, fmtDuration, SDD_AGENT_COLORS, SDD_RUN_STATUS } from '@/lib/sdd-theme';
 import { cn } from '@/lib/utils';
-import { type BoardTaskItem, useSddBoardStore } from '@/stores';
+import { type BoardTaskItem, type SddLifecycleResultUI, useSddBoardStore } from '@/stores';
 import { SddActivityFeed } from './SddActivityFeed';
+import { SddDestroyDialog } from './SddDestroyDialog';
 import { type FlowTask, SddFlowGraph } from './SddFlowGraph';
 import { SddKanbanView } from './SddKanbanView';
 import { SddTaskDrawer } from './SddTaskDrawer';
@@ -54,9 +55,14 @@ function ProgressRing({ pct }: { pct: number }): React.ReactElement {
 export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactElement {
   const { client } = useWebSocket();
   const snapshot = useSddBoardStore((s) => s.snapshot);
+  const lifecycleResult = useSddBoardStore((s) => s.lifecycleResult);
+  const destroying = useSddBoardStore((s) => s.destroying);
+  const setDestroying = useSddBoardStore((s) => s.setDestroying);
+  const setLifecycleResult = useSddBoardStore((s) => s.setLifecycleResult);
   const [now, setNow] = useState(() => Date.now());
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'graph' | 'kanban'>('graph');
+  const [destroyOpen, setDestroyOpen] = useState(false);
 
   useEffect(() => {
     client?.send?.({ type: 'sdd.board.get' });
@@ -75,6 +81,56 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
     (msg: Parameters<NonNullable<typeof client>['send']>[0]) => client?.send?.(msg),
     [client],
   );
+
+  // ── Lifecycle orchestration (stop → wait until !active → destroy) ──────────
+  // The server applies cleanup/rollback/destroy from disk and refuses while a
+  // run is live, so Destroy first stops the run, waits for the snapshot to
+  // settle, then fires the wipe. A pending request + a deadline ref drive it.
+  const pendingDestroy = useRef<{ revertMerged: boolean; deadline: number } | null>(null);
+
+  const fireDestroy = useCallback(
+    (revertMerged: boolean) => {
+      pendingDestroy.current = null;
+      send({ type: 'sdd.board.destroy', payload: { revertMerged } });
+    },
+    [send],
+  );
+
+  const handleConfirmDestroy = useCallback(
+    (revertMerged: boolean) => {
+      setDestroyOpen(false);
+      setLifecycleResult(null);
+      setDestroying(true);
+      if (active) {
+        send({ type: 'sdd.board.stop', payload: {} });
+        pendingDestroy.current = { revertMerged, deadline: Date.now() + 20_000 };
+      } else {
+        fireDestroy(revertMerged);
+      }
+    },
+    [active, send, fireDestroy, setDestroying, setLifecycleResult],
+  );
+
+  // Once a destroy is pending and the run has settled (or the deadline passed),
+  // send the wipe. Re-runs whenever `active` flips after the Stop.
+  useEffect(() => {
+    const pending = pendingDestroy.current;
+    if (!pending) return;
+    if (!active || Date.now() >= pending.deadline) {
+      fireDestroy(pending.revertMerged);
+    }
+  }, [active, snapshot, fireDestroy]);
+
+  // Clear a stale result before a fresh lifecycle action so the banner reflects
+  // the latest op only.
+  const onCleanWorktrees = useCallback(() => {
+    setLifecycleResult(null);
+    send({ type: 'sdd.board.cleanup_worktrees', payload: {} });
+  }, [send, setLifecycleResult]);
+  const onRollback = useCallback(() => {
+    setLifecycleResult(null);
+    send({ type: 'sdd.board.rollback', payload: {} });
+  }, [send, setLifecycleResult]);
 
   const flowTasks = useMemo<FlowTask[]>(
     () =>
@@ -110,15 +166,6 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
   );
   const onRetryAllFailed = useCallback(
     () => send({ type: 'sdd.board.retry_all_failed', payload: {} }),
-    [send],
-  );
-  // Lifecycle (effective once the run is stopped): sweep worktrees / revert commits.
-  const onCleanWorktrees = useCallback(
-    () => send({ type: 'sdd.board.cleanup_worktrees', payload: {} }),
-    [send],
-  );
-  const onRollback = useCallback(
-    () => send({ type: 'sdd.board.rollback', payload: {} }),
     [send],
   );
   const onReassign = useCallback(
@@ -282,6 +329,23 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
                 )}
               </>
             )}
+            {/* Destroy — the one-click "give up entirely". Always available when a
+                board exists; opens a confirmation that auto-stops a live run first. */}
+            {snapshot &&
+              (destroying ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-red-500/15 px-2.5 py-1 text-xs font-medium text-red-600 dark:text-red-300">
+                  <RotateCcw className="h-3.5 w-3.5 animate-spin" /> {active ? 'Stopping…' : 'Destroying…'}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setDestroyOpen(true)}
+                  title="Stop, remove all worktrees, optionally revert merged commits, and delete the SDD project"
+                  className="inline-flex items-center gap-1 rounded-md bg-red-600/90 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Destroy
+                </button>
+              ))}
             <Button variant="ghost" size="icon" onClick={onClose}>
               <X className="h-4 w-4" />
             </Button>
@@ -352,6 +416,11 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
           </div>
         )}
       </header>
+
+      {/* lifecycle result banner — outcome of the last clean/rollback/destroy */}
+      {lifecycleResult && (
+        <LifecycleResultBanner result={lifecycleResult} onDismiss={() => setLifecycleResult(null)} />
+      )}
 
       {/* deadlock banner */}
       {chains.length > 0 && (
@@ -429,6 +498,58 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
           </aside>
         )}
       </div>
+
+      <SddDestroyDialog
+        open={destroyOpen}
+        onOpenChange={setDestroyOpen}
+        snapshot={snapshot}
+        busy={destroying}
+        onConfirm={handleConfirmDestroy}
+      />
+    </div>
+  );
+}
+
+/** Human one-liner for a lifecycle outcome. */
+function lifecycleMessage(r: SddLifecycleResultUI): string {
+  const op = r.op === 'cleanup_worktrees' ? 'Clean' : r.op === 'rollback' ? 'Rollback' : 'Destroy';
+  if (!r.ok) return `${op} failed: ${r.reason ?? 'unknown error'}`;
+  const parts: string[] = [];
+  if (typeof r.removed === 'number') parts.push(`${r.removed} worktree${r.removed === 1 ? '' : 's'} removed`);
+  if (typeof r.reverted === 'number' && r.reverted > 0)
+    parts.push(`${r.reverted} commit${r.reverted === 1 ? '' : 's'} reverted`);
+  if (r.deleted?.length) parts.push(`deleted ${r.deleted.join(', ')}`);
+  const body = parts.length ? parts.join(' · ') : 'nothing to do';
+  // A destroy that was asked to revert but couldn't carries an ok:true + reason.
+  return r.reason ? `${op}: ${body} — note: ${r.reason}` : `${op}: ${body}`;
+}
+
+function LifecycleResultBanner({
+  result,
+  onDismiss,
+}: {
+  result: SddLifecycleResultUI;
+  onDismiss: () => void;
+}): React.ReactElement {
+  const warn = !result.ok || Boolean(result.reason);
+  return (
+    <div
+      className={cn(
+        'flex items-start gap-2 border-b px-4 py-2 text-xs',
+        warn
+          ? 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300'
+          : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300',
+      )}
+    >
+      {warn ? (
+        <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+      ) : (
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+      )}
+      <span className="flex-1">{lifecycleMessage(result)}</span>
+      <button type="button" onClick={onDismiss} className="shrink-0 opacity-60 hover:opacity-100">
+        <X className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }

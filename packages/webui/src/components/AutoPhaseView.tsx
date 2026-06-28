@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { BoardView } from './BoardView';
 import { WorktreeGraph } from './WorktreeGraph';
 import { WorktreeLanes } from './WorktreeLanes';
+import { WorktreeOrphans } from './WorktreeOrphans';
 import { Layers, Loader2, Pause, Play, Plus, Rocket, Square, Undo2, X, Zap } from 'lucide-react';
 import { Button } from './ui/button';
 
@@ -372,7 +373,8 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
               Graph
             </button>
           </div>
-          <div className="px-4 pb-3">
+          <div className="space-y-2 px-4 pb-3">
+            <WorktreeOrphans />
             {showGraph ? (
               <WorktreeGraph worktrees={worktrees} baseBranch={baseBranch} />
             ) : (

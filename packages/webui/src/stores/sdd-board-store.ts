@@ -69,16 +69,37 @@ export interface SddBoardSummary {
   updatedAt: number;
 }
 
+/** Outcome of a cleanup/rollback/destroy, surfaced as a result banner. */
+export interface SddLifecycleResultUI {
+  op: 'cleanup_worktrees' | 'rollback' | 'destroy';
+  ok: boolean;
+  removed?: number;
+  reverted?: number;
+  deleted?: string[];
+  reason?: string;
+  /** Client-stamped arrival time (server payload carries no clock). */
+  at: number;
+}
+
 interface SddBoardState {
   snapshot: SddBoardSnapshotUI | null;
   boards: SddBoardSummary[];
+  lifecycleResult: SddLifecycleResultUI | null;
+  /** True from the moment Destroy is confirmed until the result lands. */
+  destroying: boolean;
   setSnapshot: (s: SddBoardSnapshotUI | null) => void;
   setBoards: (b: SddBoardSummary[]) => void;
+  setLifecycleResult: (r: SddLifecycleResultUI | null) => void;
+  setDestroying: (v: boolean) => void;
 }
 
 export const useSddBoardStore = create<SddBoardState>()((set) => ({
   snapshot: null,
   boards: [],
+  lifecycleResult: null,
+  destroying: false,
   setSnapshot: (snapshot) => set({ snapshot }),
   setBoards: (boards) => set({ boards }),
+  setLifecycleResult: (lifecycleResult) => set({ lifecycleResult }),
+  setDestroying: (destroying) => set({ destroying }),
 }));

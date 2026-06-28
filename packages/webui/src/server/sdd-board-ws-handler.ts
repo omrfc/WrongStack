@@ -1,6 +1,6 @@
 import type { WebSocket } from 'ws';
-import type { EventBus, SddBoardSnapshot } from '@wrongstack/core';
-import { SddBoardStore } from '@wrongstack/core';
+import type { EventBus, SddBoardSnapshot, SddLifecycleOp } from '@wrongstack/core';
+import { applySddLifecycle, SddBoardStore } from '@wrongstack/core';
 
 interface WSClient {
   ws: WebSocket;
@@ -12,6 +12,11 @@ interface SddBoardWSMessage {
   payload?: Record<string, unknown>;
 }
 
+/**
+ * Commands appended to `<runId>.control.jsonl` and drained by the live run
+ * (start-sdd-run's in-process timer). Only meaningful while the run is active —
+ * the drain timer is gone once it finishes.
+ */
 const CONTROL_TYPES = new Set([
   'pause',
   'resume',
@@ -26,10 +31,26 @@ const CONTROL_TYPES = new Set([
   'cancel_task',
   'delete_task',
   'split_task',
-  // Lifecycle (pair with a prior `stop`): sweep worktrees / revert merged commits.
-  'cleanup_worktrees',
-  'rollback',
 ]);
+
+/**
+ * Post-run lifecycle ops applied DIRECTLY from disk by this handler (not via the
+ * control file — nothing drains it once the run settles). Each operates on git +
+ * on-disk state and is gated on "no active run". `destroy` accepts a
+ * `revertMerged` flag to also undo merged commits.
+ */
+const LIFECYCLE_TYPES = new Set<SddLifecycleOp>(['cleanup_worktrees', 'rollback', 'destroy']);
+
+/** Project paths the handler needs to apply lifecycle ops directly. */
+export interface SddBoardLifecycleDeps {
+  projectRoot: string;
+  paths: {
+    projectSpecs: string;
+    projectTaskGraphs: string;
+    projectSddSession: string;
+    projectSddBoards: string;
+  };
+}
 
 /**
  * SddBoardWebSocketHandler — streams the live SDD multi-agent board to clients
@@ -48,12 +69,14 @@ const CONTROL_TYPES = new Set([
 export class SddBoardWebSocketHandler {
   private readonly store: SddBoardStore;
   private readonly clients = new Set<WSClient>();
+  private readonly lifecycle?: SddBoardLifecycleDeps | undefined;
   private latest: SddBoardSnapshot | null = null;
   private poll: ReturnType<typeof setInterval> | null = null;
   private unsub: (() => void) | null = null;
 
-  constructor(boardsDir: string, events?: EventBus) {
+  constructor(boardsDir: string, events?: EventBus, lifecycle?: SddBoardLifecycleDeps) {
     this.store = new SddBoardStore({ baseDir: boardsDir });
+    this.lifecycle = lifecycle;
 
     if (events) {
       // Instant updates in the CLI-hosted server (shared bus).
@@ -88,6 +111,15 @@ export class SddBoardWebSocketHandler {
       return;
     }
     const action = msg.type.replace(/^sdd\.board\./, '');
+
+    // Post-run lifecycle ops are applied here, directly from disk — the run's
+    // control-file drain timer is gone once it finishes, so routing these
+    // through control.jsonl (as the old Clean/Rollback buttons did) was a no-op.
+    if (LIFECYCLE_TYPES.has(action as SddLifecycleOp)) {
+      await this.applyLifecycle(action as SddLifecycleOp, msg.payload);
+      return;
+    }
+
     if (CONTROL_TYPES.has(action)) {
       const runId =
         (msg.payload?.runId as string | undefined) ??
@@ -100,6 +132,47 @@ export class SddBoardWebSocketHandler {
           payload: msg.payload,
         });
       }
+    }
+  }
+
+  /**
+   * Apply a cleanup/rollback/destroy from disk and broadcast a structured
+   * `sdd.board.lifecycle_result`. Refuses (no-op) while a run is still active —
+   * the user must stop it first; the UI gates the buttons on `!active` and the
+   * Destroy flow auto-stops then waits before sending `destroy`.
+   */
+  private async applyLifecycle(op: SddLifecycleOp, payload?: Record<string, unknown>): Promise<void> {
+    if (!this.lifecycle) {
+      this.broadcast({
+        type: 'sdd.board.lifecycle_result',
+        payload: { op, ok: false, reason: 'Lifecycle operations are not available in this session.' },
+      });
+      return;
+    }
+    // Refuse while live — these force-remove worktrees / rewrite the base branch.
+    if (this.latest && (this.latest.status === 'running' || this.latest.status === 'paused')) {
+      this.broadcast({
+        type: 'sdd.board.lifecycle_result',
+        payload: { op, ok: false, reason: 'Stop the run first, then retry.' },
+      });
+      return;
+    }
+
+    const runId = (payload?.runId as string | undefined) ?? this.latest?.runId;
+    const result = await applySddLifecycle(op, {
+      projectRoot: this.lifecycle.projectRoot,
+      paths: this.lifecycle.paths,
+      runId,
+      revertMerged: payload?.revertMerged === true,
+    });
+
+    this.broadcast({ type: 'sdd.board.lifecycle_result', payload: result });
+
+    // A destroy wipes the board; clear the in-memory snapshot and push an empty
+    // board so every client returns to the "No active SDD run" state.
+    if (op === 'destroy' && result.ok) {
+      this.latest = null;
+      this.broadcast({ type: 'sdd.board.snapshot', payload: null });
     }
   }
 

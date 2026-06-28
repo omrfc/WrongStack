@@ -2,7 +2,7 @@ import type { LiveSession } from '@/stores/monitor-store';
 import type { SubagentEvent } from '@/stores';
 import { useFleetStore, useMonitorStore, useWorktreeStore } from '@/stores';
 import { useVizStore, wsToVizEvent } from '@/stores/viz-store';
-import type { WorktreeHandleView, WSServerMessage } from '@/types';
+import type { WorktreeHandleView, WorktreeOrphanView, WSServerMessage } from '@/types';
 
 export function handleWorktreeState(msg: WSServerMessage) {
   const p = msg.payload as { worktrees: WorktreeHandleView[]; baseBranch: string };
@@ -12,6 +12,16 @@ export function handleWorktreeState(msg: WSServerMessage) {
 export function handleWorktreeEvent(msg: WSServerMessage) {
   const p = msg.payload as { kind: string; handleId: string; text: string; at: number };
   useWorktreeStore.getState().pushEvent(p);
+}
+
+export function handleWorktreeOrphans(msg: WSServerMessage) {
+  const p = msg.payload as { orphans: WorktreeOrphanView[]; canClean: boolean; reason?: string };
+  useWorktreeStore.getState().setOrphans(p.orphans ?? [], p.canClean ?? false, p.reason);
+}
+
+export function handleWorktreeCleanupResult(msg: WSServerMessage) {
+  const p = msg.payload as { ok: boolean; removed: number; reason?: string };
+  useWorktreeStore.getState().setCleanResult({ ...p, at: Date.now() });
 }
 
 export function handleSubagentEvent(msg: WSServerMessage) {
@@ -75,6 +85,8 @@ export function handleSessionsStatusUpdate(msg: WSServerMessage) {
 export const fleetHandlerMap: Partial<Record<string, (msg: WSServerMessage) => void>> = {
   'worktree.state': handleWorktreeState,
   'worktree.event': handleWorktreeEvent,
+  'worktree.orphans': handleWorktreeOrphans,
+  'worktree.cleanup_result': handleWorktreeCleanupResult,
   'subagent.event': handleSubagentEvent,
   'fleet.concurrency_update': handleFleetConcurrency,
   'client.status_update': handleClientStatusUpdate,

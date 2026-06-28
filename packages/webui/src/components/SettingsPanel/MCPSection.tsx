@@ -16,6 +16,7 @@ import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import { toast } from '@/components/Toaster';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import type { WSServerMessage } from '@/types';
+import { confirmModal } from '../ConfirmModal';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -664,9 +665,14 @@ export function MCPSection(): ReactElement {
 
   const handleRemove = useCallback(
     (name: string) => {
-      if (confirm(`Remove server "${name}"?`)) {
-        ws.client?.removeMcpServer(name);
-      }
+      void confirmModal({
+        title: `Remove server "${name}"?`,
+        message: 'This removes the MCP server from your configuration.',
+        confirmLabel: 'Remove',
+        danger: true,
+      }).then((ok) => {
+        if (ok) ws.client?.removeMcpServer(name);
+      });
     },
     [ws],
   );

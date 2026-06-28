@@ -126,6 +126,7 @@ import {
   gatedEnhancerReasoning,
   recentTextTurns,
   resolveProviderModelList,
+  cleanupStaleSddWorktrees,
 } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
 import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
@@ -961,6 +962,10 @@ export async function startWebUI(
     context.meta['enhanceLanguage'] = (autonomyCfg['enhanceLanguage'] as string) ?? 'original';
     context.meta['nextPrediction'] = config.nextPrediction ?? false;
     context.meta['fallbackModels'] = config.fallbackModels ?? [];
+    context.meta['fallbackProfiles'] = config.fallbackProfiles ?? {};
+    context.meta['favoriteModels'] = config.favoriteModels ?? [];
+    context.meta['favoriteModelsOnly'] = config.favoriteModelsOnly === true;
+    context.meta['modelMatrix'] = config.modelMatrix ?? {};
     context.meta['fallbackAuto'] = config.fallbackAuto !== false;
     context.meta['featureMcp'] = config.features.mcp !== false;
     context.meta['featurePlugins'] = config.features.plugins !== false;
@@ -1002,7 +1007,7 @@ export async function startWebUI(
     'hqEnabled', 'hqUrl', 'hqToken', 'hqRawContent',
     'tgConfigured', 'tgSessionEnd', 'tgDelegate', 'tgLongToolMs',
     'reasoningMode', 'reasoningEffort', 'reasoningPreserve', 'cacheTtl',
-    'fallbackModels', 'fallbackAuto',
+    'fallbackModels', 'fallbackProfiles', 'favoriteModels', 'favoriteModelsOnly', 'modelMatrix', 'fallbackAuto',
   ] as const;
 
   const prefSnapshot = (): Record<string, unknown> => {
@@ -1051,6 +1056,23 @@ export async function startWebUI(
       // fallback extension each turn (effectiveFallbackChain), so it takes effect
       // without a restart.
       if (Array.isArray(payload['fallbackModels'])) decrypted.fallbackModels = payload['fallbackModels'];
+      if (
+        payload['fallbackProfiles'] &&
+        typeof payload['fallbackProfiles'] === 'object' &&
+        !Array.isArray(payload['fallbackProfiles'])
+      ) {
+        decrypted.fallbackProfiles = payload['fallbackProfiles'] as Record<string, string[]>;
+      }
+      if (Array.isArray(payload['favoriteModels'])) decrypted.favoriteModels = payload['favoriteModels'];
+      if (typeof payload['favoriteModelsOnly'] === 'boolean')
+        decrypted.favoriteModelsOnly = payload['favoriteModelsOnly'];
+      if (
+        payload['modelMatrix'] &&
+        typeof payload['modelMatrix'] === 'object' &&
+        !Array.isArray(payload['modelMatrix'])
+      ) {
+        decrypted.modelMatrix = payload['modelMatrix'] as typeof decrypted.modelMatrix;
+      }
       if (typeof payload['fallbackAuto'] === 'boolean') decrypted.fallbackAuto = payload['fallbackAuto'];
 
       const FEATURE_MAP: Record<string, string> = {
@@ -1440,7 +1462,23 @@ export async function startWebUI(
   // SDD live board handler — observes a CLI-owned multi-agent run. Standalone
   // server is a different process from the run, so it polls the on-disk
   // snapshot (no shared EventBus) and steers via the control file.
-  const sddBoardHandler = new SddBoardWebSocketHandler(wpaths.projectSddBoards);
+  const sddBoardHandler = new SddBoardWebSocketHandler(wpaths.projectSddBoards, undefined, {
+    projectRoot,
+    paths: {
+      projectSpecs: wpaths.projectSpecs,
+      projectTaskGraphs: wpaths.projectTaskGraphs,
+      projectSddSession: wpaths.projectSddSession,
+      projectSddBoards: wpaths.projectSddBoards,
+    },
+  });
+
+  // One-shot orphan sweep on boot: remove worktrees/branches a crashed or
+  // abandoned SDD run left behind so they never accumulate across sessions.
+  // Liveness-guarded (skips if a run is live, incl. one in another process) and
+  // best-effort — fire-and-forget so it never delays server startup.
+  void cleanupStaleSddWorktrees({ projectRoot, boardsDir: wpaths.projectSddBoards }).catch(
+    () => undefined,
+  );
 
   // SDD wizard — the interactive "New SDD Project" flow (goal → Q&A → spec →
   // task graph → start run). The standalone server runs the real fleet in-process
@@ -1469,8 +1507,12 @@ export async function startWebUI(
   );
 
   // Worktree handler — subscribes to the shared EventBus `worktree.*` events
-  // and streams live swim-lane / DAG state to connected clients.
-  const worktreeHandler = new WorktreeWebSocketHandler(events, logger);
+  // and streams live swim-lane / DAG state to connected clients. The management
+  // deps add a disk-orphan scan + guarded "clean orphans" control.
+  const worktreeHandler = new WorktreeWebSocketHandler(events, logger, {
+    projectRoot,
+    boardsDir: wpaths.projectSddBoards,
+  });
 
   // Integrated terminal handler — per-client node-pty sessions backing the
   // WebUI terminal panel. New terminals open in the live working directory.
@@ -1971,6 +2013,7 @@ export async function startWebUI(
     if (await handleSpecsRoute(ws, msg, specsRoutes)) return;
     if (await handleSddBoardRoute(ws, msg, sddBoardRoutes)) return;
     if (await handleSddWizardRoute(ws, msg, sddWizardRoutes)) return;
+    if (msg.type.startsWith('worktree.') && (await worktreeHandler.handleMessage(msg))) return;
 
     switch (msg.type) {
       // Collaboration messages short-circuit the user/agent flow.
@@ -2696,6 +2739,24 @@ export async function startWebUI(
       // extension (which reads config each turn) honours it without a restart.
       if (Array.isArray(payload['fallbackModels']))
         config.fallbackModels = payload['fallbackModels'] as string[];
+      if (
+        payload['fallbackProfiles'] &&
+        typeof payload['fallbackProfiles'] === 'object' &&
+        !Array.isArray(payload['fallbackProfiles'])
+      ) {
+        config.fallbackProfiles = payload['fallbackProfiles'] as Record<string, string[]>;
+      }
+      if (Array.isArray(payload['favoriteModels']))
+        config.favoriteModels = payload['favoriteModels'] as string[];
+      if (typeof payload['favoriteModelsOnly'] === 'boolean')
+        config.favoriteModelsOnly = payload['favoriteModelsOnly'];
+      if (
+        payload['modelMatrix'] &&
+        typeof payload['modelMatrix'] === 'object' &&
+        !Array.isArray(payload['modelMatrix'])
+      ) {
+        config.modelMatrix = payload['modelMatrix'] as typeof config.modelMatrix;
+      }
       if (typeof payload['fallbackAuto'] === 'boolean')
         config.fallbackAuto = payload['fallbackAuto'];
 
@@ -2986,4 +3047,3 @@ export async function startWebUI(
  * etc.) logs at warn level and returns — the webui keeps running.
  */
 // discoverMailboxBridgeForWebui extracted → ./discover-mailbox-bridge.ts
-

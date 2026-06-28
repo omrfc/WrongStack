@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { Columns3, Plus, Rows3 } from 'lucide-react';
 import { TaskCard, type TaskItem } from './TaskCard';
 import type { PhaseItem } from './PhasePanel';
+import { promptModal } from './ConfirmModal';
 
 type BoardLayout = 'phase' | 'status';
 
@@ -80,8 +81,11 @@ export function BoardView(): React.ReactElement {
   );
   const onAddTask = useCallback(
     (phaseId: string) => {
-      const title = window.prompt('New task title');
-      if (title?.trim()) send({ type: 'autophase.addTask', payload: { phaseId, title: title.trim() } });
+      void promptModal({ title: 'New task', placeholder: 'Task title…', confirmLabel: 'Add task' }).then(
+        (title) => {
+          if (title) send({ type: 'autophase.addTask', payload: { phaseId, title } });
+        },
+      );
     },
     [send],
   );

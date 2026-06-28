@@ -11,7 +11,7 @@
  * flow driven by WS `tool.confirm_needed` events.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { Button } from './ui/button';
 import {
@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
+import { Input } from './ui/input';
 
 export interface ConfirmModalOptions {
   title: string;
@@ -107,6 +108,99 @@ export function ConfirmModalHost() {
             onClick={() => settle(true)}
           >
             {request?.confirmLabel ?? 'Confirm'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── promptModal — in-app replacement for window.prompt() ────────────────────
+
+export interface PromptModalOptions {
+  title: string;
+  message?: string | undefined;
+  placeholder?: string | undefined;
+  defaultValue?: string | undefined;
+  confirmLabel?: string | undefined;
+  cancelLabel?: string | undefined;
+}
+
+interface PromptRequest extends PromptModalOptions {
+  resolve: (value: string | null) => void;
+}
+
+interface PromptModalState {
+  request: PromptRequest | null;
+  open: (request: PromptRequest) => void;
+  settle: (value: string | null) => void;
+}
+
+/** Internal — used by PromptModalHost and tests. Call promptModal() instead. */
+export const usePromptModalStore = create<PromptModalState>()((set, get) => ({
+  request: null,
+  open: (request) => {
+    get().request?.resolve(null);
+    set({ request });
+  },
+  settle: (value) => {
+    get().request?.resolve(value);
+    set({ request: null });
+  },
+}));
+
+/** Ask the user for a line of text. Resolves the trimmed string, or null on cancel/empty. */
+export function promptModal(options: PromptModalOptions): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    usePromptModalStore.getState().open({ ...options, resolve });
+  });
+}
+
+export function PromptModalHost() {
+  const request = usePromptModalStore((s) => s.request);
+  const settle = usePromptModalStore((s) => s.settle);
+  const [value, setValue] = useState('');
+
+  // Seed the input each time a new request opens.
+  useEffect(() => {
+    setValue(request?.defaultValue ?? '');
+  }, [request]);
+
+  const submit = () => {
+    const v = value.trim();
+    settle(v.length > 0 ? v : null);
+  };
+
+  return (
+    <Dialog
+      open={request !== null}
+      onOpenChange={(open) => {
+        if (!open) settle(null);
+      }}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{request?.title}</DialogTitle>
+          {request?.message && <DialogDescription>{request.message}</DialogDescription>}
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={value}
+          placeholder={request?.placeholder}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <DialogFooter className="gap-2">
+          <Button variant="outline" size="sm" onClick={() => settle(null)}>
+            {request?.cancelLabel ?? 'Cancel'}
+          </Button>
+          <Button size="sm" disabled={value.trim().length === 0} onClick={submit}>
+            {request?.confirmLabel ?? 'OK'}
           </Button>
         </DialogFooter>
       </DialogContent>

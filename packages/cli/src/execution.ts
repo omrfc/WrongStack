@@ -311,6 +311,19 @@ export interface ExecutionDeps {
    */
   getSddRun?: (() => import('@wrongstack/core').SddRunControl | null) | undefined;
   /**
+   * Apply a post-run SDD lifecycle op (clean worktrees / rollback / destroy) from
+   * the host. Drives the TUI board overlay keys (c / z / x) so they work even
+   * after the run finished (when `getSddRun()` is null and the in-process control
+   * drain is gone). The host stops any live run for `destroy` and refuses
+   * clean/rollback while a run is still running.
+   */
+  onSddLifecycle?:
+    | ((
+        op: 'cleanup_worktrees' | 'rollback' | 'destroy',
+        opts?: { revertMerged?: boolean },
+      ) => Promise<import('@wrongstack/core').SddLifecycleResult>)
+    | undefined;
+  /**
    * Subscribe to live per-iteration events from the eternal engine.
    * Returns an unsubscribe function. The TUI uses this to render each
    * iteration as a live event entry instead of polling goal.json after
@@ -433,6 +446,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     getEternalEngine,
     getParallelEngine,
     getSddRun,
+    onSddLifecycle,
     subscribeEternalIteration,
     subscribeEternalStage,
     skillLoader,
@@ -808,6 +822,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           setSuggestions,
           getEternalEngine,
           getSddRun,
+          onSddLifecycle,
           subscribeEternalIteration,
           subscribeEternalStage,
           subscribeAutoPhase,

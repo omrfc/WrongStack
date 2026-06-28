@@ -69,6 +69,16 @@ export interface RunTuiOptions {
    */
   getSddRun?: (() => import('@wrongstack/core').SddRunControl | null) | undefined;
   /**
+   * Apply a post-run SDD lifecycle op (clean / rollback / destroy) from the host.
+   * Drives the board overlay keys c / z / x so they work after the run ends.
+   */
+  onSddLifecycle?:
+    | ((
+        op: 'cleanup_worktrees' | 'rollback' | 'destroy',
+        opts?: { revertMerged?: boolean },
+      ) => Promise<import('@wrongstack/core').SddLifecycleResult>)
+    | undefined;
+  /**
    * Subscribe to live per-iteration events from the eternal engine.
    * Returns an unsubscribe function. TUI uses this to render each
    * iteration as a live timeline entry as it lands.
@@ -848,6 +858,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           getEternalEngine: opts.getEternalEngine,
           getParallelEngine: opts.getParallelEngine,
           getSddRun: opts.getSddRun,
+          onSddLifecycle: opts.onSddLifecycle,
           subscribeEternalIteration: opts.subscribeEternalIteration,
           subscribeEternalStage: opts.subscribeEternalStage,
           subscribeAutoPhase: opts.subscribeAutoPhase,

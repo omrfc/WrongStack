@@ -32,6 +32,66 @@ export async function cleanupStaleWorktrees(projectRoot: string): Promise<{ remo
   return wt.cleanupStale();
 }
 
+export interface CleanupStaleSddOptions {
+  projectRoot: string;
+  /** Board snapshot dir (`wpaths.projectSddBoards`) — read for the liveness guard. */
+  boardsDir: string;
+  /** A `running` board updated within this window is treated as live → skip. Default 120_000 (2 min). */
+  runningLiveMs?: number | undefined;
+  /** A `paused` board updated within this window is treated as live → skip. Default 1_800_000 (30 min). */
+  pausedLiveMs?: number | undefined;
+  /** Injectable clock for tests. */
+  now?: (() => number) | undefined;
+}
+
+export interface CleanupStaleSddResult {
+  /** True when a sweep ran (orphans were found and removed). */
+  swept: boolean;
+  removed: number;
+  detected: number;
+  /** Set when the sweep was skipped because a run appears live. */
+  skippedReason?: string | undefined;
+}
+
+/**
+ * Liveness-guarded stale-worktree sweep for boot + run-start. Worktrees live
+ * under `<projectRoot>/.wrongstack/worktrees` and a sweep force-removes ALL of
+ * them — so it must NEVER run under a genuinely live run (possibly in another
+ * process). The guard reads the latest board: a `running` board updated within
+ * `runningLiveMs`, or a `paused` one within `pausedLiveMs`, is treated as live
+ * and the sweep is skipped. A crashed run leaves its board frozen as `running`
+ * → once it ages past the window it is correctly swept. Any other status
+ * (completed / failed / stopped / deadlocked / idle) is always sweepable.
+ * Never throws — best-effort cleanup.
+ */
+export async function cleanupStaleSddWorktrees(
+  opts: CleanupStaleSddOptions,
+): Promise<CleanupStaleSddResult> {
+  const now = opts.now?.() ?? Date.now();
+  try {
+    const store = new SddBoardStore({ baseDir: opts.boardsDir });
+    const latest = (await store.list())[0];
+    if (latest) {
+      const age = now - latest.updatedAt;
+      if (latest.status === 'running' && age < (opts.runningLiveMs ?? 120_000)) {
+        return { swept: false, removed: 0, detected: 0, skippedReason: 'a run appears live (running)' };
+      }
+      if (latest.status === 'paused' && age < (opts.pausedLiveMs ?? 1_800_000)) {
+        return { swept: false, removed: 0, detected: 0, skippedReason: 'a run is paused' };
+      }
+    }
+  } catch {
+    // No/unreadable board → nothing claims the worktrees; safe to sweep.
+  }
+  try {
+    const wt = new WorktreeManager({ projectRoot: opts.projectRoot });
+    const { removed, detected } = await wt.cleanupStale();
+    return { swept: detected > 0, removed, detected };
+  } catch {
+    return { swept: false, removed: 0, detected: 0 };
+  }
+}
+
 export interface RollbackFromDiskOptions {
   projectRoot: string;
   /** Directory holding persisted board snapshots (`wpaths.projectSddBoards`). */
@@ -77,27 +137,62 @@ export interface DestroySddProjectOptions {
     projectSddSession: string;
     projectSddBoards: string;
   };
+  /**
+   * Also revert this run's already-merged squash commits (history-preserving
+   * `git revert`) BEFORE deleting the board that records them. Off by default —
+   * a plain destroy wipes worktrees + artifacts but leaves merged commits on the
+   * base branch (un-merged worktree work is destroyed regardless, since its
+   * branch is force-removed). When on and the working tree is dirty, the revert
+   * is refused and surfaced in `revertReason` (the destroy still proceeds).
+   */
+  revertMerged?: boolean | undefined;
+  /** Which run's merged commits to revert. Omit → the most recently updated board. */
+  runId?: string | undefined;
 }
 
 export interface DestroySddProjectResult {
   worktreesRemoved: number;
   /** Human labels of the artifacts that were deleted. */
   deleted: string[];
+  /** Number of merged commits reverted (only when `revertMerged` was set). */
+  reverted: number;
+  /** Whether the optional merged-commit revert succeeded (undefined → not requested). */
+  revertOk?: boolean | undefined;
+  /** Why the revert did not fully apply (dirty tree, conflict, nothing to revert). */
+  revertReason?: string | undefined;
 }
 
 /**
- * Destroy an SDD project: clean every worktree + branch, then delete the on-disk
- * artifacts (specs, task-graphs, session, boards). Does NOT roll back git commits
- * — that is the separate, explicit `rollbackSddRunFromDisk`. Best-effort: a
+ * Destroy an SDD project: optionally revert its merged commits, then clean every
+ * worktree + branch, then delete the on-disk artifacts (specs, task-graphs,
+ * session, boards). The revert is opt-in (`revertMerged`) and runs FIRST — it
+ * reads the board snapshot that the artifact deletion removes. Best-effort: a
  * missing path is simply skipped. The caller is responsible for stopping any
  * active run first.
  */
 export async function destroySddProject(
   opts: DestroySddProjectOptions,
 ): Promise<DestroySddProjectResult> {
-  const { removed } = await cleanupSddWorktrees(opts.projectRoot).catch(() => ({ removed: 0 }));
-  const deleted: string[] = [];
+  // 1. Optional merged-commit revert — must read the board before we delete it.
+  let reverted = 0;
+  let revertOk: boolean | undefined;
+  let revertReason: string | undefined;
+  if (opts.revertMerged) {
+    const r = await rollbackSddRunFromDisk({
+      projectRoot: opts.projectRoot,
+      boardsDir: opts.paths.projectSddBoards,
+      runId: opts.runId,
+    }).catch((err) => ({ ok: false, reverted: 0, reason: toReason(err) }));
+    reverted = r.reverted;
+    revertOk = r.ok;
+    revertReason = r.reason;
+  }
 
+  // 2. Force-remove every worktree + branch (incl. un-merged work).
+  const { removed } = await cleanupSddWorktrees(opts.projectRoot).catch(() => ({ removed: 0 }));
+
+  // 3. Delete the on-disk artifacts.
+  const deleted: string[] = [];
   const rmDir = async (dir: string, label: string) => {
     try {
       await fsp.rm(dir, { recursive: true, force: true });
@@ -120,5 +215,88 @@ export async function destroySddProject(
   await rmDir(opts.paths.projectTaskGraphs, 'task-graphs');
   await rmDir(opts.paths.projectSddBoards, 'boards');
 
-  return { worktreesRemoved: removed, deleted };
+  return { worktreesRemoved: removed, deleted, reverted, revertOk, revertReason };
+}
+
+function toReason(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Lifecycle operation kinds shared by every surface (WebUI / TUI / CLI). */
+export type SddLifecycleOp = 'cleanup_worktrees' | 'rollback' | 'destroy';
+
+export interface SddLifecycleOptions {
+  projectRoot: string;
+  /** Resolved wstack paths (required for `destroy`; boards dir is enough for `rollback`). */
+  paths: {
+    projectSpecs: string;
+    projectTaskGraphs: string;
+    projectSddSession: string;
+    projectSddBoards: string;
+  };
+  /** Target a specific run (rollback / destroy). Omit → most recently updated board. */
+  runId?: string | undefined;
+  /** `destroy` only: also revert merged commits before wiping. */
+  revertMerged?: boolean | undefined;
+}
+
+/** Uniform result for any lifecycle op — drives identical UI wording everywhere. */
+export interface SddLifecycleResult {
+  op: SddLifecycleOp;
+  ok: boolean;
+  /** Worktrees removed (cleanup_worktrees / destroy). */
+  removed?: number | undefined;
+  /** Merged commits reverted (rollback / destroy with revertMerged). */
+  reverted?: number | undefined;
+  /** Artifact labels deleted (destroy). */
+  deleted?: string[] | undefined;
+  /** Failure / partial reason, surfaced verbatim in the UI. */
+  reason?: string | undefined;
+}
+
+/**
+ * Apply a post-run SDD lifecycle operation from disk and return a uniform result.
+ * The single entry point shared by the WebUI board handler, the TUI overlay, and
+ * the CLI `/sdd` host so every surface reports the same thing. The caller must
+ * ensure no run is active (these operate on git + on-disk state, not the live
+ * run) — `cleanup`/`destroy` force-remove worktrees, `rollback` refuses on a
+ * dirty tree. Never throws.
+ */
+export async function applySddLifecycle(
+  op: SddLifecycleOp,
+  opts: SddLifecycleOptions,
+): Promise<SddLifecycleResult> {
+  try {
+    if (op === 'cleanup_worktrees') {
+      const { removed } = await cleanupSddWorktrees(opts.projectRoot);
+      return { op, ok: true, removed };
+    }
+    if (op === 'rollback') {
+      const r = await rollbackSddRunFromDisk({
+        projectRoot: opts.projectRoot,
+        boardsDir: opts.paths.projectSddBoards,
+        runId: opts.runId,
+      });
+      return { op, ok: r.ok, reverted: r.reverted, reason: r.reason };
+    }
+    // destroy
+    const r = await destroySddProject({
+      projectRoot: opts.projectRoot,
+      paths: opts.paths,
+      revertMerged: opts.revertMerged,
+      runId: opts.runId,
+    });
+    return {
+      op,
+      // The wipe itself is best-effort and always "ok"; a requested-but-refused
+      // revert is surfaced via reason without failing the destroy.
+      ok: true,
+      removed: r.worktreesRemoved,
+      reverted: r.reverted,
+      deleted: r.deleted,
+      reason: r.revertOk === false ? r.revertReason : undefined,
+    };
+  } catch (err) {
+    return { op, ok: false, reason: toReason(err) };
+  }
 }

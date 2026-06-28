@@ -68,11 +68,18 @@ export {
 export {
   cleanupSddWorktrees,
   cleanupStaleWorktrees,
+  cleanupStaleSddWorktrees,
   rollbackSddRunFromDisk,
   destroySddProject,
+  applySddLifecycle,
   type RollbackFromDiskOptions,
   type DestroySddProjectOptions,
   type DestroySddProjectResult,
+  type CleanupStaleSddOptions,
+  type CleanupStaleSddResult,
+  type SddLifecycleOp,
+  type SddLifecycleOptions,
+  type SddLifecycleResult,
 } from './sdd-lifecycle.js';
 
 // AI-Driven Interactive Builder

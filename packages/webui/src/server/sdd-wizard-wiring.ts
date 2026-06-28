@@ -4,6 +4,7 @@ import {
   type Agent,
   type AgentFactory,
   type BrainArbiter,
+  cleanupStaleSddWorktrees,
   type EventBus,
   makeCommandVerifier,
   makeLlmSubtaskGenerator,
@@ -128,7 +129,16 @@ export function buildSddWizardDeps(opts: SddWizardWiringOptions): SddWizardDeps 
             encoding: 'utf8',
             windowsHide: true,
           }).stdout?.trim() === 'true';
-        if (inGit) worktrees = new WorktreeManager({ projectRoot: opts.projectRoot, events: opts.events });
+        if (inGit) {
+          // Clean slate: sweep any orphaned worktrees/branches a prior crashed or
+          // abandoned run left behind BEFORE this run allocates. Liveness-guarded
+          // so it never touches a run that is still live in another process.
+          await cleanupStaleSddWorktrees({
+            projectRoot: opts.projectRoot,
+            boardsDir: opts.paths.projectSddBoards,
+          }).catch(() => undefined);
+          worktrees = new WorktreeManager({ projectRoot: opts.projectRoot, events: opts.events });
+        }
       }
 
       const boardStore = new SddBoardStore({ baseDir: opts.paths.projectSddBoards });

@@ -363,10 +363,19 @@ export interface SlashCommandContext {
   onSddRollback?: (() => Promise<{ ok: boolean; reverted: number; reason?: string }>) | undefined;
   /**
    * Destroy the SDD project: stop any active run, clean worktrees, and delete the
-   * on-disk artifacts (specs, task-graphs, session, boards). Does NOT roll back
-   * commits — that is the separate `/sdd rollback`.
+   * on-disk artifacts (specs, task-graphs, session, boards). Pass
+   * `{ revertMerged: true }` (`/sdd destroy --revert`) to also revert merged
+   * commits before wiping; otherwise they are left on the base branch.
    */
-  onSddDestroy?: (() => Promise<{ worktreesRemoved: number; deleted: string[] }>) | undefined;
+  onSddDestroy?:
+    | ((opts?: { revertMerged?: boolean }) => Promise<{
+        worktreesRemoved: number;
+        deleted: string[];
+        reverted: number;
+        revertOk?: boolean | undefined;
+        revertReason?: string | undefined;
+      }>)
+    | undefined;
   /**
    * Start a real, LLM-driven AutoPhase run from a free-text goal. The host
    * plans phases (each holding many todos), persists the phase-graph as

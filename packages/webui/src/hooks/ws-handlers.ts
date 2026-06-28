@@ -139,6 +139,12 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
     const p = msg.payload as { boards?: import('@/stores/sdd-board-store').SddBoardSummary[] };
     useSddBoardStore.getState().setBoards(p.boards ?? []);
   },
+  'sdd.board.lifecycle_result': (msg: WSServerMessage) => {
+    const p = msg.payload as Omit<import('@/stores/sdd-board-store').SddLifecycleResultUI, 'at'>;
+    const store = useSddBoardStore.getState();
+    store.setLifecycleResult({ ...p, at: Date.now() });
+    store.setDestroying(false);
+  },
   'sdd.spec.snapshot': (msg: WSServerMessage) => {
     useSddWizardStore.getState().setSnapshot(
       msg.payload as unknown as import('@/stores/sdd-wizard-store').SddWizardSnapshot,

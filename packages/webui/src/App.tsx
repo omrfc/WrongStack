@@ -15,7 +15,7 @@ import { CodeEditor } from './components/CodeEditor';
 import { ChangesView } from './components/ChangesView';
 import { CommandPalette, downloadChatAsMarkdown } from './components/CommandPalette';
 import { ConfirmDialog } from './components/ConfirmDialog';
-import { ConfirmModalHost } from './components/ConfirmModal';
+import { ConfirmModalHost, PromptModalHost } from './components/ConfirmModal';
 import { ConnectionBanner } from './components/ConnectionBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { QuickModelSwitcher } from './components/QuickModelSwitcher';
@@ -478,6 +478,7 @@ function AppInner() {
       {/* Global overlays */}
       <ConfirmDialog />
       <ConfirmModalHost />
+      <PromptModalHost />
       <CommandPalette />
       <ShortcutsOverlay />
       <QuickModelSwitcher />
