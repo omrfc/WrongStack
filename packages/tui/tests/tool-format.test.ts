@@ -1187,6 +1187,88 @@ describe('formatToolVisualOutput', () => {
   });
 });
 
+describe('formatToolVisualOutput — edit-style tools', () => {
+  it('renders edit tool: path + replacement count', () => {
+    const out = formatToolVisualOutput(
+      'edit',
+      JSON.stringify({
+        path: 'src/foo.ts',
+        replacements: 3,
+        diff: '@@ -1 +1 @@\n-old\n+new\n',
+      }),
+      true,
+    );
+    // First row: 'edit <path>' marker, kind 'ok'
+    expect(out?.[0]).toMatchObject({ kind: 'ok', marker: 'edit ', path: 'src/foo.ts' });
+    // Second row: '3 replacements' meta
+    expect(out?.[1]).toMatchObject({ kind: 'meta', text: '3 replacements' });
+  });
+
+  it('renders write tool: path + bytes', () => {
+    const out = formatToolVisualOutput(
+      'write',
+      JSON.stringify({ path: 'src/bar.ts', bytes: 256 }),
+      true,
+    );
+    expect(out?.[0]).toMatchObject({ kind: 'ok', marker: 'write ', path: 'src/bar.ts' });
+    expect(out?.[1]).toMatchObject({ kind: 'meta', text: '256 bytes' });
+  });
+
+  it('renders write tool new-file path', () => {
+    const out = formatToolVisualOutput(
+      'write',
+      JSON.stringify({ path: 'src/new.ts', created: true }),
+      true,
+    );
+    expect(out?.[0]).toMatchObject({ kind: 'ok', marker: 'write ', path: 'src/new.ts' });
+    expect(out?.[1]).toMatchObject({ kind: 'meta', text: 'new file' });
+  });
+
+  it('renders diff tool: file count', () => {
+    const out = formatToolVisualOutput(
+      'diff',
+      JSON.stringify({
+        files: ['a.ts', 'b.ts', 'c.ts'],
+        diff: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@\n-x\n+y\n',
+      }),
+      true,
+    );
+    expect(out?.[0]).toMatchObject({ kind: 'ok', marker: 'diff ', text: '3 files' });
+  });
+
+  it('renders replace tool: replacement + file count from results', () => {
+    const out = formatToolVisualOutput(
+      'replace',
+      JSON.stringify({
+        results: [
+          { path: 'a.ts', diff: '@@\n-x\n+y\n' },
+          { path: 'b.ts', diff: '@@\n-x\n+y\n' },
+          { path: 'a.ts', diff: '@@\n-x\n+y\n' },
+        ],
+      }),
+      true,
+    );
+    expect(out?.[0]).toMatchObject({ kind: 'ok', marker: 'replace ' });
+    expect(out?.[0]?.text).toContain('3 replacements');
+    expect(out?.[0]?.text).toContain('across 2 files');
+  });
+
+  it('appends an error row when the call failed', () => {
+    const out = formatToolVisualOutput(
+      'edit',
+      JSON.stringify({ path: 'src/foo.ts', replacements: 0 }),
+      false,
+    );
+    expect(out?.some((row) => row.kind === 'error')).toBe(true);
+  });
+
+  it('falls back to first non-empty line for non-JSON output', () => {
+    const out = formatToolVisualOutput('edit', 'plain text output line one\nline two', true);
+    expect(out?.[0]).toMatchObject({ kind: 'meta' });
+    expect(out?.[0]?.text).toContain('plain text output line one');
+  });
+});
+
 describe('fmtDuration', () => {
   it('renders ms below 1s', () => {
     expect(fmtDuration(0)).toBe('0ms');

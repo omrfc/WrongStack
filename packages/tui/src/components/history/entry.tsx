@@ -262,7 +262,13 @@ export const Entry = React.memo(function Entry({
           </Text>
           {visualLines && entry.resultRenderMode !== 'simple' ? (
             <ToolOutputLines lines={visualLines} hasFollowingBlock={Boolean(diff || multiDiffs)} />
-          ) : visualLines ? null : entry.resultRenderMode === 'simple' ? null : (
+          ) : visualLines ? (
+            // `simple` mode: meta line stays visible (path + replacement
+            // count for edit, line count for read, etc.) but the diff
+            // body below is hidden. The user always gets a one-line
+            // summary so the entry never looks empty.
+            <ToolOutputLines lines={visualLines} hasFollowingBlock={false} />
+          ) : entry.resultRenderMode === 'simple' ? null : (
             outLines.map((line, i) => (
               <Text key={i}>
                 <Text dimColor>{i === outLines.length - 1 && !diff && !multiDiffs ? '  └─ ' : '  ├─ '}</Text>
@@ -290,7 +296,7 @@ export const Entry = React.memo(function Entry({
                 ) : null;
               })()}
               {multiDiffs.map((item) => (
-                <DiffFileBlock key={item.path} path={item.path} preview={item.preview} />
+                <DiffFileBlock key={item.path} path={item.path} preview={item.preview} useColor />
               ))}
             </Box>
           ) : entry.resultRenderMode !== 'simple' && diff ? (
@@ -299,6 +305,7 @@ export const Entry = React.memo(function Entry({
               hidden={diff.hidden}
               hiddenAdded={diff.hiddenAdded}
               hiddenRemoved={diff.hiddenRemoved}
+              useColor
             />
           ) : null}
         </Box>

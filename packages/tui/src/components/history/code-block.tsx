@@ -207,9 +207,12 @@ export function formatMultiDiffSummary(
 export function DiffFileBlock({
   path,
   preview,
+  useColor = true,
 }: {
   path: string;
   preview: DiffPreview;
+  /** Pass-through to {@link DiffBlock}. See that component for details. */
+  useColor?: boolean | undefined;
 }): React.ReactElement {
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -219,6 +222,7 @@ export function DiffFileBlock({
         hidden={preview.hidden}
         hiddenAdded={preview.hiddenAdded}
         hiddenRemoved={preview.hiddenRemoved}
+        useColor={useColor}
       />
     </Box>
   );
@@ -229,11 +233,23 @@ export function DiffBlock({
   hidden,
   hiddenAdded = 0,
   hiddenRemoved = 0,
+  useColor = true,
 }: {
   rows: DiffLineRow[];
   hidden: number;
   hiddenAdded?: number | undefined;
   hiddenRemoved?: number | undefined;
+  /**
+   * When true (default), added/removed lines get a pastel green/red
+   * background wash with black foreground text — the visual scannable
+   * "added/removed" cue. When false, only the `+`/`-` markers get
+   * colored (bright green/red, bold) so the diff stays readable on
+   * terminals that don't support truecolor backgrounds (TERM=xterm,
+   * `NO_COLOR=1`, etc.). Pass `false` from the entry-point when
+   * `theme.supportsBackground === false` (future hook — for now the
+   * default is fine for any modern terminal).
+   */
+  useColor?: boolean | undefined;
 }): React.ReactElement {
   let gutterWidth = 1;
   for (const r of rows) {
@@ -293,26 +309,48 @@ export function DiffBlock({
             </Text>
           );
         }
-        const bg = row.kind === 'add' ? theme.diffAddBg : theme.diffDelBg;
-        const lineColor = row.kind === 'add' ? theme.success : theme.error;
         const marker = markerFor(row.kind);
         const text = textForDisplay(row);
-        // Ink's <Text> does NOT support backgroundColor — only <Box> does.
-        // We wrap the entire line in a <Box> with the background color so
-        // added lines show a soft pastel green wash and removed lines show
-        // a soft pastel red wash, making the diff scannable at a glance.
         const gutter = `${oldLn} ${newLn}`;
-        return (
-          <Box key={key} backgroundColor={bg} minWidth={1} flexShrink={0}>
-            <Text>
-              <Text dimColor>{gutter}</Text>
-              <Text>{' '}</Text>
-              <Text color={lineColor} bold>
-                {marker}
+        // When the host terminal supports truecolor (the default path):
+        // wrap the line in a <Box> with the pastel wash background and
+        // use black foreground so the text reads cleanly on the soft
+        // tint. When truecolor backgrounds aren't available (e.g. some
+        // TTYs strip background escapes), fall back to bright foreground
+        // markers only — the line still reads as added/removed, just
+        // without the wash. The bold marker is always rendered for
+        // accessibility regardless of `useColor`.
+        if (useColor) {
+          const bg = row.kind === 'add' ? theme.diffAddBg : theme.diffDelBg;
+          const lineColor = row.kind === 'add' ? theme.success : theme.error;
+          return (
+            <Box key={key} backgroundColor={bg} minWidth={1} flexShrink={0}>
+              <Text>
+                <Text dimColor>{gutter}</Text>
+                <Text>{' '}</Text>
+                <Text color={lineColor} bold>
+                  {marker}
+                </Text>
+                <Text color="black">{text}</Text>
               </Text>
-              <Text color="black">{text}</Text>
+            </Box>
+          );
+        }
+        // No-bg fallback: rely on the marker color (bright ANSI green/red
+        // after the Ink shim routes them through `softColor`) plus bold
+        // to distinguish add vs del. The line text stays in the default
+        // terminal foreground so it never vanishes against an unknown
+        // background.
+        const fgColor = row.kind === 'add' ? 'green' : 'red';
+        return (
+          <Text key={key}>
+            <Text dimColor>{gutter}</Text>
+            <Text>{' '}</Text>
+            <Text color={fgColor} bold>
+              {marker}
             </Text>
-          </Box>
+            <Text>{text}</Text>
+          </Text>
         );
       })}
       {hidden > 0 ? (

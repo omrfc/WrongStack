@@ -47,7 +47,6 @@ describe('<Entry /> tool rendering', () => {
       input: { path: 'src/new.ts', content: 'alpha\nbeta' },
       output: JSON.stringify({
         path: 'src/new.ts',
-        bytes_written: 10,
         created: true,
         diff: '+++ src/new.ts\n+ (new file, 2 lines)',
       }),
@@ -55,7 +54,9 @@ describe('<Entry /> tool rendering', () => {
 
     expect(frame).toContain('write');
     expect(frame).toContain('src/new.ts');
-    expect(frame).toContain('created');
+    // `created: true` is now rendered as "new file" in the meta line —
+    // the visual summary sits above the diff body.
+    expect(frame).toContain('new file');
     expect(frame).toContain('alpha');
     expect(frame).toContain('beta');
   });
@@ -83,5 +84,86 @@ describe('<Entry /> tool rendering', () => {
     expect(frame).toContain('1/2 succeeded');
     expect(frame).toContain('write');
     expect(frame).toContain('denied');
+  });
+
+  it('renders edit meta line (path + replacement count) above the diff body', () => {
+    const frame = renderEntry({
+      id: 4,
+      kind: 'tool',
+      name: 'edit',
+      durationMs: 12,
+      ok: true,
+      input: { path: 'src/foo.ts', old_string: 'a', new_string: 'b' },
+      output: JSON.stringify({
+        path: 'src/foo.ts',
+        replacements: 1,
+        diff: [
+          'diff --git a/src/foo.ts b/src/foo.ts',
+          '--- a/src/foo.ts',
+          '+++ b/src/foo.ts',
+          '@@ -1 +1 @@',
+          '-a',
+          '+b',
+        ].join('\n'),
+      }),
+    });
+
+    // Meta line: tool name + path
+    expect(frame).toContain('edit');
+    expect(frame).toContain('src/foo.ts');
+    // Replacement count meta
+    expect(frame).toContain('1 replacement');
+    // Diff body still rendered below
+    expect(frame).toContain('+b');
+    expect(frame).toContain('-a');
+  });
+
+  it('renders write meta line (path + bytes)', () => {
+    const frame = renderEntry({
+      id: 5,
+      kind: 'tool',
+      name: 'write',
+      durationMs: 8,
+      ok: true,
+      input: { path: 'src/bar.ts', content: 'hello\nworld' },
+      output: JSON.stringify({ path: 'src/bar.ts', bytes: 11 }),
+    });
+
+    expect(frame).toContain('write');
+    expect(frame).toContain('src/bar.ts');
+    expect(frame).toContain('11 bytes');
+  });
+
+  it('does not render the diff body in simple result-render mode for edit', () => {
+    const frame = renderEntry({
+      id: 6,
+      kind: 'tool',
+      name: 'edit',
+      durationMs: 12,
+      ok: true,
+      resultRenderMode: 'simple',
+      input: { path: 'src/foo.ts', old_string: 'a', new_string: 'b' },
+      output: JSON.stringify({
+        path: 'src/foo.ts',
+        replacements: 1,
+        diff: [
+          'diff --git a/src/foo.ts b/src/foo.ts',
+          '--- a/src/foo.ts',
+          '+++ b/src/foo.ts',
+          '@@ -1 +1 @@',
+          '-a',
+          '+b',
+        ].join('\n'),
+      }),
+    });
+
+    // Meta line: still present (path + replacement count).
+    expect(frame).toContain('edit');
+    expect(frame).toContain('src/foo.ts');
+    expect(frame).toContain('1 replacement');
+    // Diff BODY is hidden — the raw `-a`/`+b` markers from the diff
+    // must not appear in the simple render.
+    expect(frame).not.toContain('-a');
+    expect(frame).not.toContain('+b');
   });
 });

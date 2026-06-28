@@ -823,6 +823,21 @@ export function formatToolVisualOutput(
   if (toolName === 'grep' || toolName === 'search') return visualSearch(toolName, text);
   if (toolName === 'glob') return visualPathList(toolName, text);
   if (toolName === 'tree') return visualTree(text);
+  // Edit-style tools render two layers: a compact meta line via
+  // `visualEdit` (path + replacement count) at the top, then the actual
+  // diff body via the dedicated `<DiffBlock>` that `entry.tsx` already
+  // renders below. Without the meta line the user only sees the diff
+  // body and may miss which file got touched; with it they get the
+  // summary even in `simple` mode where the diff body is hidden.
+  if (
+    toolName === 'edit' ||
+    toolName === 'write' ||
+    toolName === 'diff' ||
+    toolName === 'patch' ||
+    toolName === 'replace'
+  ) {
+    return visualEdit(toolName, text, ok);
+  }
   if (toolName === 'bash' || toolName === 'shell' || toolName === 'git' || toolName === 'exec' || toolName === 'install') {
     return visualCommand(toolName, text, ok);
   }
@@ -911,6 +926,88 @@ function colorForVisualKind(kind: ToolVisualLineKind): string | undefined {
     case 'meta':
       return undefined;
   }
+}
+
+/**
+ * Render the meta line for edit-style tools (`edit`, `write`, `diff`,
+ * `patch`, `replace`). The actual diff body is rendered separately by
+ * `<DiffBlock>` in `entry.tsx`; this function only produces the compact
+ * summary that lives above it — `path · N replacement(s)` for `edit`,
+ * `path · N bytes` for `write`, `diff N file(s)` for `diff`/`patch`,
+ * `replace · N file(s)` for `replace`. Failing to render means the
+ * user only sees the raw diff body (or nothing in `simple` mode),
+ * which makes the tool entry look empty.
+ */
+function visualEdit(
+  toolName: string,
+  text: string,
+  ok: boolean,
+): ToolVisualLine[] | undefined {
+  const rows: ToolVisualLine[] = [];
+  const parsed = tryParseJson(text);
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    const path = typeof obj['path'] === 'string' ? (obj['path'] as string) : undefined;
+    const replacements = typeof obj['replacements'] === 'number' ? (obj['replacements'] as number) : undefined;
+    const bytes = typeof obj['bytes'] === 'number' ? (obj['bytes'] as number) : undefined;
+    const created = obj['created'] === true;
+    const files = Array.isArray(obj['files']) ? (obj['files'] as unknown[]) : undefined;
+    const results = Array.isArray(obj['results']) ? (obj['results'] as unknown[]) : undefined;
+
+    if (toolName === 'edit' && path !== undefined) {
+      const repText = replacements !== undefined
+        ? `${replacements} replacement${replacements === 1 ? '' : 's'}`
+        : undefined;
+      rows.push({ kind: 'ok', text: '', marker: 'edit ', path });
+      if (repText) rows.push({ kind: 'meta', text: repText });
+    } else if (toolName === 'write' && path !== undefined) {
+      const sizeText = bytes !== undefined
+        ? `${bytes} bytes`
+        : created
+          ? 'new file'
+          : 'updated';
+      rows.push({ kind: 'ok', text: '', marker: 'write ', path });
+      rows.push({ kind: 'meta', text: sizeText });
+    } else if ((toolName === 'diff' || toolName === 'patch') && files && files.length > 0) {
+      rows.push({
+        kind: 'ok',
+        marker: `${toolName} `,
+        text: `${files.length} file${files.length === 1 ? '' : 's'}`,
+      });
+    } else if (toolName === 'replace' && results && results.length > 0) {
+      const pathSet = new Set<string>();
+      for (const r of results) {
+        if (r && typeof r === 'object') {
+          const p = (r as Record<string, unknown>)['path'];
+          if (typeof p === 'string') pathSet.add(p);
+        }
+      }
+      const pathList = Array.from(pathSet);
+      const fileCount = pathList.length || results.length;
+      rows.push({
+        kind: 'ok',
+        marker: 'replace ',
+        text: `${results.length} replacement${results.length === 1 ? '' : 's'} across ${fileCount} file${fileCount === 1 ? '' : 's'}`,
+      });
+    } else if (path !== undefined) {
+      // Fallback: we have JSON but no recognised shape — still surface
+      // the path so the user knows which file got touched.
+      rows.push({ kind: 'ok', text: '', marker: `${toolName} `, path });
+    } else {
+      return undefined;
+    }
+  } else {
+    // Non-JSON output: surface the first non-empty line so the user
+    // at least sees *something* (matches the read-tool fallback in
+    // visualRead).
+    const first = firstNonEmpty(text);
+    if (!first) return undefined;
+    rows.push({ kind: 'meta', text: first.length > 80 ? `${first.slice(0, 77)}…` : first });
+  }
+  // Append an error flag for non-ok runs so the visual summary reflects
+  // failure when the meta comes from a successful call site.
+  if (!ok) rows.push({ kind: 'error', marker: '! ', text: 'edit failed' });
+  return rows;
 }
 
 function visualRead(text: string): ToolVisualLine[] | undefined {
