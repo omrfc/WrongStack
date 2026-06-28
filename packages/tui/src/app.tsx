@@ -33,7 +33,6 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { readClipboardImage, readClipboardText } from './clipboard.js';
 import { AgentsMonitor } from './components/agents-monitor.js';
 import { AUTONOMY_OPTIONS, AutonomyPicker } from './components/autonomy-picker.js';
 import { DesignPicker } from './components/design-picker.js';
@@ -97,6 +96,8 @@ import { WorktreeMonitor } from './components/worktree-monitor.js';
 import { WorktreePanel } from './components/worktree-panel.js';
 import { searchFiles } from './file-search.js';
 import { type GitInfo, readGitInfo } from './git-info.js';
+import { useQueueManager } from './hooks/use-queue-manager.js';
+import { usePasteHandling } from './hooks/use-paste-handling.js';
 import { usePickerKeys } from './hooks/use-picker-keys.js';
 import { useDirectorFleetBridge } from './hooks/use-director-fleet-bridge.js';
 import { useAutonomousCoordinator } from './hooks/use-autonomous-coordinator.js';
@@ -115,7 +116,6 @@ import { createKillSlashCommand } from './kill-slash.js';
 import { MOUSE_CLICK_ON, MOUSE_OFF } from './mouse.js';
 import { feedPaste } from './paste-accumulator.js';
 import { createPsSlashCommand } from './ps-slash.js';
-import { createQueueSlashCommand } from './queue-slash.js';
 import { buildSlashCommandMatches } from './slash-command-search.js';
 import { buildSteeringPreamble } from './steering-preamble.js';
 import { isRandomTuiThinkingWord, pickRandomTuiThinkingWord } from './thinking-word.js';
@@ -1325,20 +1325,6 @@ export function App({
     builderRef.current = new InputBuilder({ store: attachments });
   }
 
-  // Bracketed-paste accumulator. A single paste can be delivered across
-  // several stdin/keypress events: only the first carries the \x1b[200~
-  // begin marker and only the last carries \x1b[201~. We buffer every
-  // fragment here between those markers and finalize once, so a paste never
-  // fragments into multiple placeholders or leaks newlines into the buffer.
-  // `null` means "not currently inside a paste".
-  const pasteAccumRef = useRef<string | null>(null);
-  // Safety net: if the closing \x1b[201~ marker never arrives (a terminal
-  // dropped it, or Ink split the escape across chunks), flush the buffered
-  // payload after a short idle period so accumulation can't swallow input
-  // indefinitely. Real pastes deliver all fragments back-to-back, well
-  // inside this window.
-  const pasteFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const activeCtrlRef = useRef<AbortController | null>(null);
   // Set once we've asked Ink to unmount on a Ctrl+C exit. A synchronous ref
   // (not React state) because consecutive SIGINTs can fire faster than a
@@ -2373,65 +2359,6 @@ export function App({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.buffer, slashRegistry]);
 
-  const pasteClipboardImage = async (): Promise<void> => {
-    const builder = builderRef.current;
-    if (!builder) return;
-    try {
-      const img = await readClipboardImage();
-      if (!img) {
-        dispatch({
-          type: 'addEntry',
-          entry: { kind: 'info', text: 'No image on the clipboard.' },
-        });
-        return;
-      }
-      // Register-only: the token goes inline into the editable buffer (like a
-      // pasted block) so it renders as a chip and expands from the buffer at
-      // submit — not into a separate pill above the input.
-      const token = await builder.registerImage(img.base64, img.mediaType);
-      const kb = (img.bytes / 1024).toFixed(0);
-      tokenPreviewsRef.current.set(token, `image, ${kb} KB`);
-      const { buffer, cursor } = draftRef.current;
-      const next = buffer.slice(0, cursor) + token + buffer.slice(cursor);
-      setDraft(next, cursor + token.length);
-    } catch (err) {
-      dispatch({
-        type: 'addEntry',
-        entry: {
-          kind: 'error',
-          text: `Clipboard image error: ${toErrorMessage(err)}`,
-        },
-      });
-    }
-  };
-
-  // Ctrl+V → read text from the system clipboard and insert it. In raw mode the
-  // terminal hands Ctrl+V to us as a control byte instead of doing a native
-  // paste, and we never enable bracketed-paste mode, so without this nothing
-  // happens. Route through commitPaste so long/multi-line content collapses to a
-  // [pasted #N] chip exactly like a bracketed paste would.
-  const pasteClipboardText = async (): Promise<void> => {
-    try {
-      const text = await readClipboardText();
-      if (!text) {
-        dispatch({
-          type: 'addEntry',
-          entry: { kind: 'info', text: 'No text on the clipboard.' },
-        });
-        return;
-      }
-      await commitPaste(text);
-    } catch (err) {
-      dispatch({
-        type: 'addEntry',
-        entry: {
-          kind: 'error',
-          text: `Clipboard error: ${toErrorMessage(err)}`,
-        },
-      });
-    }
-  };
-
   const acceptPickerSelection = async (): Promise<void> => {
     const { open, matches, selected } = state.picker;
     if (!open || matches.length === 0) return;
@@ -2490,78 +2417,6 @@ export function App({
     setDraft(cmd, cmd.length);
     dispatch({ type: 'slashPickerClose' });
   };
-
-  // Rehydrate any queue items persisted by a previous (crashed) run.
-  // Fires once at mount; the persist effect below picks up afterwards.
-  // We dispatch one enqueue per item so the reducer's id allocation
-  // stays the single source of truth — no need to import its internals.
-  useEffect(() => {
-    if (!queueStore) return;
-    let cancelled = false;
-    queueStore
-      .read()
-      .then((items) => {
-        if (cancelled || items.length === 0) return;
-        for (const item of items) {
-          dispatch({
-            type: 'enqueue',
-            item: { displayText: item.displayText, blocks: item.blocks },
-          });
-        }
-        dispatch({
-          type: 'addEntry',
-          entry: {
-            kind: 'info',
-            text: `Restored ${items.length} queued message${items.length === 1 ? '' : 's'} from a previous run.`,
-          },
-        });
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queueStore]);
-
-  // Persist the queue snapshot on every change. Strip the in-memory id
-  // before writing — it's render bookkeeping, not part of the message.
-  // Errors are swallowed: the queue lives in memory regardless, so a
-  // persistence failure only loses crash-recovery, not the queue itself.
-  useEffect(() => {
-    if (!queueStore) return;
-    queueStore
-      .write(state.queue.map(({ displayText, blocks }) => ({ displayText, blocks })))
-      .catch(() => undefined);
-  }, [state.queue, queueStore]);
-
-  // Mirror the queue snapshot to the host on every change (enqueue, /queue
-  // delete, /queue clear, dequeue-for-delivery) so a running agent learns
-  // what's waiting at its next iteration boundary — without the queued
-  // messages being delivered early. See core's queued-messages.ts.
-  useEffect(() => {
-    onQueueChange?.(state.queue.map((q) => q.displayText));
-  }, [state.queue, onQueueChange]);
-
-  // Register the TUI-only /queue command for the lifetime of this App.
-  useEffect(() => {
-    const cmd = createQueueSlashCommand({
-      getQueue: () => stateRef.current.queue,
-      clear: () => dispatch({ type: 'queueClear' }),
-      deleteAt: (positions) => dispatch({ type: 'queueDelete', positions }),
-      getPickerEnabled: () => midRunSendPickerRef.current,
-      setPickerEnabled: (enabled) => {
-        midRunSendPickerRef.current = enabled;
-        const cur = getSettings?.();
-        if (cur && saveSettings) {
-          Promise.resolve(saveSettings({ ...cur, midRunSendPicker: enabled })).catch(() => {});
-        }
-      },
-    });
-    slashRegistry.register(cmd);
-    return () => {
-      slashRegistry.unregister('queue');
-    };
-  }, [slashRegistry]);
 
   // Register /kill (list/kill tracked bash/exec processes) and /ps (list only).
   useEffect(() => {
@@ -3865,6 +3720,33 @@ export function App({
   // "refining..." and send the original immediately.
   const enhanceAbortRef = useRef<AbortController | null>(null);
 
+  // ── Paste handling ──────────────────────────────────────────────────
+  const {
+    pasteAccumRef,
+    pasteFlushTimerRef,
+    commitPaste,
+    pasteClipboardImage,
+    pasteClipboardText,
+  } = usePasteHandling({
+    builderRef,
+    dispatch,
+    draftRef,
+    setDraft,
+    tokenPreviewsRef,
+  });
+
+  // ── Queue lifecycle ─────────────────────────────────────────────────
+  useQueueManager({
+    queueStore,
+    onQueueChange,
+    slashRegistry,
+    stateRef,
+    dispatch,
+    getSettings,
+    saveSettings,
+    midRunSendPickerRef,
+  });
+
   // Seconds remaining in the prompt-refinement auto-send countdown. Lifted
   // out of EnhancePanel so the statusline can display it — panel re-renders
   // during the countdown were causing blank entries in chat scrollback.
@@ -4297,50 +4179,6 @@ export function App({
       process.off('SIGINT', onSigint);
     };
   }, [director, getEternalEngine, getParallelEngine, getSddRun, switchAutonomy, onExit, exit]);
-
-  // Finalize a fully-assembled paste payload. A collapse-worthy paste (long
-  // or many-lined) or any multi-line paste becomes an inline `[pasted #N, L
-  // lines]` chip in the editable row — the content lives in the AttachmentStore
-  // and is expanded from the buffer at submit. A short single-line paste is
-  // inserted straight into the row as raw text so the user can see and edit it.
-  //
-  // Exception: when the buffer starts with `/` (slash command), the paste
-  // content is the command's argument — collapsing it to a chip would make
-  // commands like `/fix` classify the placeholder text instead of the actual
-  // error. Still collapse only truly massive pastes (>collapse threshold)
-  // since they won't fit a CLI command line anyway.
-  const commitPaste = async (full: string): Promise<void> => {
-    const builder = builderRef.current;
-    if (!builder || !full) return;
-    const { buffer, cursor } = draftRef.current;
-    const isSlashCmd = buffer.trimStart().startsWith('/');
-    const mustCollapse = builder.wouldCollapse(full);
-    const multiLine = full.includes('\n');
-
-    if (isSlashCmd && !mustCollapse) {
-      // Slash command: inline the paste so the command handler sees the real
-      // content instead of a `[pasted #N]` placeholder. Multi-line content is
-      // fine — slash command args span the rest of the line, newlines included.
-      const next = buffer.slice(0, cursor) + full + buffer.slice(cursor);
-      setDraft(next, cursor + full.length);
-      return;
-    }
-
-    if (mustCollapse || multiLine) {
-      // Register-only: store the paste, get back the inline token. The token
-      // goes into the buffer (single source of truth); nothing is appended to
-      // the builder's own display, so there's no double-expansion at submit.
-      const token = await builder.registerPaste(full);
-      // Store the full paste so slash commands like /fix can see the entire
-      // content. Display truncation (6-line preview) happens at render time.
-      tokenPreviewsRef.current.set(token, full);
-      const next = buffer.slice(0, cursor) + token + buffer.slice(cursor);
-      setDraft(next, cursor + token.length);
-      return;
-    }
-    const next = buffer.slice(0, cursor) + full + buffer.slice(cursor);
-    setDraft(next, cursor + full.length);
-  };
 
   const handleKey = async (input: string, key: KeyEvent) => {
     // Note: we no longer block input while the agent is running. Enter
