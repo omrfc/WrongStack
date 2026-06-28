@@ -424,15 +424,18 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.275.0.** The multi-file diff rendering, settings picker,
-and per-iteration performance release. The TUI renders multi-file tool outputs
-(`replace` / `diff` / `patch` / `write`) as one **DiffFileBlock per file** with an
-independently-capped preview and a configurable summary footer; gains an 18-chord
-**settings picker** (`Ctrl` / `Alt` / `Alt+Shift`) with a live fuzzy filter and two
-new `/settings` inline commands; and memoizes the history + tool-entry formatting.
-A per-iteration performance pass skips redundant serialization, makes the agent-loop
-in-flight marker fire-and-forget, and replaces full-history token re-walks with an
-incremental delta. The 2,095-line `session-store.ts` is split into focused modules.
+**Current release: 0.275.0.** The ACP v1 spec coverage, performance hardening,
+and surface polish release. Ships **ACP v1 100 % spec coverage** via the official
+`@agentclientprotocol/sdk` bridge (server: 14 methods, client: 12 methods, both
+transports, full `agentCapabilities`), and closes the top hot-path bottlenecks in
+core storage and ACP — an async serialized logger tail with `flush()`,
+reverse-iterate `DefaultMailbox.query()`, and a once-per-reload sort in
+`DefaultSessionStore`. On the surfaces: a reliable `/sdd` stop/rollback/destroy
+lifecycle with worktree orphan cleanup, a dedicated WebUI **Worktrees** management
+panel, Telegram secret redaction + inline-keyboard approvals + startup self-test, a
+split `/tool <name> desc|result simple|extend` mode, a TUI mid-run **send-mode
+picker** (Queue / By the way / Steer), and cross-restart persistence of WebUI
+preferences. Closes all P1 (4/4) and P2 (9/9) `before-release.md` items plus 11 P3.
 All workspace packages and the marketing site are aligned to `0.275.0` in lockstep.
 Additive only — no breaking changes.
 
@@ -539,7 +542,7 @@ Every built-in command is tagged with a category (`Run` · `Session` · `Inspect
 | `/steer <text>` | _(TUI; in the plain REPL use **Esc**)_ Mid-flight redirect — aborts iteration, terminates fleet, drops queue, prepends STEERING preamble |
 | `/goal <text>` | Lock in a goal — auto-refines it into deliverables, persists to `~/.wrongstack/projects/<hash>/goal.json`, tracks progress/trends, and injects the full-autonomy preamble. Subcommands: `/goal` (status + journal), `/goal refine`, `/goal clear`, `/goal pause`, `/goal resume`, `/goal journal [N]` |
 | `/tasks add\|start\|done\|fail\|status\|depends\|assign\|promote\|clear` | Structured task management between `/plan` and `/todos`: dependencies, types, priorities, estimates, agent assignment, and promote-to-todos flow |
-| `/queue` | _(TUI)_ Show, clear, or delete entries from the in-flight message queue |
+| `/queue` | _(TUI)_ Show, clear, or delete entries from the in-flight message queue. `/queue picker on\|off` toggles the mid-run send-mode picker (Queue / By the way / Steer) that pops when you submit a plain message while the agent is busy |
 | `/plan show\|add\|start\|done\|remove\|clear` | Per-session plan JSON. Mirrored to disk; surfaces `📋 ⌛N ☐N ✓N` chip in TUI status bar |
 | `/autonomy off\|suggest\|on\|eternal\|parallel\|stop\|toggle` | Self-driving mode. `suggest` shows next steps without executing; `on` auto-continues; `eternal` runs goal-driven loop; `parallel` fans out 4-8 subagents per tick. TUI shows `∞ AUTO` / `∞ SUGGEST` / `ETERNAL` / `⟳ PARALLEL` chip |
 | `/yolo on\|off\|toggle` | Flip YOLO mode (auto-approve all tool calls). `/yolo` alone shows status. TUI shows `⚠ YOLO` chip |
@@ -554,7 +557,7 @@ Every built-in command is tagged with a category (`Run` · `Session` · `Inspect
 | `/plugin install\|disable\|enable\|remove\|official [name]` | Manage plugins. `install` adds bundled package to config (no npm). Restart to load/unload |
 | `/telegram send\|read\|chat\|attach` | Telegram plugin (enable with `wstack plugin install telegram`): `send <chatId> <message>`, `read <chatId> [limit]`, `chat` list recent, `attach <file>` send file |
 | `/sdd new\|approve\|spec\|tasks\|graph\|critical\|parallel\|stop\|retry-failed\|split\|clean\|rollback\|destroy` | Spec-Driven Development workflow: interactive interview → spec → plan → task graph → execute. `parallel [slots]` fans out a real subagent fleet onto the live board; `clean`/`rollback`/`destroy` manage worktrees and run history. Built on `SpecParser`, `TaskTracker`, `TaskGenerator`, `TaskFlow`, `SddParallelRun` |
-| `/tool <name> simple\|extend` | Set a tool's description detail: `extend` (default, full description) or `simple` (1–2 lines) to trim prompt overhead. Shown in `/tools` output |
+| `/tool <name> desc\|result simple\|extend` | Two independent axes: `desc simple\|extend` sets the LLM-side description detail (trims prompt overhead), `result simple\|extend` sets the on-screen result preview (never changes what the model sees). Legacy `/tool <name> simple\|extend` still sets both. Shown in `/tools` output |
 | `/shadow start\|stop\|status\|hoop\|model\|interval` | Manage the event-driven Shadow Agent fleet monitor: runs one-shot fleet checks, detects loops/spike tasks, and can `hoop <agent-id>` to stop a runaway agent and notify |
 | `/settings` | View or change settings (non-blocking, works in REPL + TUI): `/settings` (show), `/settings delay <seconds>`, `/settings mode <off\|suggest\|auto>`, `/settings defaults`; persists to `~/.wrongstack/config.json` |
 | `/prune [days] [--dry-run] [--rebuild-index]` | Delete sessions older than N days (default 30, clamped 1–365). `--dry-run` previews; `--rebuild-index` rebuilds the session index from disk. Sessions referenced by `active.json` are never pruned |

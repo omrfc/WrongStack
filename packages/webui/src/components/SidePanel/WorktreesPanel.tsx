@@ -63,7 +63,15 @@ export function WorktreesPanel(): React.ReactElement {
   const [busyBranch, setBusyBranch] = useState<string | null>(null);
   const [openDiff, setOpenDiff] = useState<string | null>(null);
 
-  const send = client?.send;
+  // Bind once: `client.send` reads `this.ws` internally, so it MUST be invoked
+  // as a method on the client. Extracting the bare method (`const send =
+  // client.send`) drops the `this` binding and the first call throws
+  // "can't access property 'ws', this is undefined". Every other panel calls
+  // `client.send(...)` directly for the same reason.
+  const send = useMemo(
+    () => (client ? client.send.bind(client) : undefined),
+    [client],
+  );
   useEffect(() => {
     send?.({ type: 'worktree.scan' });
   }, [send]);

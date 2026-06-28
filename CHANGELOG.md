@@ -7,32 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **TUI — mid-run send-mode picker.** Submitting a plain message while the agent
-  is busy now pops a 3-way picker — **Queue** (run after the current turn),
-  **By the way** (fold in at the next step via `setBtwNote`, no interrupt), or
-  **Steer** (abort now, drop the queue, redirect with a STEERING preamble) —
-  instead of silently queueing. Queue is the default highlight; `Esc` queues so
-  the typed text is never lost. Quick keys `q`/`b`/`s`, arrows to move, `Enter`
-  to pick. On by default; toggle with `/queue picker on|off` (persisted to
-  `autonomy.midRunSendPicker`). Slash commands typed while busy still dispatch
-  immediately. New `packages/tui/src/components/send-mode-picker.tsx`; the
-  `/steer` body was factored into a shared `runSteerSequence` reused by both the
-  command and the picker.
+_Nothing yet._
 
 ## [0.275.0] — 2026-06-28
 
-> The **performance hardening, ACP v1 spec coverage, and pre-release cleanup**
-> release. Closes the top-3 hot-path bottlenecks in core storage and ACP
-> (async logger tail with `flush()`, sort-then-slice in `DefaultMailbox.query()`,
-> once-on-reload sort in `DefaultSessionStore`), completes **ACP v1 100 % spec
-> coverage** with the official `@agentclientprotocol/sdk` bridge (server: 14
-> methods; client: 12 methods; both transports; full `agentCapabilities`),
-> closes all P1 (4/4) and P2 (9/9) items from `before-release.md` plus 11 P3
-> items (2 won't-fix), and locks the token-saving tier measurements in via
-> regression tests. All workspace packages and the marketing site are aligned
-> to `0.275.0` in lockstep. Additive only — no breaking changes.
+> The **ACP v1 spec coverage, performance hardening, and surface polish**
+> release. Completes **ACP v1 100 % spec coverage** with the official
+> `@agentclientprotocol/sdk` bridge (server: 14 methods; client: 12 methods;
+> both transports; full `agentCapabilities`); closes the top-3 hot-path
+> bottlenecks in core storage and ACP (async logger tail with `flush()`,
+> sort-then-slice in `DefaultMailbox.query()`, once-on-reload sort in
+> `DefaultSessionStore`); and lands a wave of surface work — a reliable
+> `/sdd` stop/rollback/destroy lifecycle with worktree orphan cleanup, a
+> dedicated WebUI **Worktrees** panel, Telegram secret redaction + inline
+> approvals, a split `/tool` desc/result mode, a TUI mid-run send-mode picker,
+> and cross-restart persistence of WebUI preferences. Closes all P1 (4/4) and
+> P2 (9/9) items from `before-release.md` plus 11 P3 items (2 won't-fix), and
+> locks the token-saving tier measurements in via regression tests. All
+> workspace packages and the marketing site are aligned to `0.275.0` in
+> lockstep. Additive only — no breaking changes.
 
 ### Added
 
@@ -71,6 +64,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `config.features.memory`, tier-independent). Catches an accidental
   regression that would compact memory at `aggressive` to match
   `minimal`-style.
+
+- **`/tool` — independent description + result render modes.** `/tool <name>
+  simple` used to set both the LLM-side description and the on-screen result
+  preview at once — shortening a description you were fine with while also
+  wiping file output you wanted to keep. Split into two independent axes:
+  `/tool <name> desc simple|extend` (LLM prompt prose, unchanged) and
+  `/tool <name> result simple|extend` (on-screen render, new). The legacy
+  `/tool <name> simple` keeps working as a back-compat alias that sets both.
+  Backed by independent config fields (`tools.descriptionMode[name]` /
+  `tools.resultRenderMode[name]`), independent of the token-saving tiers, and
+  wired with parity across CLI (`TerminalRenderer`), TUI (`HistoryEntry`), and
+  WebUI (`ToolResult` `renderMode` prop). Toggling the result render mode never
+  changes what the model sees. New
+  `packages/core/src/utils/tool-result-render-mode.ts` (13 unit tests); CLI
+  `renderer`/`slash-tool` test suites extended.
+
+- **`packages/telegram` — secret redaction, inline-keyboard approvals, startup
+  self-test.** Outbound notifications now run tool output and delegate-completed
+  summaries through a new `src/redact.ts` (mirrors `redactCommand` from
+  `@wrongstack/tools` without taking the dependency), closing the risk of tokens
+  printed by a long bash run landing in a phone notification (15-case regex
+  matrix). New `telegram_approve` tool posts a yes/no inline keyboard and races
+  the two buttons via `callback_query` (`awaitCallback` + `answerCallbackQuery`
+  ack), with a 600s timeout safety net. `setup()` now runs a `getMe` health
+  check before polling, so a `401`/`403` surfaces immediately instead of
+  spinning on every poll cycle; `bot.health()` also clears its 5s timeout in a
+  `finally` so it no longer leaks an `AbortSignal.timeout`.
+
+- **`packages/webui` — dedicated Worktrees management panel.** A first-class
+  worktree manager in the left nav unifies live (event-driven) worktrees with
+  disk-scanned orphans in one list, with per-row open-in-terminal/folder, view
+  changes (compact diff summary), squash-merge to base, and remove/discard, plus
+  bulk **Clean orphans** + rescan. New core ops (`WorktreeManager.removeOne` /
+  `mergeBranch` / `diffSummary` / `listManaged`) are handle-free and path-guarded;
+  destructive actions are double-guarded (refused while a run owns the worktree,
+  and behind the cross-process board liveness guard for bulk clean). The panel
+  only operates on this project's own `wstack/ap/*` branches (regex also blocks
+  argv flag-smuggling), and every directory is validated inside the managed
+  worktrees root before any `git` call.
+
+- **`/sdd` — robust stop / rollback / destroy lifecycle + worktree orphan
+  cleanup.** Abandoning an SDD run is now reliable and reversible on every
+  surface. `destroySddProject` gains `revertMerged` (revert → cleanup → delete
+  order); a shared `applySddLifecycle` gives CLI/TUI/WebUI one uniform result so
+  wording matches everywhere. The WebUI board applies cleanup/rollback/destroy
+  directly from disk once a run ends (fixing the post-run no-op where
+  `control.jsonl` had no drainer), adds one-click **Destroy** + `SddDestroyDialog`,
+  and the TUI/CLI board overlay `c`/`z`/`x` keys fall back to a disk-backed host
+  callback post-run (`/sdd destroy --revert`). Previously-dead
+  `cleanupStaleWorktrees` is now wired (liveness-guarded) on WebUI+CLI boot and
+  before each run start, and also catches dangling `wstack/ap/*` branches.
+
+- **TUI — mid-run send-mode picker.** Submitting a plain message while the agent
+  is busy now pops a 3-way picker — **Queue** (run after the current turn),
+  **By the way** (fold in at the next step via `setBtwNote`, no interrupt), or
+  **Steer** (abort now, drop the queue, redirect with a STEERING preamble) —
+  instead of silently queueing. Queue is the default highlight; `Esc` queues so
+  the typed text is never lost. Quick keys `q`/`b`/`s`, arrows to move, `Enter`
+  to pick. On by default; toggle with `/queue picker on|off` (persisted to
+  `autonomy.midRunSendPicker`). Slash commands typed while busy still dispatch
+  immediately. New `packages/tui/src/components/send-mode-picker.tsx`; the
+  `/steer` body was factored into a shared `runSteerSequence` reused by both the
+  command and the picker.
 
 ### Changed
 
@@ -171,6 +227,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `flush()` API; existing callers that relied on synchronous file
   visibility must now `await logger.flush()` (see the test updates in
   `packages/core/tests/infrastructure/logger.test.ts`).
+
+- **`packages/tui` — edit-style tool entries render a meta line; DiffBlock
+  color fallback.** `formatToolVisualOutput` had no branch for
+  `edit`/`write`/`diff`/`patch`/`replace`, so those entries rendered the raw
+  diff body with no summary line — you had to scroll past the hunks to see which
+  file was touched. A new `visualEdit()` helper surfaces a one-line summary
+  (`edit <path>` + replacement count, `write <path>` + bytes/`new file`,
+  `diff`/`patch`/`replace` file counts), and `simple` render mode now keeps that
+  meta line so edit entries never look blank (only the diff body is hidden).
+  `DiffBlock` gains a `useColor` fallback: terminals that strip background
+  escapes (`NO_COLOR=1`, plain xterm) now get bright green/red bold markers with
+  default foreground text instead of an invisible line. New
+  `diff-block-render.test.ts` (7 tests); `tool-format` / `tool-entry-render`
+  suites extended.
+
+- **`/sdd` — a user-stopped run is reported as `stopped`, not `paused`.** A
+  stopped run was projected with board status `paused` (the resumable, still-live
+  state), so every surface treated it as active forever — the WebUI Destroy
+  orchestration waited for an `!active` that never came, and the
+  Clean/Rollback/Destroy controls (gated on `!active`) never appeared. A distinct
+  terminal `stopped` status is now returned by `resolveStatus` for a finished +
+  stop-requested run and threaded through the WebUI store/theme and the TUI
+  overlay, so the post-run lifecycle controls apply and the
+  auto-stop→destroy handoff completes.
+
+- **`cli` / `webui` — browser preference changes persist across restarts.**
+  `wrongstack --webui` previously lost browser-side changes to reasoning
+  mode/effort/preserve, cache TTL, context mode, token-saving tier,
+  `max-concurrent`, title animation, and the active provider/model on restart —
+  only the standalone `wstackui` server persisted them. Both surfaces now write
+  the same canonical keys to `config.json`.
 
 ### Changed — versions
 
