@@ -1,5 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { hasApiKey, buildPickableProviders, resolveProviderAlias } from '../src/provider-helpers.js';
+import {
+  hasApiKey,
+  buildPickableProviders,
+  isKeylessLocalProvider,
+  resolveProviderAlias,
+} from '../src/provider-helpers.js';
 
 let savedEnv: Record<string, string | undefined>;
 
@@ -68,6 +73,36 @@ describe('hasApiKey', () => {
       },
     } as never;
     expect(hasApiKey(fakeProvider(), config)).toBe(false);
+  });
+});
+
+// ── isKeylessLocalProvider ───────────────────────────────────────────────────
+
+describe('isKeylessLocalProvider', () => {
+  it('is true for a loopback gateway with no env vars (omniroute)', () => {
+    expect(
+      isKeylessLocalProvider({ apiBase: 'http://localhost:20128/v1', envVars: [] }),
+    ).toBe(true);
+  });
+
+  it('is true for 127.x and ::1 hosts', () => {
+    expect(isKeylessLocalProvider({ apiBase: 'http://127.0.0.1:4000/v1' })).toBe(true);
+    expect(isKeylessLocalProvider({ apiBase: 'http://[::1]:8000/v1' })).toBe(true);
+  });
+
+  it('is false when the provider declares key env vars', () => {
+    expect(
+      isKeylessLocalProvider({ apiBase: 'http://localhost:20128/v1', envVars: ['OMNI_KEY'] }),
+    ).toBe(false);
+  });
+
+  it('is false for a remote host', () => {
+    expect(isKeylessLocalProvider({ apiBase: 'https://api.openai.com/v1' })).toBe(false);
+  });
+
+  it('is false when there is no base URL or it is malformed', () => {
+    expect(isKeylessLocalProvider({})).toBe(false);
+    expect(isKeylessLocalProvider({ apiBase: 'not a url' })).toBe(false);
   });
 });
 
@@ -153,6 +188,38 @@ describe('buildPickableProviders', () => {
     } as never);
     const custom = result.find((p) => p.id === 'custom');
     expect(custom?.models).toEqual(['m1', 'm2']);
+  });
+
+  it('includes a keyless local gateway from the catalog (omniroute)', async () => {
+    const registry = fakeRegistry([
+      {
+        id: 'omniroute',
+        family: 'openai-compatible',
+        apiBase: 'http://localhost:20128/v1',
+        envVars: [],
+        models: [{ id: 'cc/claude-opus-4-8' }, { id: 'openai/gpt-5-codex' }],
+      },
+    ]);
+    const result = await buildPickableProviders(registry, { providers: {} } as never);
+    const omni = result.find((p) => p.id === 'omniroute');
+    expect(omni).toBeDefined();
+    expect(omni?.models).toEqual(['cc/claude-opus-4-8', 'openai/gpt-5-codex']);
+  });
+
+  it('includes a keyless local gateway configured as a custom loopback provider', async () => {
+    const registry = fakeRegistry([]);
+    const result = await buildPickableProviders(registry, {
+      providers: {
+        omniroute: {
+          type: 'omniroute',
+          family: 'openai-compatible',
+          baseUrl: 'http://127.0.0.1:20128/v1',
+          models: ['cc/claude-opus-4-8'],
+        },
+      },
+    } as never);
+    const omni = result.find((p) => p.id === 'omniroute');
+    expect(omni?.models).toEqual(['cc/claude-opus-4-8']);
   });
 
   it('filters out unsupported family providers', async () => {

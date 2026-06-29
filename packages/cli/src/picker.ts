@@ -4,7 +4,7 @@ import { color, expectDefined, setOutputLineGuard, setRawMode, writeOut } from '
 import { toErrorMessage } from '@wrongstack/core/utils';
 import { appendHistory, backupCurrent } from './config-history.js';
 import type { ReadlineInputReader } from './input-reader.js';
-import { hasApiKey, visibleModelIds } from './provider-helpers.js';
+import { hasApiKey, isKeylessLocalProvider, visibleModelIds } from './provider-helpers.js';
 import type { TerminalRenderer } from './renderer.js';
 
 // Simple theme alias (avoids importing the full theme module just for one color)
@@ -502,11 +502,15 @@ export async function runPicker(deps: {
     return undefined;
   }
 
-  // Filter to keyed providers. If none are keyed (fresh install, no env
-  // vars set), fall back to the full list and prompt the user to add a
-  // key — picking a keyless provider here is still useful because the
-  // very next step (`wstack auth <prov>`) needs to know which provider.
-  const keyed = merged.filter((p) => hasApiKey(p, config));
+  // Filter to usable providers: those with a key, plus keyless local
+  // gateways (omniroute/LiteLLM/… on a loopback address) which need no
+  // credential and so are immediately launchable. If none qualify (fresh
+  // install, no env vars set), fall back to the full list and prompt the
+  // user to add a key — picking a keyless provider here is still useful
+  // because the very next step (`wstack auth <prov>`) needs to know which.
+  const keyed = merged.filter(
+    (p) => hasApiKey(p, config) || isKeylessLocalProvider(p),
+  );
   let displayList = keyed;
   let showingFallback = false;
   if (keyed.length === 0) {

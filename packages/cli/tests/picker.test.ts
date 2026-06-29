@@ -136,6 +136,39 @@ describe('runPicker', () => {
     expect(result!.model).toBe('gpt-5-mini');
   });
 
+  it('lists a keyless local gateway (omniroute) alongside a keyed provider', async () => {
+    const { renderer, out } = mkRig();
+    // anthropic is keyed via env; omniroute is a keyless loopback gateway with
+    // no env vars. Both must be offered — previously omniroute was dropped
+    // because it failed the hasApiKey filter.
+    process.env.ANTHROPIC_API_KEY = 'sk-env';
+    try {
+      const providers = [
+        fakeProvider(),
+        fakeProvider({
+          id: 'omniroute',
+          name: 'OmniRoute',
+          family: 'openai-compatible',
+          apiBase: 'http://localhost:20128/v1',
+          envVars: [],
+          models: [fakeModel({ id: 'cc/claude-opus-4-8', name: 'Claude Opus' })],
+        }),
+      ];
+      const reader = fakeReader(['2', '1', 'n']); // pick omniroute, model 1, don't save
+      const registry = fakeRegistry(providers);
+      const result = await runPicker({
+        modelsRegistry: registry as never,
+        renderer,
+        reader: reader as never,
+      });
+      expect(out.buf).toContain('omniroute');
+      expect(result?.provider).toBe('omniroute');
+      expect(result?.model).toBe('cc/claude-opus-4-8');
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
   it('returns undefined when user cancels provider selection', async () => {
     const { renderer } = mkRig();
     const providers = [fakeProvider()];
