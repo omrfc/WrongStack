@@ -18,14 +18,23 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Share2,
   Sparkles,
   Zap,
   Shield,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 import { cn } from '@/lib/utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -219,6 +228,24 @@ function ProviderKeyCard({
   const [saved, setSaved] = useState(!!savedProvider?.apiKeys.some((k) => k.isActive));
   const [showModels, setShowModels] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
+  // Generate QR code when modal opens
+  useEffect(() => {
+    if (shareModalOpen && popular.referral) {
+      QRCode.toDataURL(popular.referral.url, {
+        width: 200,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff',
+        },
+      })
+        .then((url: string) => setQrDataUrl(url))
+        .catch(() => setQrDataUrl(null));
+    }
+  }, [shareModalOpen, popular.referral]);
 
   const handleSave = async () => {
     if (!key.trim()) return;
@@ -383,21 +410,30 @@ function ProviderKeyCard({
                 </a>
               )}
               {popular.referral && (
-                <button
-                  type="button"
-                  onClick={handleCopyReferral}
-                  className="inline-flex items-center gap-1 text-[11px] text-amber-600/80 dark:text-amber-400/80 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="h-3 w-3" /> Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3 w-3" /> Copy referral link
-                    </>
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyReferral}
+                    className="inline-flex items-center gap-1 text-[11px] text-amber-600/80 dark:text-amber-400/80 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-3 w-3" /> Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3" /> Copy referral link
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShareModalOpen(true)}
+                    className="inline-flex items-center gap-1 text-[11px] text-amber-600/80 dark:text-amber-400/80 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+                  >
+                    <Share2 className="h-3 w-3" /> Share
+                  </button>
+                </div>
               )}
             </div>
           ) : hasModels ? (
@@ -416,6 +452,69 @@ function ProviderKeyCard({
           ) : null}
         </div>
       </div>
+
+      {/* Share Modal */}
+      <Dialog open={shareModalOpen} onOpenChange={setShareModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Gift className="h-4 w-4 text-amber-500" />
+              Share {popular.name} Referral
+            </DialogTitle>
+            <DialogDescription>
+              Share this referral link with friends and earn rewards!
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-4">
+            {popular.referral && (
+              <>
+                <div className="text-sm text-center">
+                  <p className="font-medium text-amber-600 dark:text-amber-400">
+                    🎁 {popular.referral.reward}
+                  </p>
+                </div>
+                {qrDataUrl ? (
+                  <div className="rounded-lg border border-border p-2 bg-white">
+                    <img
+                      src={qrDataUrl}
+                      alt={`${popular.name} referral QR code`}
+                      className="w-[200px] h-[200px]"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-[200px] h-[200px] rounded-lg border border-border flex items-center justify-center bg-muted">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+                <div className="w-full space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={popular.referral.url}
+                      readOnly
+                      className="font-mono text-xs flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCopyReferral}
+                      className="shrink-0"
+                    >
+                      {copied ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground text-center">
+                    Scan the QR code or copy the link to share
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -568,6 +667,7 @@ export function SetupScreen() {
   const [isLoadingPopular, setIsLoadingPopular] = useState(false);
   const [popularRefreshNonce, setPopularRefreshNonce] = useState(0);
   const [previousProviderCount, setPreviousProviderCount] = useState(0);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const isInitialLoadRef = useRef(true);
 
   // Fetch popular providers from remote JSON on mount and when refresh is triggered
@@ -605,6 +705,7 @@ export function SetupScreen() {
             }
             setPreviousProviderCount(local.length);
           }
+          setLastUpdatedAt(new Date());
           return;
         }
         // Local didn't work, try GitHub
@@ -635,6 +736,7 @@ export function SetupScreen() {
             }
             setPreviousProviderCount(result.length);
           }
+          setLastUpdatedAt(new Date());
         }
       })
       .catch(() => {
@@ -750,6 +852,21 @@ export function SetupScreen() {
       },
     });
   }, [popularProviders.length]);
+
+  // Format relative time (e.g. "2m ago", "just now")
+  const formatRelativeTime = useCallback((date: Date): string => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 10) return 'just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    return `${diffDay}d ago`;
+  }, []);
 
   const handleKeySaved = useCallback((providerId: string) => {
     setSavedProviderIds((prev) => new Set([...prev, providerId]));
@@ -914,6 +1031,14 @@ export function SetupScreen() {
                         <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                           <Loader2 className="h-3 w-3 animate-spin" />
                           Updating...
+                        </span>
+                      )}
+                      {lastUpdatedAt && !isLoadingPopular && (
+                        <span
+                          className="text-[11px] text-muted-foreground"
+                          title={lastUpdatedAt.toLocaleString()}
+                        >
+                          {formatRelativeTime(lastUpdatedAt)}
                         </span>
                       )}
                       <button
