@@ -342,6 +342,30 @@ describe('EventBus', () => {
     expect(order).toEqual(['b', 'c']);
   });
 
+  it('off() prunes the empty Set so the internal map does not accumulate dead entries', () => {
+    // Hygiene guard: off() must delete the now-empty Set from the listeners
+    // map, not leave a dead 0-size entry behind. The map is private, so we
+    // reach in to assert the entry is gone (the only observable proof).
+    const bus = new EventBus();
+    const fn = vi.fn();
+    bus.on('session.started', fn);
+    const internal = (bus as unknown as { listeners: Map<string, Set<unknown>> }).listeners;
+    expect(internal.has('session.started')).toBe(true);
+    bus.off('session.started', fn);
+    expect(internal.has('session.started')).toBe(false);
+    // off() on an unknown / already-pruned event must not throw.
+    expect(() => bus.off('session.started', fn)).not.toThrow();
+    // A surviving sibling listener keeps the entry alive.
+    const a = vi.fn();
+    const b = vi.fn();
+    bus.on('tool.executed', a);
+    bus.on('tool.executed', b);
+    bus.off('tool.executed', a);
+    expect(internal.has('tool.executed')).toBe(true);
+    bus.off('tool.executed', b);
+    expect(internal.has('tool.executed')).toBe(false);
+  });
+
   it('emit() snapshots named listeners so one added mid-emit does not fire on the same emit', () => {
     // Regression guard: the named-listener loop must snapshot the Set like the
     // wildcard path does, so a listener that subscribes a sibling for the same

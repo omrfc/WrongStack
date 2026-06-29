@@ -977,7 +977,14 @@ export class EventBus {
   }
 
   off<E extends EventName>(event: E, fn: Listener<E>): void {
-    this.listeners.get(event)?.delete(fn as Listener<EventName>);
+    const set = this.listeners.get(event);
+    if (!set) return;
+    set.delete(fn as Listener<EventName>);
+    // Prune the now-empty Set so the map doesn't accumulate dead entries that
+    // listenerCount() and iteration would otherwise walk. Safe during an
+    // in-flight emit() because emit snapshots the Set before iterating, so it
+    // never observes the live Set being deleted.
+    if (set.size === 0) this.listeners.delete(event);
   }
 
   once<E extends EventName>(event: E, fn: Listener<E>): () => void {
