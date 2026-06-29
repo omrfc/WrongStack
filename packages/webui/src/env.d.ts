@@ -36,3 +36,6 @@ interface Performance {
     jsHeapSizeLimit: number;
   };
 }
+
+// Vite define replacement — true in development, false in production.
+declare const __DEV__: boolean;

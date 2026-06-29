@@ -3,12 +3,14 @@ import { useConfigStore, useUIStore } from '@/stores';
 import type { WSServerMessage } from '@/types';
 import { toast } from '@/components/Toaster';
 import { getWSClient } from '@/lib/ws-client';
+import { trackEvent } from '@/lib/analytics';
 import {
   ArrowRight,
   Bot,
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   ExternalLink,
   Gift,
   Globe,
@@ -215,6 +217,7 @@ function ProviderKeyCard({
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(!!savedProvider?.apiKeys.some((k) => k.isActive));
   const [showModels, setShowModels] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleSave = async () => {
     if (!key.trim()) return;
@@ -234,8 +237,28 @@ function ProviderKeyCard({
       setKey('');
       toast.success(`${popular.name} API key saved`);
       onKeySaved(popular.id);
+
+      // Track the key save event
+      trackEvent('provider_key_saved', 'engagement', {
+        label: popular.name,
+        metadata: {
+          providerId: popular.id,
+          providerFamily: popular.family,
+          hasReferral: !!popular.referral,
+          isNewProvider: !catalogProvider,
+        },
+      });
     } catch {
       toast.error(`Failed to save ${popular.name} API key`);
+
+      // Track the failed save event
+      trackEvent('provider_key_save_failed', 'error', {
+        label: popular.name,
+        metadata: {
+          providerId: popular.id,
+          providerFamily: popular.family,
+        },
+      });
     } finally {
       setIsSaving(false);
     }
@@ -244,6 +267,37 @@ function ProviderKeyCard({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && key.trim()) {
       handleSave();
+    }
+  };
+
+  const handleCopyReferral = async () => {
+    if (!popular.referral) return;
+    try {
+      await navigator.clipboard.writeText(popular.referral.url);
+      setCopied(true);
+      toast.success('Referral link copied to clipboard');
+      setTimeout(() => setCopied(false), 2000);
+
+      // Track the referral link copy event
+      trackEvent('referral_link_copied', 'engagement', {
+        label: popular.name,
+        metadata: {
+          providerId: popular.id,
+          referralCode: popular.referral.code,
+          referralUrl: popular.referral.url,
+        },
+      });
+    } catch {
+      toast.error('Failed to copy referral link');
+
+      // Track the failed copy event
+      trackEvent('referral_link_copy_failed', 'error', {
+        label: popular.name,
+        metadata: {
+          providerId: popular.id,
+          referralCode: popular.referral.code,
+        },
+      });
     }
   };
 
@@ -313,9 +367,36 @@ function ProviderKeyCard({
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => {
+                    trackEvent('provider_docs_link_clicked', 'engagement', {
+                      label: popular.name,
+                      metadata: {
+                        providerId: popular.id,
+                        docsUrl: popular.docsUrl,
+                        hasReferral: !!popular.referral,
+                      },
+                    });
+                  }}
                 >
                   Get your API key <ExternalLink className="h-3 w-3" />
                 </a>
+              )}
+              {popular.referral && (
+                <button
+                  type="button"
+                  onClick={handleCopyReferral}
+                  className="inline-flex items-center gap-1 text-[11px] text-amber-600/80 dark:text-amber-400/80 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3 w-3" /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3 w-3" /> Copy referral link
+                    </>
+                  )}
+                </button>
               )}
             </div>
           ) : hasModels ? (
@@ -498,16 +579,44 @@ export function SetupScreen() {
         if (local !== DEFAULT_POPULAR_PROVIDERS) {
           setPopularProviders(local);
           setIsLoadingPopular(false);
+
+          // Track successful local load
+          trackEvent('providers_loaded', 'system', {
+            label: 'local',
+            metadata: {
+              providerCount: local.length,
+              source: localUrl,
+            },
+          });
           return;
         }
         // Local didn't work, try GitHub
         return loadPopularProviders(githubUrl, controller.signal);
       })
       .then((result) => {
-        if (result) setPopularProviders(result);
+        if (result) {
+          setPopularProviders(result);
+
+          // Track successful GitHub load
+          trackEvent('providers_loaded', 'system', {
+            label: 'github',
+            metadata: {
+              providerCount: result.length,
+              source: githubUrl,
+            },
+          });
+        }
       })
       .catch(() => {
         /* keep defaults */
+
+        // Track failed load
+        trackEvent('providers_load_failed', 'error', {
+          metadata: {
+            localUrl,
+            githubUrl,
+          },
+        });
       })
       .finally(() => setIsLoadingPopular(false));
 
