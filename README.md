@@ -424,20 +424,23 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.275.0.** The ACP v1 spec coverage, performance hardening,
-and surface polish release. Ships **ACP v1 100 % spec coverage** via the official
-`@agentclientprotocol/sdk` bridge (server: 14 methods, client: 12 methods, both
-transports, full `agentCapabilities`), and closes the top hot-path bottlenecks in
-core storage and ACP — an async serialized logger tail with `flush()`,
-reverse-iterate `DefaultMailbox.query()`, and a once-per-reload sort in
-`DefaultSessionStore`. On the surfaces: a reliable `/sdd` stop/rollback/destroy
-lifecycle with worktree orphan cleanup, a dedicated WebUI **Worktrees** management
-panel, Telegram secret redaction + inline-keyboard approvals + startup self-test, a
-split `/tool <name> desc|result simple|extend` mode, a TUI mid-run **send-mode
-picker** (Queue / By the way / Steer), and cross-restart persistence of WebUI
-preferences. Closes all P1 (4/4) and P2 (9/9) `before-release.md` items plus 11 P3.
-All workspace packages and the marketing site are aligned to `0.275.0` in lockstep.
-Additive only — no breaking changes.
+**Current release: 0.276.2.** The tool consolidation, local-gateway
+auto-discovery, and WebUI modularization release. A **tool-family consolidation**
+pass merges duplicate tools, standardizes params and categories, and retires the
+redundant `web-search` / `json-path` plugin stubs (folded into the built-in
+`search` and `json` tools). **Local-LLM gateway auto-discovery** adds OmniRoute to
+the built-in catalog, probes keyless loopback gateways for their model list at
+boot, and surfaces those keyless providers across every picker — CLI startup,
+`/model`, the `wstack auth` menu, and the WebUI provider selectors — with
+local-server presets (OmniRoute / Ollama / vLLM / LM Studio). The **WebUI server
+god-module** was split into an 11-module `server/` layout, alongside F5
+client-state resilience, browser-side subscription OAuth login, an analytics
+dashboard, and a referral surface. Plus a **CI workflow + structured-error
+migration** (bare `Error` → `WrongStackError` across 5 packages), a `review`
+mailbox message type, kernel/security/storage/execution hardening, and a
+memory-search O(1) fast path. All workspace packages and the marketing site are
+aligned to `0.276.2` in lockstep. Additive only — no breaking changes for end
+users.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -695,7 +698,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **9300+ tests passing** across 500+ test files in the 0.275.0 release gate
+- **9300+ tests passing** across 500+ test files in the 0.276.2 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

@@ -9,6 +9,185 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.276.2] — 2026-06-29
+
+> The **tool consolidation, local-gateway auto-discovery, and WebUI
+> modularization** release. Consolidates the `0.276.1`–`0.276.2` line (both
+> bump-only) into a single documented entry. Four headlines: a **tool-family
+> consolidation** pass that merges duplicate tools, standardizes params and
+> categories, and retires the now-redundant plugin stubs (`web-search`,
+> `json-path`); **local-LLM gateway auto-discovery** that adds OmniRoute to the
+> built-in catalog, probes keyless loopback gateways for their model list at
+> boot, and surfaces those keyless providers across every picker (CLI startup,
+> `/model`, auth menu, and the WebUI provider selectors); a **WebUI server
+> god-module split** (`index.ts` → an 11-module `server/` layout) plus F5
+> client-state resilience, subscription OAuth login, an analytics dashboard, and
+> a referral surface; and a **CI workflow + structured-error migration** that
+> wires a GitHub Actions gate and converts bare `throw new Error(...)` sites to
+> typed `WrongStackError` subclasses across five packages. Plus a `review`
+> mailbox message type, kernel/security/storage/execution hardening, and a
+> memory-search O(1) fast path. All workspace packages and the marketing site
+> are aligned to `0.276.2` in lockstep. Additive only — no breaking changes for
+> end users.
+
+### Added
+
+- **OmniRoute + local-LLM gateway auto-discovery.** A new `omniroute` provider
+  (openai-compatible, loopback `http://localhost:20128/v1`, keyless) ships in
+  the built-in catalog with an `autoDiscoverModels` flag. `boot.ts` now calls
+  `discoverAndMergeProviders()` after config load: providers flagged
+  `autoDiscoverModels: true` have their `/v1/models` endpoint probed and the
+  discovered catalog merged into the `ModelsRegistry` via a new `mergeOverlay()`
+  method. The overlay is remembered and re-applied across every `refresh()` so
+  discovered models survive a catalog reload. New
+  `packages/providers/src/auto-discover.ts` and
+  `packages/cli/src/boot/auto-discover-providers.ts`.
+
+- **Keyless local gateways surface in every picker.** A new
+  `isKeylessLocalProvider(apiBase, envVars)` helper
+  (`packages/cli/src/provider-helpers.ts`) recognizes loopback gateways that
+  need no API key (OmniRoute, Ollama). A provider is now offered when it has a
+  key **or** is a keyless loopback gateway, so OmniRoute's auto-discovered
+  models appear in both the in-session `/model` switch and the startup
+  selection screen — previously both surfaces gated visibility on `hasApiKey`
+  and silently filtered keyless gateways out.
+
+- **Local-server preset menus (CLI + WebUI).** A dependency-free
+  `LOCAL_LLM_PRESETS` module (OmniRoute / Ollama / vLLM / LM Studio) backs three
+  new surfaces: a `l)` "local server" action in the interactive
+  `wstack auth` top-menu, a deduped preset block in the startup provider picker
+  (with a manual model-id prompt for freshly-picked gateways that have no
+  catalog models yet), and a "Local servers — click to pre-fill" quick-pick in
+  both the WebUI Settings → Add Provider form and the first-run SetupScreen. The
+  WebUI keeps its own standalone copy of the preset metadata
+  (`packages/webui/src/components/SettingsPanel/local-presets.ts`) to avoid a
+  `webui → cli` layering dependency.
+
+- **Keyless gateways skip the "Save anyway?" prompt.** `wstack auth local` now
+  auto-saves keyless (`noAuth`) gateways when the health probe fails, instead of
+  the confirmation prompt. Keyed presets (vLLM / LM Studio) keep the
+  confirmation.
+
+- **Tool disable / enable commands.** New CLI commands and config support to
+  disable or enable individual tools, complementing the consolidation pass.
+
+- **`review` mailbox message type.** A passive inter-agent ask where no
+  immediate reply is required — full end-to-end support across the mailbox,
+  `mail_send`, and the system-prompt docs.
+
+- **WebUI F5 resilience.** Client state, the live transcript, and the verifier
+  surface now persist and replay across a browser refresh instead of resetting
+  the session view.
+
+- **WebUI subscription OAuth login.** Browser-side **ChatGPT / Claude /
+  C‍opilot** subscription OAuth login with a refreshed key-entry UX, mirroring
+  the CLI's `wstack auth login <provider>` flows (PRs #148, #149).
+
+- **WebUI analytics dashboard + referral surface.** A new `/analytics` view
+  polls a new analytics backend endpoint (event aggregation) for overview cards,
+  events-by-category charts, active-session usage, and a live event stream; plus
+  a referral share modal with QR code, social sharing buttons, a referral badge,
+  and click tracking. Popular providers load from an external `providers.json`
+  with a refresh button and a provider-count-change toast.
+
+- **CI workflow.** A GitHub Actions gate (`pnpm typecheck` + `pnpm test` +
+  `pnpm build`) added alongside the structured-error migration.
+
+### Changed
+
+- **Tool-family consolidation.** Duplicate tools were merged, parameters and
+  categories standardized, and the redundant plugin stubs retired —
+  `web-search` folded into the built-in `search` tool and `json-path` folded
+  into the built-in `json` tool (via an `action` parameter). All stale tool
+  references across instructions, skills, docs, and code were updated to match;
+  director tests and the fleet tool-count assertions were updated for the
+  consolidated surface.
+
+- **WebUI server god-module split.** The monolithic `packages/webui/server/
+  index.ts` was decomposed into an 11-module `server/` layout — route-table
+  construction, the connection handler, the message dispatcher, the
+  setup-screen, WS/HTTP/shutdown + port resolution + session-start payload
+  (`server-runtime.ts`), and pre-context registries (`pre-context-services.ts`)
+  are now independent modules. `index.ts` is a pure barrel and `start-webui.ts`
+  is under 800 lines. Documented in `docs/architecture.md`.
+
+- **`autonomous-coordination` toolkit feature-gated.** The experimental
+  autonomous-coordination toolkit now sits behind
+  `features.autonomousCoordination` (default `false`).
+
+- **Provider credentials hot-reload.** `config.json` provider-credential changes
+  are now picked up without a restart.
+
+### Performance
+
+- **Memory-search inverted index O(1) fast path.** `searchIndex` in
+  `packages/core/src/storage/memory-backend.ts` built a `wordMap` / `tagMap`
+  inverted index but never used it as an index — every query needle walked the
+  entire vocabulary via `word.includes(n) || n.includes(word)`, making
+  `search_memory` O(needles × vocabulary) and degrading linearly as memory
+  grows. Added an exact `Map.get` fast path for whole-word and tag hits, with a
+  bounded substring fallback only when there's no exact hit and the needle is
+  ≥3 chars. New `packages/core/tests/perf/memory-search.bench.ts` locks the fast
+  path (exact whole-word hit stays ~flat 1.06× between 1K and 10K vocabularies;
+  the deliberate substring-fallback worst case is ~9.9× slower — what the old
+  code did on every query).
+
+- **`memory-store.scoreRelevant` cache reuse.** The per-entry lowercase WeakMap
+  was reallocated on every scoring pass, discarding all cached `toLowerCase()`
+  results; it's now lazily allocated once and reused. A single
+  `invalidateScoreCaches()` helper is wired into all four mutation sites
+  (remember / forget / consolidate / clear) plus the clear-all branch, which
+  previously never cleared the score cache.
+
+### Fixed
+
+- **Three latent kernel edge-case bugs.** `Container` now memoizes singletons
+  that resolve to `undefined` (via a `hasCache` flag); `EventBus.emit` snapshots
+  the named-listener set before iterating; `RunController.onAbort` fires
+  post-drain hooks immediately instead of dropping them. `EventBus.off` now
+  prunes the empty listener Set from the internal map instead of leaving dead
+  entries.
+
+- **Secret scrubber plaintext leaks (two fixes).** `DefaultSecretScrubber` leaked
+  every other secret when two secrets shared a single delimiter (the
+  printenv/`.env`-dump shape) because the `high_entropy_env` / `bearer_token`
+  patterns consumed their trailing delimiter, starving the next match's leading
+  anchor — fixed with non-consuming lookaheads. Separately, the chunked path
+  could split a secret across the 64 KB boundary on long newline-free input
+  (base64 / minified logs) and leak it — fixed with a forward whitespace-snap
+  bounded by a 1 KB overlap window.
+
+- **Session index concurrency.** `DefaultSessionStore`'s `_index.jsonl` path
+  (`appendToIndex` / `writeTombstone` / `compactIndex` / `rebuildIndex`) now runs
+  under `withFileLock` + `atomicWrite`, closing a concurrent-append drop, a
+  fixed-temp-path collision, and the Windows rename-retry gap. Compaction was
+  split into a locked outer + lock-free inner to avoid self-deadlock with the
+  non-reentrant lock.
+
+- **Parallel tool output-cap race.** `ToolExecutor`'s per-iteration output cap
+  (`perIterationOutputCapBytes`) was applied per-tool instead of cumulatively
+  under the parallel/smart strategies, so ~N× leaked through with N parallel
+  tools. `executeTool` was split into a concurrency-safe `produceToolOutput` plus
+  a synchronous `settleToolOutput` that enforces the cap against the live shared
+  budget atomically. Public `executeTool` is unchanged for single-tool callers.
+
+- **ACP malformed permission response.** Closed a `TypeError` on a malformed
+  `session/request_permission` response.
+
+- **TUI mid-paste Enter corruption.** The TUI now swallows `Enter` mid-paste to
+  prevent Windows paste corruption.
+
+### Changed — versions
+
+- **All workspace packages aligned to 0.276.2**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/plugins`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`,
+  `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`,
+  `@wrongstack/acp`, `@wrongstack/bench`, and the umbrella `apps/wrongstack`.
+  The marketing site (`website/`) is aligned in lockstep. The `0.276.1` bump
+  was bump-only.
+
 ## [0.276.0] — 2026-06-28
 
 ### Added
