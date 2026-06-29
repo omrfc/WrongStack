@@ -1,0 +1,338 @@
+/**
+ * Pref-persistence helpers for the standalone WebUI server.
+ *
+ * Phase 1c of the god-module split (issue: God-modules >1500 lines).
+ * `startWebUI` previously inlined four interlocking closures:
+ *   - `PREF_KEYS` + `prefSnapshot()` — read the live context.meta subset
+ *     the settings panel exposes
+ *   - `updateGlobalConfig()` — unified read→decrypt→mutate→encrypt→write
+ *     against config.json, serialized behind a non-poisoning lock
+ *   - `persistPrefsToConfig()` — project a prefs.update payload back into
+ *     config.json so a toggle made in the browser survives restarts
+ *
+ * All four move here. `updateGlobalConfig` returns the new lock so
+ * `startWebUI` can keep its mutable `configWriteLock` reference; the other
+ * two take explicit args. No behaviour change — the mutation ladder,
+ * the FEATURE_MAP, and the touch-flags are preserved verbatim.
+ */
+import { atomicWrite } from '@wrongstack/core/utils';
+import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
+import type { SecretVault } from '@wrongstack/core';
+import * as fs from 'node:fs/promises';
+
+/** Pref keys exposed to the settings panel via prefs.get / prefs.updated. */
+export const PREF_KEYS = [
+  'autonomy',
+  'autonomyDelayMs',
+  'autoProceedMaxIterations',
+  'yolo',
+  'maxIterations',
+  'chime',
+  'confirmExit',
+  'streamFleet',
+  'nextPrediction',
+  'enhanceEnabled',
+  'enhanceDelayMs',
+  'enhanceLanguage',
+  'featureMcp',
+  'featurePlugins',
+  'featureMemory',
+  'featureSkills',
+  'featureModelsRegistry',
+  'indexOnStart',
+  'contextAutoCompact',
+  'contextStrategy',
+  'contextMode',
+  'tokenSavingTier',
+  'maxConcurrent',
+  'titleAnimation',
+  'logLevel',
+  'auditLevel',
+  'hqEnabled',
+  'hqUrl',
+  'hqToken',
+  'hqRawContent',
+  'tgConfigured',
+  'tgSessionEnd',
+  'tgDelegate',
+  'tgLongToolMs',
+  'reasoningMode',
+  'reasoningEffort',
+  'reasoningPreserve',
+  'cacheTtl',
+  'fallbackModels',
+  'fallbackProfiles',
+  'favoriteModels',
+  'favoriteModelsOnly',
+  'modelMatrix',
+  'fallbackAuto',
+] as const;
+
+export interface PrefHelperDeps {
+  globalConfigPath: string;
+  vault: SecretVault;
+  logger: { warn(msg: string): void };
+}
+
+/**
+ * Snapshot the pref keys currently present on `contextMeta`. Structural
+ * typing on the meta keeps this decoupled from the `Context` class.
+ */
+export function prefSnapshot(contextMeta: Record<string, unknown>): Record<string, unknown> {
+  const snapshot: Record<string, unknown> = {};
+  for (const k of PREF_KEYS) {
+    if (k in contextMeta) snapshot[k] = contextMeta[k];
+  }
+  return snapshot;
+}
+
+/** Mutable holder for the serialized-config-write lock. The helpers update
+ *  `lock` in place so callers keep a stable reference across writes (the
+ *  lock is non-poisoning: a failed write resolves the chain but logs).
+ *
+ *  We use a holder object rather than returning the new lock because
+ *  TypeScript flattens `Promise<Promise<void>>` into `Promise<void>`,
+ *  which would make `await helper(...)` yield `void` instead of the new
+ *  lock value. */
+export interface ConfigWriteLockHolder {
+  lock: Promise<void>;
+}
+
+/**
+ * Unified global config mutation: read → decrypt → mutate → encrypt → write.
+ * All config writes MUST go through this helper so encryption is always
+ * preserved and writes are serialized behind the holder's `lock`.
+ *
+ * Mutates `holder.lock` in place to the new (non-poisoning) chain value.
+ */
+export async function updateGlobalConfig(
+  deps: PrefHelperDeps,
+  holder: ConfigWriteLockHolder,
+  mutate: (config: Record<string, unknown>) => void,
+  errorLabel: string,
+): Promise<void> {
+  const { globalConfigPath, vault, logger } = deps;
+  const write = async (): Promise<void> => {
+    let raw: string;
+    try {
+      raw = await fs.readFile(globalConfigPath, 'utf8');
+    } catch {
+      raw = '{}';
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      logger.warn(`${errorLabel}: refusing to overwrite corrupt config at ${globalConfigPath}`);
+      return;
+    }
+    const decrypted = decryptConfigSecrets(parsed, vault) as Record<string, unknown>;
+    mutate(decrypted);
+    const encrypted = encryptConfigSecrets(decrypted, vault);
+    await atomicWrite(globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+  };
+  const next = holder.lock.then(write);
+  holder.lock = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  try {
+    await next;
+  } catch (err) {
+    logger.warn(`${errorLabel}: failed to persist to config: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Persist pref changes into the global config.json — the SAME keys the TUI
+ * settings picker writes — so a toggle made in the browser survives restarts
+ * and is visible to the CLI/TUI (and vice versa on next boot). Best-effort
+ * and serialized behind the holder's `lock`; failures log but never break
+ * the WS reply.
+ */
+export async function persistPrefsToConfig(
+  deps: PrefHelperDeps,
+  holder: ConfigWriteLockHolder,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  return updateGlobalConfig(deps, holder, (decrypted) => {
+    const autonomyCfg = (decrypted.autonomy as Record<string, unknown>) ?? {};
+    let autonomyTouched = false;
+    const setAutonomy = (key: string, val: unknown): void => {
+      autonomyCfg[key] = val;
+      autonomyTouched = true;
+    };
+    if (
+      typeof payload['autonomy'] === 'string' &&
+      ['off', 'suggest', 'auto'].includes(payload['autonomy'])
+    ) {
+      setAutonomy('defaultMode', payload['autonomy']);
+    }
+    if (typeof payload['autonomyDelayMs'] === 'number')
+      setAutonomy('autoProceedDelayMs', payload['autonomyDelayMs']);
+    if (typeof payload['autoProceedMaxIterations'] === 'number')
+      setAutonomy('autoProceedMaxIterations', payload['autoProceedMaxIterations']);
+    if (typeof payload['yolo'] === 'boolean') setAutonomy('yolo', payload['yolo']);
+    if (typeof payload['chime'] === 'boolean') setAutonomy('chime', payload['chime']);
+    if (typeof payload['confirmExit'] === 'boolean')
+      setAutonomy('confirmExit', payload['confirmExit']);
+    if (typeof payload['streamFleet'] === 'boolean')
+      setAutonomy('streamFleet', payload['streamFleet']);
+    if (typeof payload['enhanceEnabled'] === 'boolean')
+      setAutonomy('enhance', payload['enhanceEnabled']);
+    if (typeof payload['enhanceDelayMs'] === 'number')
+      setAutonomy('enhanceDelayMs', payload['enhanceDelayMs']);
+    if (typeof payload['enhanceLanguage'] === 'string')
+      setAutonomy('enhanceLanguage', payload['enhanceLanguage']);
+    if (autonomyTouched) decrypted.autonomy = autonomyCfg;
+
+    if (typeof payload['nextPrediction'] === 'boolean')
+      decrypted.nextPrediction = payload['nextPrediction'];
+
+    // Global fallback model chain (top-level config). Read live by the leader's
+    // fallback extension each turn (effectiveFallbackChain), so it takes effect
+    // without a restart.
+    if (Array.isArray(payload['fallbackModels']))
+      decrypted.fallbackModels = payload['fallbackModels'];
+    if (
+      payload['fallbackProfiles'] &&
+      typeof payload['fallbackProfiles'] === 'object' &&
+      !Array.isArray(payload['fallbackProfiles'])
+    ) {
+      decrypted.fallbackProfiles = payload['fallbackProfiles'] as Record<string, string[]>;
+    }
+    if (Array.isArray(payload['favoriteModels']))
+      decrypted.favoriteModels = payload['favoriteModels'];
+    if (typeof payload['favoriteModelsOnly'] === 'boolean')
+      decrypted.favoriteModelsOnly = payload['favoriteModelsOnly'];
+    if (
+      payload['modelMatrix'] &&
+      typeof payload['modelMatrix'] === 'object' &&
+      !Array.isArray(payload['modelMatrix'])
+    ) {
+      decrypted.modelMatrix = payload['modelMatrix'] as typeof decrypted.modelMatrix;
+    }
+    if (typeof payload['fallbackAuto'] === 'boolean')
+      decrypted.fallbackAuto = payload['fallbackAuto'];
+
+    const FEATURE_MAP: Record<string, string> = {
+      featureMcp: 'mcp',
+      featurePlugins: 'plugins',
+      featureMemory: 'memory',
+      featureSkills: 'skills',
+      featureModelsRegistry: 'modelsRegistry',
+    };
+    for (const [prefKey, cfgKey] of Object.entries(FEATURE_MAP)) {
+      if (typeof payload[prefKey] === 'boolean') {
+        const feats = (decrypted.features as Record<string, unknown>) ?? {};
+        feats[cfgKey] = payload[prefKey];
+        decrypted.features = feats;
+      }
+    }
+
+    if (
+      typeof payload['contextAutoCompact'] === 'boolean' ||
+      typeof payload['contextStrategy'] === 'string' ||
+      typeof payload['contextMode'] === 'string'
+    ) {
+      const ctxCfg = (decrypted.context as Record<string, unknown>) ?? {};
+      if (typeof payload['contextAutoCompact'] === 'boolean')
+        ctxCfg.autoCompact = payload['contextAutoCompact'];
+      if (typeof payload['contextStrategy'] === 'string')
+        ctxCfg.strategy = payload['contextStrategy'];
+      if (typeof payload['contextMode'] === 'string') ctxCfg.mode = payload['contextMode'];
+      decrypted.context = ctxCfg;
+    }
+    if (typeof payload['tokenSavingTier'] === 'string') {
+      const featsCfg = (decrypted.features as Record<string, unknown>) ?? {};
+      featsCfg.tokenSavingMode = payload['tokenSavingTier'];
+      decrypted.features = featsCfg;
+    }
+    if (typeof payload['maxConcurrent'] === 'number') {
+      decrypted.maxConcurrent = payload['maxConcurrent'];
+    }
+    if (typeof payload['titleAnimation'] === 'boolean') {
+      const autoCfg = (decrypted.autonomy as Record<string, unknown>) ?? {};
+      autoCfg.terminalTitleAnimation = payload['titleAnimation'];
+      decrypted.autonomy = autoCfg;
+    }
+    if (typeof payload['logLevel'] === 'string') {
+      const logCfg = (decrypted.log as Record<string, unknown>) ?? {};
+      logCfg.level = payload['logLevel'];
+      decrypted.log = logCfg;
+    }
+    if (typeof payload['auditLevel'] === 'string') {
+      const sessionCfg = (decrypted.session as Record<string, unknown>) ?? {};
+      sessionCfg.auditLevel = payload['auditLevel'];
+      decrypted.session = sessionCfg;
+    }
+    if (typeof payload['indexOnStart'] === 'boolean') {
+      const indexingCfg = (decrypted.indexing as Record<string, unknown>) ?? {};
+      indexingCfg.onSessionStart = payload['indexOnStart'];
+      decrypted.indexing = indexingCfg;
+    }
+    if (typeof payload['maxIterations'] === 'number') {
+      const toolsCfg = (decrypted.tools as Record<string, unknown>) ?? {};
+      toolsCfg.maxIterations = payload['maxIterations'];
+      decrypted.tools = toolsCfg;
+    }
+
+    const hqTouched =
+      typeof payload['hqEnabled'] === 'boolean' ||
+      typeof payload['hqUrl'] === 'string' ||
+      typeof payload['hqToken'] === 'string' ||
+      typeof payload['hqRawContent'] === 'boolean';
+    if (hqTouched) {
+      const hqCfg = (decrypted.hq as Record<string, unknown>) ?? {};
+      if (typeof payload['hqEnabled'] === 'boolean') hqCfg.enabled = payload['hqEnabled'];
+      if (typeof payload['hqUrl'] === 'string') hqCfg.url = payload['hqUrl'];
+      if (typeof payload['hqToken'] === 'string') hqCfg.token = payload['hqToken'];
+      if (typeof payload['hqRawContent'] === 'boolean')
+        hqCfg.rawContent = payload['hqRawContent'];
+      decrypted.hq = hqCfg;
+    }
+
+    const tgTouched =
+      typeof payload['tgSessionEnd'] === 'boolean' ||
+      typeof payload['tgDelegate'] === 'boolean' ||
+      typeof payload['tgLongToolMs'] === 'number';
+    if (tgTouched) {
+      const ext = (decrypted.extensions as Record<string, Record<string, unknown>>) ?? {};
+      const tg = ext['telegram'] ?? {};
+      if (typeof payload['tgSessionEnd'] === 'boolean') {
+        tg['notifyOnSessionEnd'] = payload['tgSessionEnd'];
+      }
+      if (typeof payload['tgDelegate'] === 'boolean') {
+        tg['notifyOnDelegate'] = payload['tgDelegate'];
+      }
+      if (typeof payload['tgLongToolMs'] === 'number') {
+        tg['longToolThresholdMs'] = payload['tgLongToolMs'];
+      }
+      ext['telegram'] = tg;
+      decrypted.extensions = ext;
+    }
+
+    // Reasoning / cache runtime controls → Config.modelRuntime
+    const modelRuntimeTouched =
+      typeof payload['reasoningMode'] === 'string' ||
+      typeof payload['reasoningEffort'] === 'string' ||
+      typeof payload['reasoningPreserve'] === 'boolean' ||
+      typeof payload['cacheTtl'] === 'string';
+    if (modelRuntimeTouched) {
+      const mr = (decrypted.modelRuntime as Record<string, unknown>) ?? {};
+      const reasoning = (mr.reasoning as Record<string, unknown>) ?? {};
+      if (typeof payload['reasoningMode'] === 'string') reasoning.mode = payload['reasoningMode'];
+      if (typeof payload['reasoningEffort'] === 'string')
+        reasoning.effort = payload['reasoningEffort'];
+      if (typeof payload['reasoningPreserve'] === 'boolean')
+        reasoning.preserve = payload['reasoningPreserve'];
+      mr.reasoning = reasoning;
+      if (typeof payload['cacheTtl'] === 'string' && payload['cacheTtl'] !== 'default') {
+        mr.cache = { ttl: payload['cacheTtl'] };
+      } else if (payload['cacheTtl'] === 'default') {
+        delete mr.cache;
+      }
+      decrypted.modelRuntime = mr;
+    }
+  }, 'prefs');
+}

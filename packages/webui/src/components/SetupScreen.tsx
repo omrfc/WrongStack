@@ -22,7 +22,7 @@ import {
   Zap,
   Shield,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
@@ -567,6 +567,8 @@ export function SetupScreen() {
   const [popularProviders, setPopularProviders] = useState<PopularProvider[]>(DEFAULT_POPULAR_PROVIDERS);
   const [isLoadingPopular, setIsLoadingPopular] = useState(false);
   const [popularRefreshNonce, setPopularRefreshNonce] = useState(0);
+  const [previousProviderCount, setPreviousProviderCount] = useState(0);
+  const isInitialLoadRef = useRef(true);
 
   // Fetch popular providers from remote JSON on mount and when refresh is triggered
   useEffect(() => {
@@ -590,6 +592,19 @@ export function SetupScreen() {
               source: localUrl,
             },
           });
+
+          // Show toast notification on refresh (not initial load)
+          if (!isInitialLoadRef.current) {
+            const diff = local.length - previousProviderCount;
+            if (diff > 0) {
+              toast.success(`${local.length} providers loaded (${diff} new)`);
+            } else if (diff < 0) {
+              toast.success(`${local.length} providers loaded (${Math.abs(diff)} removed)`);
+            } else {
+              toast.success(`${local.length} providers loaded (no changes)`);
+            }
+            setPreviousProviderCount(local.length);
+          }
           return;
         }
         // Local didn't work, try GitHub
@@ -607,6 +622,19 @@ export function SetupScreen() {
               source: githubUrl,
             },
           });
+
+          // Show toast notification on refresh (not initial load)
+          if (!isInitialLoadRef.current) {
+            const diff = result.length - previousProviderCount;
+            if (diff > 0) {
+              toast.success(`${result.length} providers loaded (${diff} new)`);
+            } else if (diff < 0) {
+              toast.success(`${result.length} providers loaded (${Math.abs(diff)} removed)`);
+            } else {
+              toast.success(`${result.length} providers loaded (no changes)`);
+            }
+            setPreviousProviderCount(result.length);
+          }
         }
       })
       .catch(() => {
@@ -619,8 +647,16 @@ export function SetupScreen() {
             githubUrl,
           },
         });
+
+        // Show error toast on refresh (not initial load)
+        if (!isInitialLoadRef.current) {
+          toast.error('Failed to refresh providers');
+        }
       })
-      .finally(() => setIsLoadingPopular(false));
+      .finally(() => {
+        setIsLoadingPopular(false);
+        isInitialLoadRef.current = false;
+      });
 
     return () => controller.abort();
   }, [popularRefreshNonce]);

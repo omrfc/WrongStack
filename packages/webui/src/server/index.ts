@@ -83,8 +83,17 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { type AutoPhaseRouteHandlers, handleAutoPhaseRoute } from './autophase-routes.js';
 import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
 import { bootConfig, patchConfig } from './boot.js';
+import { createAgentServices } from './backend-services.js';
+import { seedContextMeta } from './context-meta.js';
 import { createConnectionHandler } from './connection-handler.js';
 import { createMessageDispatcher } from './message-dispatcher.js';
+import {
+  persistPrefsToConfig as persistPrefsToConfigImpl,
+  prefSnapshot as prefSnapshotImpl,
+  updateGlobalConfig as updateGlobalConfigImpl,
+  type PrefHelperDeps,
+  type ConfigWriteLockHolder,
+} from './pref-helpers.js';
 import { resolveSetupProvider } from './setup-screen.js';
 import { type BrainRouteHandlers, handleBrainRoute } from './brain-routes.js';
 import { setupWebUICodebaseIndexing } from './codebase-indexing.js';
@@ -503,49 +512,20 @@ export async function startWebUI(
 
   // Serialize concurrent config writes to prevent races between model.switch
   // and key.add/key.update handlers that both read-modify-write globalConfigPath.
-  let configWriteLock: Promise<void> = Promise.resolve();
+  // Held in a mutable object so the pref-helpers (./pref-helpers.ts, Phase 1c)
+  // can update the lock in place — TypeScript flattens Promise<Promise<void>>,
+  // so we can't return the new lock from an async helper.
+  const configWriteLock: ConfigWriteLockHolder = { lock: Promise.resolve() };
 
-  /**
-   * Unified global config mutation: read → decrypt → mutate → encrypt → write.
-   * All config writes MUST go through this helper so encryption is always
-   * preserved and writes are serialized behind configWriteLock.
-   * The `mutate` callback receives the decrypted config and mutates it in place.
-   * Failures log but never break the caller (non-poisoning lock).
-   */
+  // Unified global config mutation: read → decrypt → mutate → encrypt → write,
+  // serialized behind configWriteLock. Implementation lives in
+  // ./pref-helpers.ts; this thin wrapper preserves the two-arg signature the
+  // route layer (provider routes, key handlers) expects.
+  const prefHelperDeps: PrefHelperDeps = { globalConfigPath, vault, logger };
   const updateGlobalConfig = async (
-    mutate: (config: Record<string, unknown>) => void,
+    mutate: (cfg: Record<string, unknown>) => void,
     errorLabel: string,
-  ): Promise<void> => {
-    const write = async (): Promise<void> => {
-      let raw: string;
-      try {
-        raw = await fs.readFile(globalConfigPath, 'utf8');
-      } catch {
-        raw = '{}';
-      }
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        logger.warn(`${errorLabel}: refusing to overwrite corrupt config at ${globalConfigPath}`);
-        return;
-      }
-      const decrypted = decryptConfigSecrets(parsed, vault) as Record<string, unknown>;
-      mutate(decrypted);
-      const encrypted = encryptConfigSecrets(decrypted, vault);
-      await atomicWrite(globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
-    };
-    const next = configWriteLock.then(write);
-    configWriteLock = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    try {
-      await next;
-    } catch (err) {
-      logger.warn(`${errorLabel}: failed to persist to config: ${errMessage(err)}`);
-    }
-  };
+  ): Promise<void> => updateGlobalConfigImpl(prefHelperDeps, configWriteLock, mutate, errorLabel);
 
   console.log('[WebUI] Config loaded:', config.provider ?? '(none)', '/', config.model ?? '(none)');
 
@@ -941,686 +921,68 @@ export async function startWebUI(
   // this seed the snapshot is empty and every browser shows localStorage
   // defaults (autonomy "off", etc.) regardless of what config.json says.
   // Mirrors the CLI's getSettings() mapping so TUI and WebUI agree.
-  {
-    const autonomyCfg = (config.autonomy ?? {}) as Record<string, unknown>;
-    const rawMode = autonomyCfg['defaultMode'];
-    context.meta['autonomy'] = rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
-    context.meta['autonomyDelayMs'] = (autonomyCfg['autoProceedDelayMs'] as number) ?? 45_000;
-    context.meta['autoProceedMaxIterations'] =
-      (autonomyCfg['autoProceedMaxIterations'] as number) ?? 50;
-    context.meta['yolo'] = (autonomyCfg['yolo'] as boolean) ?? config.yolo ?? false;
-    context.meta['chime'] = (autonomyCfg['chime'] as boolean) ?? false;
-    context.meta['confirmExit'] = autonomyCfg['confirmExit'] !== false;
-    context.meta['streamFleet'] = autonomyCfg['streamFleet'] !== false;
-    context.meta['enhanceEnabled'] = (autonomyCfg['enhance'] as boolean) ?? true;
-    context.meta['enhanceDelayMs'] = (autonomyCfg['enhanceDelayMs'] as number) ?? 60_000;
-    context.meta['enhanceLanguage'] = (autonomyCfg['enhanceLanguage'] as string) ?? 'original';
-    context.meta['nextPrediction'] = config.nextPrediction ?? false;
-    context.meta['fallbackModels'] = config.fallbackModels ?? [];
-    context.meta['fallbackProfiles'] = config.fallbackProfiles ?? {};
-    context.meta['favoriteModels'] = config.favoriteModels ?? [];
-    context.meta['favoriteModelsOnly'] = config.favoriteModelsOnly === true;
-    context.meta['modelMatrix'] = config.modelMatrix ?? {};
-    context.meta['fallbackAuto'] = config.fallbackAuto !== false;
-    context.meta['featureMcp'] = config.features.mcp !== false;
-    context.meta['featurePlugins'] = config.features.plugins !== false;
-    context.meta['featureMemory'] = config.features.memory !== false;
-    context.meta['featureSkills'] = config.features.skills !== false;
-    context.meta['featureModelsRegistry'] = config.features.modelsRegistry !== false;
-    context.meta['indexOnStart'] = config.indexing?.onSessionStart !== false;
-    context.meta['contextAutoCompact'] = config.context?.autoCompact !== false;
-    context.meta['contextStrategy'] = config.context?.strategy ?? 'hybrid';
-    context.meta['logLevel'] = config.log?.level ?? 'info';
-    context.meta['auditLevel'] = config.session?.auditLevel ?? 'standard';
-    context.meta['maxIterations'] = config.tools?.maxIterations ?? 500;
-    context.meta['contextMode'] = config.context?.mode ?? 'balanced';
-    {
-      const tsm = config.features?.tokenSavingMode;
-      context.meta['tokenSavingTier'] = typeof tsm === 'string' ? tsm : tsm ? 'medium' : 'off';
-    }
-    context.meta['maxConcurrent'] =
-      typeof config.maxConcurrent === 'number' ? config.maxConcurrent : 10;
-    context.meta['titleAnimation'] = autonomyCfg['terminalTitleAnimation'] !== false;
-    {
-      const mr = (config.modelRuntime ?? {}) as {
-        reasoning?: { mode?: string; effort?: string; preserve?: boolean };
-        cache?: { ttl?: string };
-      };
-      context.meta['reasoningMode'] = mr.reasoning?.mode ?? 'auto';
-      context.meta['reasoningEffort'] = mr.reasoning?.effort ?? 'high';
-      context.meta['reasoningPreserve'] = mr.reasoning?.preserve === true;
-      context.meta['cacheTtl'] = mr.cache?.ttl ?? 'default';
-    }
-    const hqConfig = (
-      config as { hq?: { enabled?: boolean; url?: string; token?: string; rawContent?: boolean } }
-    ).hq;
-    context.meta['hqEnabled'] = hqConfig?.enabled === true;
-    context.meta['hqUrl'] = hqConfig?.url ?? '';
-    context.meta['hqToken'] = hqConfig?.token ?? '';
-    context.meta['hqRawContent'] = hqConfig?.rawContent === true;
+  // (Projection lives in ./context-meta.ts — Phase 1c.)
+  seedContextMeta(config, context);
 
-    // Telegram plugin notification settings live under
-    // extensions.telegram — same path the CLI's /telegram-settings writes.
-    // Seed the meta so the SettingsPanel reflects the persisted config on
-    // first connect, before any prefs.update arrives.
-    const tgExt = (config.extensions as Record<string, Record<string, unknown>> | undefined)?.[
-      'telegram'
-    ];
-    context.meta['tgConfigured'] =
-      typeof tgExt?.['botToken'] === 'string' && tgExt['botToken'].length > 0;
-    context.meta['tgSessionEnd'] = tgExt?.['notifyOnSessionEnd'] === true;
-    context.meta['tgDelegate'] = tgExt?.['notifyOnDelegate'] !== false; // default true
-    const tgMs = tgExt?.['longToolThresholdMs'];
-    context.meta['tgLongToolMs'] = typeof tgMs === 'number' ? tgMs : 30_000;
-  }
+  // Pref keys + snapshot + persistence live in ./pref-helpers.ts (Phase 1c).
+  // Thin closures below keep the original signatures the route layer expects
+  // while threading the live configWriteLock holder.
+  const prefSnapshot = (): Record<string, unknown> => prefSnapshotImpl(context.meta);
+  const persistPrefsToConfig = async (payload: Record<string, unknown>): Promise<void> =>
+    persistPrefsToConfigImpl(prefHelperDeps, configWriteLock, payload);
 
-  /** Pref keys exposed to the settings panel via prefs.get / prefs.updated. */
-  const PREF_KEYS = [
-    'autonomy',
-    'autonomyDelayMs',
-    'autoProceedMaxIterations',
-    'yolo',
-    'maxIterations',
-    'chime',
-    'confirmExit',
-    'streamFleet',
-    'nextPrediction',
-    'enhanceEnabled',
-    'enhanceDelayMs',
-    'enhanceLanguage',
-    'featureMcp',
-    'featurePlugins',
-    'featureMemory',
-    'featureSkills',
-    'featureModelsRegistry',
-    'indexOnStart',
-    'contextAutoCompact',
-    'contextStrategy',
-    'contextMode',
-    'tokenSavingTier',
-    'maxConcurrent',
-    'titleAnimation',
-    'logLevel',
-    'auditLevel',
-    'hqEnabled',
-    'hqUrl',
-    'hqToken',
-    'hqRawContent',
-    'tgConfigured',
-    'tgSessionEnd',
-    'tgDelegate',
-    'tgLongToolMs',
-    'reasoningMode',
-    'reasoningEffort',
-    'reasoningPreserve',
-    'cacheTtl',
-    'fallbackModels',
-    'fallbackProfiles',
-    'favoriteModels',
-    'favoriteModelsOnly',
-    'modelMatrix',
-    'fallbackAuto',
-  ] as const;
 
-  const prefSnapshot = (): Record<string, unknown> => {
-    const snapshot: Record<string, unknown> = {};
-    for (const k of PREF_KEYS) {
-      if (k in context.meta) snapshot[k] = context.meta[k];
-    }
-    return snapshot;
-  };
-
-  /**
-   * Persist pref changes into the global config.json — the SAME keys the
-   * TUI settings picker writes — so a toggle made in the browser survives
-   * restarts and is visible to the CLI/TUI (and vice versa on next boot).
-   * Best-effort and serialized behind configWriteLock (shared with the
-   * provider/key handlers); failures log but never break the WS reply.
-   */
-  const persistPrefsToConfig = async (payload: Record<string, unknown>): Promise<void> => {
-    await updateGlobalConfig((decrypted) => {
-      const autonomyCfg = (decrypted.autonomy as Record<string, unknown>) ?? {};
-      let autonomyTouched = false;
-      const setAutonomy = (key: string, val: unknown): void => {
-        autonomyCfg[key] = val;
-        autonomyTouched = true;
-      };
-      if (
-        typeof payload['autonomy'] === 'string' &&
-        ['off', 'suggest', 'auto'].includes(payload['autonomy'])
-      ) {
-        setAutonomy('defaultMode', payload['autonomy']);
-      }
-      if (typeof payload['autonomyDelayMs'] === 'number')
-        setAutonomy('autoProceedDelayMs', payload['autonomyDelayMs']);
-      if (typeof payload['autoProceedMaxIterations'] === 'number')
-        setAutonomy('autoProceedMaxIterations', payload['autoProceedMaxIterations']);
-      if (typeof payload['yolo'] === 'boolean') setAutonomy('yolo', payload['yolo']);
-      if (typeof payload['chime'] === 'boolean') setAutonomy('chime', payload['chime']);
-      if (typeof payload['confirmExit'] === 'boolean')
-        setAutonomy('confirmExit', payload['confirmExit']);
-      if (typeof payload['streamFleet'] === 'boolean')
-        setAutonomy('streamFleet', payload['streamFleet']);
-      if (typeof payload['enhanceEnabled'] === 'boolean')
-        setAutonomy('enhance', payload['enhanceEnabled']);
-      if (typeof payload['enhanceDelayMs'] === 'number')
-        setAutonomy('enhanceDelayMs', payload['enhanceDelayMs']);
-      if (typeof payload['enhanceLanguage'] === 'string')
-        setAutonomy('enhanceLanguage', payload['enhanceLanguage']);
-      if (autonomyTouched) decrypted.autonomy = autonomyCfg;
-
-      if (typeof payload['nextPrediction'] === 'boolean')
-        decrypted.nextPrediction = payload['nextPrediction'];
-
-      // Global fallback model chain (top-level config). Read live by the leader's
-      // fallback extension each turn (effectiveFallbackChain), so it takes effect
-      // without a restart.
-      if (Array.isArray(payload['fallbackModels']))
-        decrypted.fallbackModels = payload['fallbackModels'];
-      if (
-        payload['fallbackProfiles'] &&
-        typeof payload['fallbackProfiles'] === 'object' &&
-        !Array.isArray(payload['fallbackProfiles'])
-      ) {
-        decrypted.fallbackProfiles = payload['fallbackProfiles'] as Record<string, string[]>;
-      }
-      if (Array.isArray(payload['favoriteModels']))
-        decrypted.favoriteModels = payload['favoriteModels'];
-      if (typeof payload['favoriteModelsOnly'] === 'boolean')
-        decrypted.favoriteModelsOnly = payload['favoriteModelsOnly'];
-      if (
-        payload['modelMatrix'] &&
-        typeof payload['modelMatrix'] === 'object' &&
-        !Array.isArray(payload['modelMatrix'])
-      ) {
-        decrypted.modelMatrix = payload['modelMatrix'] as typeof decrypted.modelMatrix;
-      }
-      if (typeof payload['fallbackAuto'] === 'boolean')
-        decrypted.fallbackAuto = payload['fallbackAuto'];
-
-      const FEATURE_MAP: Record<string, string> = {
-        featureMcp: 'mcp',
-        featurePlugins: 'plugins',
-        featureMemory: 'memory',
-        featureSkills: 'skills',
-        featureModelsRegistry: 'modelsRegistry',
-      };
-      for (const [prefKey, cfgKey] of Object.entries(FEATURE_MAP)) {
-        if (typeof payload[prefKey] === 'boolean') {
-          const feats = (decrypted.features as Record<string, unknown>) ?? {};
-          feats[cfgKey] = payload[prefKey];
-          decrypted.features = feats;
-        }
-      }
-
-      if (
-        typeof payload['contextAutoCompact'] === 'boolean' ||
-        typeof payload['contextStrategy'] === 'string' ||
-        typeof payload['contextMode'] === 'string'
-      ) {
-        const ctxCfg = (decrypted.context as Record<string, unknown>) ?? {};
-        if (typeof payload['contextAutoCompact'] === 'boolean')
-          ctxCfg.autoCompact = payload['contextAutoCompact'];
-        if (typeof payload['contextStrategy'] === 'string')
-          ctxCfg.strategy = payload['contextStrategy'];
-        if (typeof payload['contextMode'] === 'string') ctxCfg.mode = payload['contextMode'];
-        decrypted.context = ctxCfg;
-      }
-      if (typeof payload['tokenSavingTier'] === 'string') {
-        const featsCfg = (decrypted.features as Record<string, unknown>) ?? {};
-        featsCfg.tokenSavingMode = payload['tokenSavingTier'];
-        decrypted.features = featsCfg;
-      }
-      if (typeof payload['maxConcurrent'] === 'number') {
-        decrypted.maxConcurrent = payload['maxConcurrent'];
-      }
-      if (typeof payload['titleAnimation'] === 'boolean') {
-        const autoCfg = (decrypted.autonomy as Record<string, unknown>) ?? {};
-        autoCfg.terminalTitleAnimation = payload['titleAnimation'];
-        decrypted.autonomy = autoCfg;
-      }
-      if (typeof payload['logLevel'] === 'string') {
-        const logCfg = (decrypted.log as Record<string, unknown>) ?? {};
-        logCfg.level = payload['logLevel'];
-        decrypted.log = logCfg;
-      }
-      if (typeof payload['auditLevel'] === 'string') {
-        const sessionCfg = (decrypted.session as Record<string, unknown>) ?? {};
-        sessionCfg.auditLevel = payload['auditLevel'];
-        decrypted.session = sessionCfg;
-      }
-      if (typeof payload['indexOnStart'] === 'boolean') {
-        const indexingCfg = (decrypted.indexing as Record<string, unknown>) ?? {};
-        indexingCfg.onSessionStart = payload['indexOnStart'];
-        decrypted.indexing = indexingCfg;
-      }
-      if (typeof payload['maxIterations'] === 'number') {
-        const toolsCfg = (decrypted.tools as Record<string, unknown>) ?? {};
-        toolsCfg.maxIterations = payload['maxIterations'];
-        decrypted.tools = toolsCfg;
-      }
-
-      const hqTouched =
-        typeof payload['hqEnabled'] === 'boolean' ||
-        typeof payload['hqUrl'] === 'string' ||
-        typeof payload['hqToken'] === 'string' ||
-        typeof payload['hqRawContent'] === 'boolean';
-      if (hqTouched) {
-        const hqCfg = (decrypted.hq as Record<string, unknown>) ?? {};
-        if (typeof payload['hqEnabled'] === 'boolean') hqCfg.enabled = payload['hqEnabled'];
-        if (typeof payload['hqUrl'] === 'string') hqCfg.url = payload['hqUrl'];
-        if (typeof payload['hqToken'] === 'string') hqCfg.token = payload['hqToken'];
-        if (typeof payload['hqRawContent'] === 'boolean')
-          hqCfg.rawContent = payload['hqRawContent'];
-        decrypted.hq = hqCfg;
-      }
-
-      const tgTouched =
-        typeof payload['tgSessionEnd'] === 'boolean' ||
-        typeof payload['tgDelegate'] === 'boolean' ||
-        typeof payload['tgLongToolMs'] === 'number';
-      if (tgTouched) {
-        const ext = (decrypted.extensions as Record<string, Record<string, unknown>>) ?? {};
-        const tg = ext['telegram'] ?? {};
-        if (typeof payload['tgSessionEnd'] === 'boolean') {
-          tg['notifyOnSessionEnd'] = payload['tgSessionEnd'];
-        }
-        if (typeof payload['tgDelegate'] === 'boolean') {
-          tg['notifyOnDelegate'] = payload['tgDelegate'];
-        }
-        if (typeof payload['tgLongToolMs'] === 'number') {
-          tg['longToolThresholdMs'] = payload['tgLongToolMs'];
-        }
-        ext['telegram'] = tg;
-        decrypted.extensions = ext;
-      }
-
-      // Reasoning / cache runtime controls → Config.modelRuntime
-      const modelRuntimeTouched =
-        typeof payload['reasoningMode'] === 'string' ||
-        typeof payload['reasoningEffort'] === 'string' ||
-        typeof payload['reasoningPreserve'] === 'boolean' ||
-        typeof payload['cacheTtl'] === 'string';
-      if (modelRuntimeTouched) {
-        const mr = (decrypted.modelRuntime as Record<string, unknown>) ?? {};
-        const reasoning = (mr.reasoning as Record<string, unknown>) ?? {};
-        if (typeof payload['reasoningMode'] === 'string') reasoning.mode = payload['reasoningMode'];
-        if (typeof payload['reasoningEffort'] === 'string')
-          reasoning.effort = payload['reasoningEffort'];
-        if (typeof payload['reasoningPreserve'] === 'boolean')
-          reasoning.preserve = payload['reasoningPreserve'];
-        mr.reasoning = reasoning;
-        if (typeof payload['cacheTtl'] === 'string' && payload['cacheTtl'] !== 'default') {
-          mr.cache = { ttl: payload['cacheTtl'] };
-        } else if (payload['cacheTtl'] === 'default') {
-          delete mr.cache;
-        }
-        decrypted.modelRuntime = mr;
-      }
-    }, 'prefs');
-  };
-
-  // Pipelines
-  const pipelines = createDefaultPipelines();
-  // Collaboration bus — process-singleton pause/resume signal. The
-  // middleware below hooks it into the toolCall pipeline so a
-  // `controller` participant can halt the agent before the next tool
-  // call (Phase 3 of idea #13). The same bus instance is shared with
-  // the CollaborationWebSocketHandler so client pause/resume requests
-  // are routed to the kernel.
-  const collabBus = new CollaborationBus();
-  // prepend (not use) — the pause check must run first, before any
-  // permission/retry middleware that would otherwise proceed.
-  const collabPause = collabPauseMiddleware(collabBus, { logger });
-  Object.defineProperty(collabPause, 'name', { value: 'collab-pause' });
-  pipelines.toolCall.prepend(collabPause as never);
-  // Phase 4 — collab-inject. Installed AFTER collab-pause so the
-  // controller can pause + inject before the next tool runs. The
-  // middleware checks the bus's injection queue and splices a
-  // synthetic tool_result when a controller has queued one for
-  // the current toolUse.id.
-  const collabInject = collabInjectMiddleware(collabBus, { logger });
-  Object.defineProperty(collabInject, 'name', { value: 'collab-inject' });
-  pipelines.toolCall.prepend(collabInject as never);
-  // Design Studio — per-turn UI-intent detection + kit-menu injection, so the
-  // WebUI host gets the same auto-trigger behavior as the CLI/TUI.
-  installDesignStudioMiddleware({ pipelines, ctx: context });
-  const codebaseIndexing = setupWebUICodebaseIndexing({
+  // ── Post-context agent services (pipelines, compaction, agent, Brain,
+  // per-feature WS handlers) — built in ./backend-services.ts (Phase 1c).
+  // The factory returns everything startWebUI needs to wire routes + the
+  // dispatcher; the updateAutoCompactionMaxContext closure captures the
+  // live autoCompactor / modelCapabilitiesRef it built.
+  const agentServices = await createAgentServices({
     config,
-    context,
-    projectRoot,
+    wpaths,
     logger,
-  });
-  // Compactor — honors config.context.strategy ('hybrid' default, lossless
-  // rules; 'intelligent'/'selective' resolve their provider from ctx at
-  // compact()-time). eliseThreshold is a TOKEN COUNT (not a fraction).
-  const compactor = createStrategyCompactor({
-    strategy: config.context?.strategy,
-    preserveK: config.context?.preserveK ?? 10,
-    eliseThreshold: config.context?.eliseThreshold ?? 2000,
-    summarizerModel: config.context?.summarizerModel,
-    llmSelector: config.context?.llmSelector,
-  });
-
-  // Auto-compaction
-  let autoCompactor: AutoCompactionMiddleware | undefined;
-  if (config.context?.autoCompact !== false) {
-    // Priority: explicit override → models.dev per-model window → family default.
-    // The catalog lookup matters for openai-compatible providers (OpenRouter,
-    // Groq, …) whose family default is 0; without it auto-compaction would be
-    // disabled even though the model has a real published window. Mirrors
-    // updateAutoCompactionMaxContext below.
-    let effectiveMaxContext = config.context?.effectiveMaxContext ?? 0;
-    if (!effectiveMaxContext) {
-      try {
-        const m = await modelsRegistry.getModel(provider.id, context.model);
-        effectiveMaxContext = m?.capabilities?.maxContext ?? 0;
-      } catch {
-        // best-effort: fall through to provider capability
-      }
-    }
-    if (!effectiveMaxContext) effectiveMaxContext = provider.capabilities.maxContext;
-    autoCompactor = new AutoCompactionMiddleware(
-      compactor,
-      effectiveMaxContext,
-      (ctx) =>
-        estimateRequestTokensCalibrated(
-          ctx.messages,
-          ctx.systemPrompt,
-          ctx.tools ?? [],
-          `${ctx.provider?.id ?? 'unknown'}/${ctx.model}`,
-        ).total,
-      {
-        warn: initialContextPolicy.thresholds.warn,
-        soft: initialContextPolicy.thresholds.soft,
-        hard: initialContextPolicy.thresholds.hard,
-      },
-      {
-        events,
-        aggressiveOn: initialContextPolicy.aggressiveOn,
-        policyProvider: (ctx) => {
-          const policy = ctx.meta['contextWindowPolicy'];
-          return policy && typeof policy === 'object'
-            ? (policy as ReturnType<typeof resolveContextWindowPolicy>)
-            : initialContextPolicy;
-        },
-      },
-    );
-    pipelines.contextWindow.use({ name: 'AutoCompaction', handler: autoCompactor.handler() });
-  }
-
-  /** Refresh AutoCompactionMiddleware denominator when the active model changes. */
-  async function updateAutoCompactionMaxContext(newProvider: Provider): Promise<void> {
-    await modelsRegistry.refresh().catch((err) => {
-      logger.warn(
-        `models.dev refresh failed for ${newProvider.id}/${context.model}: ${toErrorMessage(err)}; using cached catalog`,
-      );
-    });
-    let newMaxContext = config.context?.effectiveMaxContext ?? newProvider.capabilities.maxContext;
-    try {
-      const m = await modelsRegistry.getModel(newProvider.id, context.model);
-      newMaxContext = m?.capabilities?.maxContext ?? newMaxContext;
-    } catch {
-      // best-effort: use provider capability
-    }
-    newProvider.capabilities.maxContext = newMaxContext;
-    modelCapabilitiesRef.current =
-      newMaxContext > 0
-        ? {
-            maxContextTokens: newMaxContext,
-            supportsTools: !!newProvider.capabilities.tools,
-            supportsVision: !!newProvider.capabilities.vision,
-            supportsReasoning: !!newProvider.capabilities.reasoning,
-          }
-        : undefined;
-    if (newMaxContext > 0) {
-      context.meta['effectiveMaxContext'] = newMaxContext;
-      autoCompactor?.setMaxContext(newMaxContext);
-      autoCompactor?.setEnabled(config.context?.autoCompact !== false);
-    } else {
-      delete context.meta['effectiveMaxContext'];
-      autoCompactor?.setEnabled(false);
-    }
-    events.emit('ctx.max_context', {
-      providerId: newProvider.id,
-      modelId: context.model,
-      maxContext: newMaxContext,
-    });
-  }
-
-  // Agent
-  const secretScrubber = container.resolve(TOKENS.SecretScrubber);
-  const renderer = container.has(TOKENS.Renderer) ? container.resolve(TOKENS.Renderer) : undefined;
-  const permissionPolicy = container.resolve(TOKENS.PermissionPolicy);
-  const toolExecutor = new ToolExecutor(toolRegistry, {
-    permissionPolicy,
-    secretScrubber,
-    renderer,
-    events,
-    confirmAwaiter: undefined,
-    iterationTimeoutMs: config.tools?.iterationTimeoutMs ?? DEFAULT_TOOLS_CONFIG.iterationTimeoutMs,
-    perIterationOutputCapBytes:
-      config.tools?.perIterationOutputCapBytes ?? DEFAULT_TOOLS_CONFIG.perIterationOutputCapBytes,
-    tracer: undefined,
-  });
-
-  // Mailbox bridge discovery — fire-and-forget. Now that the lock
-  // primitives live in `@wrongstack/core` (see commit after
-  // `f1720ed0`), the webui can read the per-project
-  // `.mailbox-bridge.lock` directly without a cli dependency. We
-  // don't spawn a bridge here — the cli surface (REPL/TUI) does that
-  // via the auto-bootstrap wiring; we just join whatever's running
-  // for this project and stash the handle on ctx.meta so downstream
-  // HTTP surfaces (mailbox routes, external-agent proxy) can find it.
-  //
-  // Best-effort: a failed discovery never blocks the WebUI from
-  // starting. If no bridge is running, we log a breadcrumb so the
-  // user knows to start `wstack mailbox serve` (or any CLI surface)
-  // to enable external-agent connectivity.
-  const webuiLogger = container.resolve(TOKENS.Logger);
-  void discoverMailboxBridgeForWebui({
     projectRoot,
-    config,
-    logger: webuiLogger,
-    ctx: context,
-  }).catch((err: unknown) => {
-    webuiLogger.warn('mailbox bridge discovery threw on webui boot', {
-      err: err instanceof Error ? err.message : String(err),
-    });
-  });
-
-  const agent = new Agent({
+    workingDir,
+    context,
+    provider,
     container,
-    tools: toolRegistry,
-    providers: providerRegistry,
+    toolRegistry,
+    providerRegistry,
+    modelsRegistry,
     events,
-    pipelines,
-    context,
-    maxIterations: config.tools?.maxIterations ?? DEFAULT_TOOLS_CONFIG.maxIterations,
-    iterationTimeoutMs: config.tools?.iterationTimeoutMs ?? DEFAULT_TOOLS_CONFIG.iterationTimeoutMs,
-    executionStrategy:
-      config.tools?.defaultExecutionStrategy ?? DEFAULT_TOOLS_CONFIG.defaultExecutionStrategy,
-    perIterationOutputCapBytes:
-      config.tools?.perIterationOutputCapBytes ?? DEFAULT_TOOLS_CONFIG.perIterationOutputCapBytes,
-    confirmAwaiter: undefined,
-    toolExecutor,
-  });
-  console.log('[WebUI] Agent initialized');
-
-  // ── Brain — policy → LLM tiered decision layer ─────────────────────────
-  // Same positioning as the CLI: one Brain per process at
-  // TOKENS.BrainArbiter. The WebUI has no human-escalation prompt yet, so
-  // the chain stops at the LLM tier — `ask_human` decisions surface to the
-  // browser as `brain.event` WS messages and the caller's fallback applies.
-  const brainSettings: { maxAutoRisk: BrainAutoRisk } = { maxAutoRisk: 'medium' };
-  // Lazy wrapper so the LLM tier always sees the LIVE provider/model —
-  // both are swapped at runtime via the settings panel.
-  const autonomousBrain: BrainArbiter = {
-    decide: (request) =>
-      createAutonomyBrain({
-        provider,
-        model: context.model,
-        maxAutoRisk: 'all', // the tiered ceiling gates risk — keep inner permissive
-      }).decide(request),
-  };
-  const brain = new ObservableBrainArbiter(
-    createTieredBrainArbiter({
-      policy: new DefaultBrainArbiter(),
-      autonomous: autonomousBrain,
-      getMaxAutoRisk: () => brainSettings.maxAutoRisk,
-    }),
-    events,
-  );
-  container.bind(TOKENS.BrainArbiter, () => brain);
-
-  // Self-activation: watch for tool-failure streaks / error storms and
-  // steer this session's leader via the shared project mailbox. `session`
-  // is mutable (swapped on /new and resume) — read it at send time so the
-  // steer always targets the LIVE session's leader identity.
-  const brainMailbox = new GlobalMailbox(wpaths.projectDir, events);
-  const brainMonitor = new BrainMonitor({
-    events,
-    brain,
-    intervene: async ({ subject, body }) => {
-      const tag = mailboxSessionTag(session.id);
-      await brainMailbox.send({
-        from: `brain@${tag}`,
-        to: `leader@${tag}`,
-        type: 'steer',
-        subject,
-        body,
-        priority: 'high',
-      });
-    },
-  });
-  brainMonitor.start();
-  console.log('[WebUI] Brain initialized (tiered policy → LLM, monitor active)');
-
-  // Decision log for the /brain command — last 20 decisions, newest last.
-  const brainLog: Array<{ at: number; kind: string; question: string; outcome: string }> = [];
-  const pushBrainLog = (entry: (typeof brainLog)[number]) => {
-    brainLog.push(entry);
-    if (brainLog.length > 20) brainLog.shift();
-  };
-  events.on('brain.decision_answered', (e) =>
-    pushBrainLog({
-      at: e.at,
-      kind: 'answered',
-      question: e.request.question,
-      outcome: e.decision.type === 'answer' ? (e.decision.optionId ?? e.decision.text) : '',
-    }),
-  );
-  events.on('brain.decision_ask_human', (e) =>
-    pushBrainLog({
-      at: e.at,
-      kind: 'ask_human',
-      question: e.request.question,
-      outcome: 'needs human judgement',
-    }),
-  );
-  events.on('brain.decision_denied', (e) =>
-    pushBrainLog({
-      at: e.at,
-      kind: 'denied',
-      question: e.request.question,
-      outcome: e.decision.type === 'deny' ? e.decision.reason : '',
-    }),
-  );
-  events.on('brain.intervention', (e) =>
-    pushBrainLog({
-      at: e.at,
-      kind: 'intervention',
-      question: e.request.question,
-      outcome: e.intervened ? 'steered the agent' : 'observed (no action)',
-    }),
-  );
-
-  // AutoPhase handler — manages AutoPhaseRunner lifecycle via WS messages.
-  // Stored under the per-project autophase dir (not the shared SDD task-graphs).
-  const autoPhaseHandler = new AutoPhaseWebSocketHandler(
-    agent,
-    context,
-    logger,
-    wpaths.projectAutophase,
-    events,
-    projectRoot,
-  );
-
-  // Specs handler — FORGE-style browser of persisted SDD specs + their task
-  // graphs (dependency board). Reads the shared per-project SDD stores.
-  const specsHandler = new SpecsWebSocketHandler(wpaths.projectSpecs, wpaths.projectTaskGraphs);
-
-  // SDD live board handler — observes a CLI-owned multi-agent run. Standalone
-  // server is a different process from the run, so it polls the on-disk
-  // snapshot (no shared EventBus) and steers via the control file.
-  const sddBoardHandler = new SddBoardWebSocketHandler(wpaths.projectSddBoards, undefined, {
-    projectRoot,
-    paths: {
-      projectSpecs: wpaths.projectSpecs,
-      projectTaskGraphs: wpaths.projectTaskGraphs,
-      projectSddSession: wpaths.projectSddSession,
-      projectSddBoards: wpaths.projectSddBoards,
-    },
-  });
-
-  // One-shot orphan sweep on boot: remove worktrees/branches a crashed or
-  // abandoned SDD run left behind so they never accumulate across sessions.
-  // Liveness-guarded (skips if a run is live, incl. one in another process) and
-  // best-effort — fire-and-forget so it never delays server startup.
-  void cleanupStaleSddWorktrees({ projectRoot, boardsDir: wpaths.projectSddBoards }).catch(
-    () => undefined,
-  );
-
-  // SDD wizard — the interactive "New SDD Project" flow (goal → Q&A → spec →
-  // task graph → start run). The standalone server runs the real fleet in-process
-  // via the runtime light subagent factory (no @wrongstack/cli MultiAgentHost —
-  // layer rule). The interview turns + run subagents share one factory.
-  const sddWizardHandler = new SddWizardWebSocketHandler(
-    buildSddWizardDeps({
-      agent,
-      events,
-      projectRoot,
-      brain,
-      subagentFactory: makeLightSubagentFactory({
-        container,
-        providerRegistry,
-        toolRegistry,
-        session,
-        projectRoot,
-      }),
-      paths: {
-        projectSpecs: wpaths.projectSpecs,
-        projectTaskGraphs: wpaths.projectTaskGraphs,
-        projectSddBoards: wpaths.projectSddBoards,
-        projectDir: wpaths.projectDir,
-      },
-    }),
-  );
-
-  // Worktree handler — subscribes to the shared EventBus `worktree.*` events
-  // and streams live swim-lane / DAG state to connected clients. The management
-  // deps add a disk-orphan scan + guarded "clean orphans" control.
-  const worktreeHandler = new WorktreeWebSocketHandler(events, logger, {
-    projectRoot,
-    boardsDir: wpaths.projectSddBoards,
-  });
-
-  // Integrated terminal handler — per-client node-pty sessions backing the
-  // WebUI terminal panel. New terminals open in the live working directory.
-  const terminalHandler = new TerminalWebSocketHandler(() => workingDir, logger);
-
-  // Collaboration handler — Phase 1 of idea #13. Lets a second client
-  // (e.g. a senior dev) join an active agent run as a read-only
-  // observer and watch a live mirror of kernel events. Annotated and
-  // controller roles land in Phase 2/3. The session reader enables
-  // replay-on-join for late observers.
-  const collabHandler = new CollaborationWebSocketHandler(
-    events,
-    logger,
+    mcpRegistry,
+    memoryStore,
+    modeStore,
+    customModeStore,
+    skillLoader,
+    skillInstaller,
+    tokenCounter,
+    pipelines: createDefaultPipelines(),
+    modelCapabilitiesRef,
+    sessionGetter: () => session,
     sessionReader,
     annotationsStore,
-    collabBus,
-  );
+  });
+  const {
+    compactor,
+    autoCompactor,
+    agent,
+    permissionPolicy,
+    pipelines,
+    brain,
+    brainSettings,
+    brainLog,
+    brainMonitor,
+    codebaseIndexing,
+    autoPhaseHandler,
+    specsHandler,
+    sddBoardHandler,
+    sddWizardHandler,
+    worktreeHandler,
+    terminalHandler,
+    collabHandler,
+    updateAutoCompactionMaxContext,
+  } = agentServices;
 
   // Helper: build the rich session.start payload from current runtime state.
   // Centralised so initial connect, post-/new, and post-model.switch all
@@ -1983,9 +1345,9 @@ export async function startWebUI(
       modeId = next;
     },
     getModelCapabilities: () => modelCapabilitiesRef.current,
-    getConfigWriteLock: () => configWriteLock,
+    getConfigWriteLock: () => configWriteLock.lock,
     setConfigWriteLock: (next) => {
-      configWriteLock = next;
+      configWriteLock.lock = next;
     },
     abortRunLock: () => {
       const ctrl = runLockControl.get();
