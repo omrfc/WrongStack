@@ -726,21 +726,31 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       // The coordinator tracks goals, tasks, knowledge, and consensus across all
       // active sessions in the same project. Initialized lazily when the Director
       // becomes available so we have access to director.fleet for cross-session events.
+      // Gated by features.autonomousCoordination (default true) — users who only use
+      // the simpler Director/Fleet path can disable it to shrink the coordination
+      // surface at runtime.
       const coordinatorEvents = new Set<(event: CoordinatorEvent) => void>();
       state.coordinatorEvents = coordinatorEvents;
-      const coordinatorSetup = setupAutonomousCoordinator({
-        state,
-        events,
-        context,
-        wpaths,
-        mailbox,
-        director,
-        getDirector,
-        coordinatorController,
-        onCoordinatorStopSetter: (fn) => {
-          deps.onCoordinatorStop = fn ?? undefined;
-        },
-      });
+      const autonomousCoordinationEnabled =
+        config.features.autonomousCoordination !== false;
+      const coordinatorSetup = autonomousCoordinationEnabled
+        ? setupAutonomousCoordinator({
+            state,
+            events,
+            context,
+            wpaths,
+            mailbox,
+            director,
+            getDirector,
+            coordinatorController,
+            onCoordinatorStopSetter: (fn) => {
+              deps.onCoordinatorStop = fn ?? undefined;
+            },
+          })
+        : {
+            ensure: () => null,
+            cleanup: () => undefined,
+          };
       const ensureAutonomousCoordinator = coordinatorSetup.ensure;
       const offDirectorSpawned = coordinatorSetup.cleanup;
 

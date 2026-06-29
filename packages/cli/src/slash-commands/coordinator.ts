@@ -41,6 +41,18 @@ export function buildCoordinatorCommand(opts: SlashCommandContext): SlashCommand
       const [verbRaw, ...rest] = trimmed.split(/\s+/);
       const verb = (verbRaw ?? '').toLowerCase();
 
+      // When the autonomous-coordination feature is disabled, none of the
+      // controller callbacks are wired. Surface that clearly instead of
+      // silently no-op-ing.
+      const isDisabled = !getStart() && !getStatus();
+      if (isDisabled && verb !== '') {
+        return {
+          message:
+            'Autonomous coordination is disabled (features.autonomousCoordination: false).\n' +
+            'Enable it in config to use the AutonomousCoordinator.',
+        };
+      }
+
       if (verb === 'start') {
         const goal = rest.join(' ').trim();
         if (!goal) {

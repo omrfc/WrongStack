@@ -520,6 +520,16 @@ export interface FeaturesConfig {
    */
   tokenSavingMode?: TokenSavingTier | boolean | undefined;
   /**
+   * Enable the autonomous-coordination toolkit (AutonomousCoordinator +
+   * KnowledgeGraph + ConsensusProtocol + TaskAuctioneer + ChangeManager +
+   * TaskDAG). When true (the default), the TUI boot wires the coordinator
+   * lazily on the first Director spawn. When false, the coordinator is
+   * never constructed and the `/coordinator` slash command reports it
+   * unavailable — reducing the coordination domain's runtime surface for
+   * users who only use the simpler Director/Fleet path.
+   */
+  autonomousCoordination?: boolean | undefined;
+  /**
    * Allow tools to read/write paths outside the project root directory.
    * When true (default), tools can access any path on the filesystem.
    * When false, tools are restricted to the project root directory.
@@ -615,7 +625,7 @@ export interface LaunchConfig {
 
 /**
  * Controls how much detail is persisted to the per-session JSONL log
- * (`~/.wrongstack/projects/<hash>/sessions/<id>.jsonl`).
+ * (`~/.wrongstack/projects/<hash>/sessions/<date>/sess_<ULID>.jsonl`).
  */
 export interface SessionLoggingConfig {
   /**
