@@ -52,12 +52,17 @@
   {
     "id": "minimax",
     "name": "MiniMax",
-    "description": "Subscribe to one plan and unlock the latest models, including frontier coding capabilities, 1M ultra-long context, and native multimodality. Text, image, and speech models all share the same quota. Invite Friends, Win Together: Friends get 10% off plus Builder benefits when they subscribe, while referrers earn 10% cashback plus community perks.",
+    "description": "Subscribe to one plan and unlock the latest models, including frontier coding capabilities, 1M ultra-long context, and native multimodality. Text, image, and speech models all share the same quota.",
     "icon": "🔮",
     "color": "from-fuchsia-500/20 to-fuchsia-500/5 border-fuchsia-500/30 hover:border-fuchsia-500/50",
     "keyPlaceholder": "eyJ...",
-    "docsUrl": "https://platform.minimax.io/subscribe/token-plan?code=JrA4R9QAEn&source=link",
-    "family": "openai-compatible"
+    "docsUrl": "https://platform.minimax.io/subscribe/token-plan?code=JrA4R9QAEn\u0026source=link",
+    "family": "openai-compatible",
+    "referral": {
+      "code": "JrA4R9QAEn",
+      "reward": "Friends get 10% off + Builder benefits. Referrers earn 10% cashback + community perks.",
+      "url": "https://platform.minimax.io/subscribe/token-plan?code=JrA4R9QAEn\u0026source=link"
+    }
   },
   {
     "id": "kimi",
@@ -72,12 +77,17 @@
   {
     "id": "zai",
     "name": "Z.ai (GLM)",
-    "description": "You've been invited to join the GLM Coding Plan! Enjoy full support for Claude Code, Cline, and 20+ top coding tools — starting at just $18/month. Subscribe now and grab the limited-time deal!",
+    "description": "Full support for Claude Code, Cline, and 20+ top coding tools — starting at just $18/month.",
     "icon": "🔷",
     "color": "from-indigo-500/20 to-indigo-500/5 border-indigo-500/30 hover:border-indigo-500/50",
     "keyPlaceholder": "...",
     "docsUrl": "https://z.ai/subscribe?ic=JQZ7TPPRA6",
-    "family": "openai-compatible"
+    "family": "openai-compatible",
+    "referral": {
+      "code": "JQZ7TPPRA6",
+      "reward": "Limited-time deal for GLM Coding Plan subscription",
+      "url": "https://z.ai/subscribe?ic=JQZ7TPPRA6"
+    }
   },
   {
     "id": "opencode-go",
@@ -87,6 +97,11 @@
     "color": "from-teal-500/20 to-teal-500/5 border-teal-500/30 hover:border-teal-500/50",
     "keyPlaceholder": "oc-...",
     "docsUrl": "https://opencode.ai/go?ref=6VZAER87H4",
-    "family": "openai-compatible"
+    "family": "openai-compatible",
+    "referral": {
+      "code": "6VZAER87H4",
+      "reward": "Support the project by signing up with this referral link",
+      "url": "https://opencode.ai/go?ref=6VZAER87H4"
+    }
   }
 ]

@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  Gift,
   Globe,
   KeyRound,
   Loader2,
@@ -69,6 +70,11 @@ interface PopularProvider {
   keyPlaceholder: string;
   docsUrl?: string;
   family: string;
+  referral?: {
+    code: string;
+    reward: string;
+    url: string;
+  };
 }
 
 const DEFAULT_POPULAR_PROVIDERS: PopularProvider[] = [
@@ -263,8 +269,19 @@ function ProviderKeyCard({
                 Key saved
               </span>
             )}
+            {popular.referral && !saved && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                <Gift className="h-2.5 w-2.5" />
+                Referral
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">{popular.description}</p>
+          {popular.referral && !saved && (
+            <p className="text-[11px] text-amber-600/80 dark:text-amber-400/80 mt-1">
+              🎁 {popular.referral.reward}
+            </p>
+          )}
 
           {!saved ? (
             <div className="mt-3 space-y-2">
@@ -731,9 +748,17 @@ export function SetupScreen() {
             ) : (
               <>
                 <div className="space-y-3">
-                  <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                    Popular Providers
-                  </h2>
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                      Popular Providers
+                    </h2>
+                    {isLoadingPopular && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Updating...
+                      </span>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {popularProviders.map((p) => (
                       <ProviderKeyCard
