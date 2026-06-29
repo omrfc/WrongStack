@@ -37,6 +37,7 @@ import {
   DialogTitle,
 } from './ui/dialog';
 import { cn } from '@/lib/utils';
+import { LOCAL_PRESET_FAMILY, LOCAL_SERVER_PRESETS } from './SettingsPanel/local-presets';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -775,7 +776,33 @@ function CustomProviderSection({ onKeySaved }: { onKeySaved: (providerId: string
 
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-border/40">
-          <div className="grid grid-cols-2 gap-3 pt-3">
+          {/* Local-server quick-pick — mirrors the CLI's `wstack auth local`.
+              Click a preset to pre-fill id / family / baseUrl. */}
+          <div className="space-y-1.5 pt-3">
+            <span className="text-[11px] font-medium text-muted-foreground block">
+              Local servers — click to pre-fill
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {LOCAL_SERVER_PRESETS.map((preset) => (
+                <Button
+                  key={preset.id}
+                  type="button"
+                  size="sm"
+                  variant={providerId === preset.id ? 'default' : 'outline'}
+                  onClick={() => {
+                    setProviderId(preset.id);
+                    setFamily(LOCAL_PRESET_FAMILY);
+                    setBaseUrl(preset.defaultBaseUrl);
+                    if (preset.noAuth) setKey('');
+                  }}
+                  title={preset.hint}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
                 Provider ID *

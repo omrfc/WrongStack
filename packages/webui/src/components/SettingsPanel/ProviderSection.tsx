@@ -16,6 +16,7 @@ import type { WrongStackWebSocketClient } from '@/lib/ws-client';
 import type { WSServerMessage } from '@/types';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { LOCAL_PRESET_FAMILY, LOCAL_SERVER_PRESETS } from './local-presets';
 import { OAuthLoginSection } from './OAuthLoginSection';
 import { ProviderModelsPanel } from './ProviderModelsPanel';
 
@@ -152,6 +153,22 @@ export function ProviderSection({
     setNewProviderApiKey('');
     setShowAddProviderForm(false);
   }, [onAddProvider, newProviderId, newProviderFamily, newProviderBaseUrl, newProviderApiKey]);
+
+  /**
+   * Pre-fill the Add Provider form from a local-server preset (OmniRoute /
+   * Ollama / vLLM / LM Studio) — the WebUI parallel to the CLI's
+   * `wstack auth local` quick-pick. Keyless (noAuth) presets clear the key
+   * field; keyed ones leave whatever the user already typed.
+   */
+  const handlePickLocalPreset = useCallback(
+    (preset: (typeof LOCAL_SERVER_PRESETS)[number]) => {
+      setNewProviderId(preset.id);
+      setNewProviderFamily(LOCAL_PRESET_FAMILY);
+      setNewProviderBaseUrl(preset.defaultBaseUrl);
+      if (preset.noAuth) setNewProviderApiKey('');
+    },
+    [],
+  );
 
   // ── Inline catalog keying + save-time probe ──
   const [inlineKeyFor, setInlineKeyFor] = useState<string | null>(null);
@@ -447,6 +464,29 @@ export function ProviderSection({
           {showAddProviderForm && (
             <div className="p-4 border rounded-lg space-y-3 bg-muted/50">
               <h4 className="font-medium">Add Custom Provider</h4>
+
+              {/* Local-server quick-pick — mirrors the CLI's `wstack auth
+                  local`. Click a preset to pre-fill id / family / baseUrl. */}
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">
+                  Local servers — click to pre-fill:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {LOCAL_SERVER_PRESETS.map((preset) => (
+                    <Button
+                      key={preset.id}
+                      type="button"
+                      size="sm"
+                      variant={newProviderId === preset.id ? 'default' : 'outline'}
+                      onClick={() => handlePickLocalPreset(preset)}
+                      title={preset.hint}
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
               <Input
                 placeholder="Provider ID (e.g. my-llm-server)"
                 value={newProviderId}
