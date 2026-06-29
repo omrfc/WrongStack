@@ -21,7 +21,7 @@ npm i -g wrongstack && wrongstack
 
 ---
 
-WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **multi-agent Director orchestration**, **Brain-governed policy decisions**, and **collaborative debugging** — and walks you through full **Spec-Driven Development** cycles. It ships with **36 built-in tools**, **20 skills**, **8 core plugins** + **10 bundled** in `@wrongstack/plugins`, and **~110 providers** pulled live from [models.dev](https://models.dev) — no hardcoded model names, no hardcoded pricing, no hardcoded lists. Secrets are **AES-256-GCM** encrypted at rest with a per-machine key; every tool call clears a **per-tool permission policy**. Everything lives under `~/.wrongstack/` — the only thing you'd ever commit is `.wrongstack/AGENTS.md`.
+WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **multi-agent Director orchestration**, **Brain-governed policy decisions**, and **collaborative debugging** — and walks you through full **Spec-Driven Development** cycles. It ships with **36 built-in tools**, **22 skills**, **8 core plugins** + **10 bundled** in `@wrongstack/plugins`, and **~110 providers** pulled live from [models.dev](https://models.dev) — no hardcoded model names, no hardcoded pricing, no hardcoded lists. Secrets are **AES-256-GCM** encrypted at rest with a per-machine key; every tool call clears a **per-tool permission policy**. Everything lives under `~/.wrongstack/` — the only thing you'd ever commit is `.wrongstack/AGENTS.md`.
 
 ### ✨ Why it slaps
 
@@ -393,9 +393,9 @@ Four-layer observability:
 - **Plugin trust tiers + capability gating**: only first-party (`official`) plugins may register bare slash-command names; tool `wrap`/`override`/`unregister` is gated on **declared capabilities** in addition to the officiality tier, so a plugin can only mutate tools it is actually authorized for
 - Threat model and adversary trust assumptions in [`SECURITY.md`](SECURITY.md); audit findings and verification in [`security-report/`](security-report/)
 
-### Bundled skills (17)
+### Bundled skills (22)
 
-`api-design`, `audit-log`, `bug-hunter`, `docker-deploy`, `git-flow`, `multi-agent`, `node-modern`, `observability`, `prompt-engineering`, `react-modern`, `refactor-planner`, `sdd`, `security-scanner`, `skill-creator`, `tech-stack`, `testing`, `typescript-strict` — all following one structure (Overview → Rules → Patterns → Skills in scope). Discovered in order: project → user → bundled, with first-seen winning on name collisions.
+`api-design`, `audit-log`, `bug-hunter`, `chimera`, `docker-deploy`, `git-flow`, `mailbox-bridge`, `multi-agent`, `node-modern`, `observability`, `output-standards`, `prompt-engineering`, `react-modern`, `refactor-planner`, `research-web`, `sdd`, `security-scanner`, `skill-creator`, `tech-stack`, `testing`, `typescript-strict`, `wrongstack-mailbox` — all following one structure (Overview → Rules → Patterns → Skills in scope). Discovered in order: project → user → bundled, with first-seen winning on name collisions.
 
 ### Token-saving mode (`--token-saving-mode`)
 
