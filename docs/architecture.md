@@ -20,7 +20,7 @@ packages/
   plugins/      Bundled plugin library
   telegram/     Telegram bridge plugin — send messages, receive prompts, get notified
   skills/       Skill subpackages published independently
-  webui/        Vite+React web UI served by the CLI
+  webui/        Standalone Vite+React web UI (wstackui) + WS backend; also embeddable via --webui
 apps/
   wrongstack/   bin entry — runs cli/main(argv)
 ```
@@ -393,8 +393,8 @@ by the ToolExecutor. Everything is noop unless you wire a real tracer.
 
 ## Session storage
 
-JSONL files under `~/.wrongstack/projects/<hash>/sessions/<id>.jsonl`. Each
-line is one `SessionEvent`: `user_input`, `llm_request`, `llm_response`,
+JSONL files under `~/.wrongstack/projects/<hash>/sessions/<date>/sess_<ULID>.jsonl`.
+Each line is one `SessionEvent`: `user_input`, `llm_request`, `llm_response`,
 `tool_use`, `tool_result`, `compaction`, `error`, plus mode/task/agent/
 skill events.
 
@@ -425,10 +425,87 @@ it's just the assembly of defaults + the interactive shell.
 
 ## WebUI
 
-A Vite+React web UI served by the CLI via `--webui`. The CLI starts an
-HTTP server that mounts the compiled React app and wires it to the same
-EventBus and session store as the TUI, so both UIs stay consistent with
-the agent run.
+A Vite+React web UI served by the CLI via `--webui` (or standalone via the
+`wstackui` binary). The server starts an HTTP server that mounts the
+compiled React app and wires it to the same EventBus and session store as
+the CLI/TUI, so all surfaces stay consistent with the agent run.
+
+The standalone server lives in `packages/webui/src/server/` and was
+decomposed from a single ~2954-line god module (`index.ts`) into 11
+focused modules, each under 800 lines. The split preserves the package's
+public API (`exports["./server"]` → `index.ts`) and every
+`opts.services?` injection point the CLI's embedded `--webui` mode relies
+on.
+
+### Module map
+
+```
+packages/webui/src/server/
+  index.ts                 (164)  Pure re-export barrel — the public API entry
+  start-webui.ts           (777)  Server lifecycle orchestration
+  pre-context-services.ts  (359)  Pre-context registries/stores factory
+  backend-services.ts      (491)  Post-context agent services factory
+  routes.ts                (771)  Route-table construction (13 route records)
+  message-dispatcher.ts    (604)  WS message dispatch (switch(msg.type))
+  server-runtime.ts        (334)  WS/HTTP/shutdown + port resolution
+  pref-helpers.ts          (339)  Pref persistence (config.json read/write)
+  connection-handler.ts    (249)  WS connection lifecycle + F5 replay
+  setup-screen.ts          (117)  Provider resolution ladder
+  context-meta.ts          (100)  Config→context.meta projection
+```
+
+### `startWebUI` orchestration flow
+
+`startWebUI` (in `start-webui.ts`) reads as connect-the-dots — boot,
+build services in two layers, wire routes/dispatcher/connection, serve:
+
+```text
+bootConfig()
+  │
+  ├─ createPreContextServices()        ← registries, stores, session,
+  │   (pre-context-services.ts)          system prompt, provider, context
+  │
+  ├─ createAgentServices()             ← pipelines, compaction, agent,
+  │   (backend-services.ts)              Brain, per-feature WS handlers
+  │
+  ├─ buildRoutes(state, deps, cb)      ← 13 route records
+  │   (routes.ts)
+  │
+  ├─ createMessageDispatcher()         ← switch(msg.type) + runLock
+  │   (message-dispatcher.ts)
+  │
+  ├─ createConnectionHandler()         ← rate-limit, F5 replay, lifecycle
+  │   (connection-handler.ts)
+  │
+  ├─ resolvePorts() + createWsServers() ← host/port/auth, WS servers
+  │   (server-runtime.ts)
+  │
+  ├─ armEvents()                       ← once-only setupEvents bridge
+  │   (server-runtime.ts)
+  │
+  └─ startHttpServer() + registerShutdown()
+      (server-runtime.ts)
+```
+
+### Mutable state threading
+
+Several bindings are `let` in `startWebUI` because the route layer swaps
+them at runtime: `config` (model switch), `session` / `sessionStore` /
+`sessionStartedAt` (`/new`, `/resume`), `projectRoot` / `workingDir`
+(`projects.select`), `modeId` (mode switch). These are wrapped into a
+`WebuiMutableState` object (getters + setters) that `buildRoutes` reads
+live — preserving the original closure-capture semantics without the
+inline construction. The `configWriteLock` uses a `ConfigWriteLockHolder`
+object (mutated in place by `pref-helpers.ts`) because TypeScript
+flattens `Promise<Promise<void>>`.
+
+### Shared handler parity
+
+The standalone server and the CLI's embedded `--webui` server share the
+same WS protocol. `ws-handler-parity.test.ts` scans both servers' message
+dispatchers for identical `case` labels and asserts every
+`WSClientMessage` union member is handled — so a handler added to one
+but not the other fails CI loudly.
 
 ---
 
