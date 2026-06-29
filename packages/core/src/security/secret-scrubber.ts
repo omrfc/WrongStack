@@ -74,13 +74,27 @@ const PATTERNS: Pattern[] = [
     // Min 12 chars: some OAuth providers issue shorter-lived tokens (< 20
     // chars). A 12-char base64 string has ~71 bits of entropy — above the
     // threshold where random strings are unlikely to produce false matches.
-    regex: /(?:^|[^A-Za-z0-9_.~+/-])Bearer\s+[A-Za-z0-9._~+/-]{12,512}=*(?:$|[^A-Za-z0-9_.~+/-])/g,
+    // The trailing boundary is a NON-consuming lookahead: two adjacent bearer
+    // tokens sharing a single delimiter (`Bearer a… Bearer b…`) must both be
+    // redacted. A consuming trailing delimiter would eat the separator the
+    // next match needs for its leading anchor, leaking the second token.
+    regex: /(?:^|[^A-Za-z0-9_.~+/-])Bearer\s+[A-Za-z0-9._~+/-]{12,512}=*(?=$|[^A-Za-z0-9_.~+/-])/g,
   },
   {
     type: 'high_entropy_env',
     // Anchored with alternation instead of lookbehind to avoid backtracking.
     // Value bounded at 512 chars.
-    regex: /(?:^|\s)([A-Z_]{4,}(?:KEY|TOKEN|SECRET|PASSWORD|PWD))\s*[:=]\s*['"]?([A-Za-z0-9_/+=-]{20,512})['"]?(?:\s|$)/g,
+    // The trailing boundary is a NON-consuming lookahead so two secrets
+    // separated by a single delimiter (one space OR one newline, e.g.
+    // `printenv` / `.env` dumps: `API_KEY=… \n SESSION_TOKEN=…`) are BOTH
+    // redacted. A consuming trailing `\s` would swallow the separator the
+    // next match needs for its leading anchor, so every other secret would
+    // leak in plaintext.
+    // The leading delimiter is CAPTURED (group 1) and re-emitted by the
+    // replacement so the separator between adjacent secrets is preserved
+    // rather than collapsed. Capture groups are therefore: 1=leading
+    // delimiter, 2=key name, 3=value.
+    regex: /(^|\s)([A-Z_]{4,}(?:KEY|TOKEN|SECRET|PASSWORD|PWD))\s*[:=]\s*['"]?([A-Za-z0-9_/+=-]{20,512})['"]?(?=\s|$)/g,
   },
 ];
 
@@ -210,8 +224,10 @@ export class DefaultSecretScrubber implements SecretScrubber {
     );
 
     // Pass 2: high_entropy_env needs special handling — preserve the key name.
-    out = out.replace(HIGH_ENTROPY_REGEX, (_match, group1, _group2) => {
-      return `${group1}=[REDACTED:high_entropy_env]`;
+    // Groups: 1=leading delimiter (re-emitted so adjacent-secret separators
+    // aren't collapsed), 2=key name, 3=value (redacted).
+    out = out.replace(HIGH_ENTROPY_REGEX, (_match, lead, key, _value) => {
+      return `${lead}${key}=[REDACTED:high_entropy_env]`;
     });
 
     return out;

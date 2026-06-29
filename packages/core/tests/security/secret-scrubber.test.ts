@@ -62,6 +62,49 @@ describe('SecretScrubber', () => {
     expect(out).toContain('safe-text');
   });
 
+  // Adjacency regression: a consuming trailing delimiter used to eat the
+  // separator the next match needed, so every other secret leaked. The
+  // trailing boundary is now a non-consuming lookahead.
+  it('redacts two space-separated high-entropy env secrets (no plaintext leak)', () => {
+    const v1 = 'AAAAAAAAAAAAAAAAAAAA';
+    const v2 = 'BBBBBBBBBBBBBBBBBBBB';
+    const out = s.scrub(`API_KEY=${v1} SESSION_TOKEN=${v2}`);
+    expect(out).not.toContain(v1);
+    expect(out).not.toContain(v2);
+    expect(out).toBe('API_KEY=[REDACTED:high_entropy_env] SESSION_TOKEN=[REDACTED:high_entropy_env]');
+  });
+
+  it('redacts newline-separated high-entropy env secrets (printenv/.env dump shape)', () => {
+    const v1 = 'AAAAAAAAAAAAAAAAAAAA';
+    const v2 = 'BBBBBBBBBBBBBBBBBBBB';
+    const v3 = 'CCCCCCCCCCCCCCCCCCCC';
+    const out = s.scrub(`API_KEY=${v1}\nSESSION_TOKEN=${v2}\nROOT_PASSWORD=${v3}`);
+    expect(out).not.toContain(v1);
+    expect(out).not.toContain(v2);
+    expect(out).not.toContain(v3);
+    expect((out.match(/\[REDACTED:high_entropy_env\]/g) ?? []).length).toBe(3);
+    // Newline separators between the redacted lines must be preserved.
+    expect(out.split('\n')).toHaveLength(3);
+  });
+
+  it('redacts two adjacent Bearer tokens sharing a single delimiter', () => {
+    const t1 = 'tokentokentoken1';
+    const t2 = 'tokentokentoken2';
+    const out = s.scrub(`Bearer ${t1} Bearer ${t2}`);
+    expect(out).not.toContain(t1);
+    expect(out).not.toContain(t2);
+    expect((out.match(/\[REDACTED:bearer_token\]/g) ?? []).length).toBe(2);
+  });
+
+  it('still redacts a single high-entropy env secret with surrounding text', () => {
+    // Guard against the lookahead over-relaxing the boundary.
+    const v = 'abcdef1234567890abcdef';
+    const out = s.scrub(`prefix MY_API_KEY=${v} suffix`);
+    expect(out).not.toContain(v);
+    expect(out).toContain('[REDACTED:high_entropy_env]');
+    expect(out).toContain('suffix');
+  });
+
   // AI/ML provider key patterns
   it('redacts HuggingFace tokens', () => {
     // HuggingFace tokens: hf_ followed by exactly 34 alphanumeric chars
