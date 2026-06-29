@@ -70,7 +70,11 @@ export function buildRecoveryStrategies(opts?: {
       label: 'downgrade_model',
       async attempt(err, ctx) {
         if (!(err instanceof ProviderError)) return null;
-        if (err.status !== 429 && err.status !== 529 && err.status < 500) return null;
+        // 429 is intentionally NOT handled here: the rate_limit_backoff
+        // strategy above always returns a decision for 429, so this strategy
+        // is never reached for it. Downgrade applies to overload (529) and
+        // generic 5xx server errors only.
+        if (err.status !== 529 && err.status < 500) return null;
 
         const registry = opts?.modelsRegistry;
         if (!registry) return null;
@@ -100,8 +104,15 @@ export function buildRecoveryStrategies(opts?: {
 
           if (candidates.length === 0) return null;
 
+          // Pick the cheapest candidate. Treat a missing input cost as
+          // +Infinity (most expensive) — matching the filter above, which
+          // already excludes undefined-cost models — so the sentinel stays
+          // consistent if the filter is ever loosened.
           const fallback = candidates.reduce((prev, curr) =>
-            (curr.cost?.input ?? 0) < (prev.cost?.input ?? 0) ? curr : prev,
+            (curr.cost?.input ?? Number.POSITIVE_INFINITY) <
+            (prev.cost?.input ?? Number.POSITIVE_INFINITY)
+              ? curr
+              : prev,
           );
 
           return {

@@ -147,6 +147,40 @@ describe('recovery strategies', () => {
     expect(elapsed).toBeGreaterThanOrEqual(1000);
   });
 
+  it('downgrades on 529 (overloaded), not just 5xx', async () => {
+    const modelsRegistry = {
+      getProvider: vi.fn(async () => ({
+        id: 'openai',
+        family: 'openai',
+        models: [
+          { id: 'gpt-4', cost: { input: 30 }, tool_call: true, modalities: { input: ['text'] } },
+          { id: 'gpt-3.5', cost: { input: 1 }, tool_call: true, modalities: { input: ['text'] } },
+        ],
+      })),
+      getModel: vi.fn(async (_p: string, m: string) => ({
+        id: m,
+        cost: { input: 30 },
+        capabilities: { tools: true, vision: false },
+      })),
+    } as never as ModelsRegistry;
+    const eh = new DefaultErrorHandler(buildRecoveryStrategies({ modelsRegistry }));
+    const res = await eh.recover(provErr('overloaded', 529), makeCtx());
+    expect(res).toEqual({ action: 'retry', reason: 'model_downgrade', model: 'gpt-3.5' });
+  });
+
+  it('429 backs off and never reaches downgrade_model even with a registry', { timeout: 10_000 }, async () => {
+    // rate_limit_backoff returns first for 429, so downgrade_model (which no
+    // longer lists 429 in its guard) is never consulted. getProvider must not
+    // be called.
+    const getProvider = vi.fn(async () => ({ id: 'openai', models: [] }));
+    const modelsRegistry = { getProvider, getModel: vi.fn() } as never as ModelsRegistry;
+    const eh = new DefaultErrorHandler(buildRecoveryStrategies({ modelsRegistry }));
+    const err = new ProviderError('rate limited', 429, true, 'test', { body: { retryAfterMs: 10 } });
+    const res = await eh.recover(err, makeCtx());
+    expect(res).toEqual({ action: 'retry', reason: 'rate_limit_backoff' });
+    expect(getProvider).not.toHaveBeenCalled();
+  });
+
   it('downgrade_model picks cheapest compatible fallback on 500', async () => {
     const modelsRegistry = {
       getProvider: vi.fn(async () => ({
