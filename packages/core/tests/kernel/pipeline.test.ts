@@ -178,9 +178,49 @@ describe('Pipeline', () => {
       });
       p.setErrorHandler(() => 'swallow');
       // a runs (+1), b throws and is swallowed → run returns the value
-      // flowing into b. c never executes — error boundary skips one layer.
+      // flowing into b. c (downstream of b) never executes — the crashed
+      // layer and everything below it are short-circuited.
       expect(await p.run(0)).toBe(1);
       expect(calls).toEqual(['a', 'b']);
+    });
+
+    it('after swallow, upstream middleware resumes its post-next() work while downstream is skipped', async () => {
+      // Pins the full swallow semantics the docs describe: the crashed
+      // middleware and everything downstream of it are skipped, but an
+      // UPSTREAM middleware paused at `await next()` resumes normally and
+      // observes the swallowed (pre-crash) value flowing back up.
+      const calls: string[] = [];
+      const p = new Pipeline<number>();
+      p.use({
+        name: 'upstream',
+        handler: async (v, next) => {
+          calls.push('upstream:before');
+          const out = await next(v + 1); // descends into 'crash'
+          calls.push(`upstream:after(${out})`); // must still run after swallow
+          return out + 100;
+        },
+      });
+      p.use({
+        name: 'crash',
+        handler: async () => {
+          calls.push('crash');
+          throw new Error('boom');
+        },
+      });
+      p.use({
+        name: 'downstream',
+        handler: async (v, next) => {
+          calls.push('downstream'); // must NEVER run
+          return next(v);
+        },
+      });
+      p.setErrorHandler(() => 'swallow');
+      // run(0): upstream sees 0, passes 1 into crash; crash throws and is
+      // swallowed so `next()` resolves to 1; upstream's post-next() runs and
+      // adds 100 → 101. downstream never executes.
+      const result = await p.run(0);
+      expect(result).toBe(101);
+      expect(calls).toEqual(['upstream:before', 'crash', 'upstream:after(1)']);
     });
 
     it('swallow path emits a structured warning when a logger is set (P2 #7)', async () => {

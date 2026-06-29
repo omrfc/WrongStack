@@ -13,9 +13,13 @@ export type MiddlewareHandler<T> = (value: T, next: NextFn<T>) => Promise<T>;
  * Pipeline's error boundary to log the offender without aborting the run.
  *
  * Return `'rethrow'` to propagate the error (default for core middleware),
- * or `'swallow'` to skip past the crashing middleware and continue with the
- * value the previous one produced. Plugin middleware should usually be
- * swallowed so one bad plugin can't kill an agent run.
+ * or `'swallow'` to abort descent into the crashing middleware: its caller's
+ * `await next()` resolves with the value that was about to flow into the
+ * crashed middleware. The crashed middleware AND every middleware after it in
+ * the chain are skipped (they never run); UPSTREAM middleware, already paused
+ * at their own `await next()`, resume their post-`next()` work normally. It
+ * does NOT continue at the next sibling middleware. Plugin middleware should
+ * usually be swallowed so one bad plugin can't kill an agent run.
  */
 export type PipelineErrorPolicy = 'rethrow' | 'swallow';
 
@@ -203,12 +207,16 @@ export class Pipeline<T> {
         if (!errorHandler) throw err;
         const policy = await errorHandler({ middleware: mw.name, owner: mw.owner, err });
         if (policy === 'rethrow') throw err;
-        // Swallow: continue with the value that was about to flow into this
-        // middleware. Subsequent middleware after the crashed one is skipped
-        // — error boundary is "skip the broken layer", not "skip the rest".
+        // Swallow: resolve THIS dispatch with the value that was about to flow
+        // into the crashed middleware. Because we return instead of recursing,
+        // the crashed middleware and everything downstream of it never run; the
+        // upstream caller's `await next()` resolves with `value` and its
+        // post-next() logic continues. Net effect: the broken layer and the
+        // rest of the chain below it are short-circuited, while already-entered
+        // upstream layers unwind normally.
         // P2 #7 (before-release.md): emit a structured warning so a swallowed
         // crash is never completely silent. Plugin authors debugging a
-        // silently-skipped middleware would otherwise have no signal.
+        // short-circuited middleware would otherwise have no signal.
         this.logger?.warn('pipeline.error', {
           middleware: mw.name,
           owner: mw.owner,
