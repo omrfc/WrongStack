@@ -674,6 +674,9 @@ export class MultiAgentHost {
   private async runShadowPass(reason: string): Promise<void> {
     try {
       if (!this.director) return;
+      // Director has wound down (workComplete()) — spawning is closed. A
+      // heartbeat-scheduled shadow pass can race shutdown; bail quietly.
+      if (this.director.isWorkComplete()) return;
       if (this.shadowObservedWorkDepth > 0) {
         this.shadowQueuedProblem = this.shadowQueuedProblem
           ? `${this.shadowQueuedProblem}; ${reason}`
@@ -681,25 +684,34 @@ export class MultiAgentHost {
         return;
       }
       const liveConfig = this.deps.configStore.get() as Config;
-      await this._spawnAndAssign(
-        {
-          name: 'shadow',
-          role: 'shadow-agent',
-          provider: liveConfig.provider,
-          model: liveConfig.model,
-          tools: [
-            'fleet', 'fleet', 'fleet',
-            'mailbox', 'mail_inbox', 'mail_send',
-            'terminate_subagent',
-          ],
-        },
-        buildShadowAgentTaskDescription(reason),
-        {
-          internalTask: true,
-          stopShadowAfterTask: true,
-          shadowIntervalMs: this.shadowHeartbeatIntervalMs,
-        },
-      );
+      try {
+        await this._spawnAndAssign(
+          {
+            name: 'shadow',
+            role: 'shadow-agent',
+            provider: liveConfig.provider,
+            model: liveConfig.model,
+            tools: [
+              'fleet', 'fleet', 'fleet',
+              'mailbox', 'mail_inbox', 'mail_send',
+              'terminate_subagent',
+            ],
+          },
+          buildShadowAgentTaskDescription(reason),
+          {
+            internalTask: true,
+            stopShadowAfterTask: true,
+            shadowIntervalMs: this.shadowHeartbeatIntervalMs,
+          },
+        );
+      } catch (err) {
+        // A FleetSpawnBudgetError after workComplete() is an expected
+        // shutdown race for an internal monitoring spawn — never fatal.
+        // Re-throw anything else.
+        if ((err as { name?: string } | null)?.name !== 'FleetSpawnBudgetError') {
+          throw err;
+        }
+      }
     } finally {
       this.shadowPassInFlight = false;
       if (this.shadowObservedWorkDepth === 0 && this.shadowQueuedProblem) {
