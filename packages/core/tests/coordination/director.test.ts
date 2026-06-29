@@ -411,11 +411,8 @@ describe('Director orchestration', () => {
       'assign_task',
       'await_tasks',
       'collab_debug',
+      'fleet',
       'fleet_emit',
-      'fleet_health',
-      'fleet_session',
-      'fleet_status',
-      'fleet_usage',
       'roll_up',
       'spawn_subagent',
       'terminate_all',
@@ -426,7 +423,7 @@ describe('Director orchestration', () => {
     const spawn = tools.find((t) => t.name === 'spawn_subagent')!;
     const assign = tools.find((t) => t.name === 'assign_task')!;
     const awaitTasks = tools.find((t) => t.name === 'await_tasks')!;
-    const usage = tools.find((t) => t.name === 'fleet_usage')!;
+    const usage = tools.find((t) => t.name === 'fleet')!;
 
     // Spawn from roster.
     const spawnRes = (await spawn.execute({ role: 'researcher' }, null as never, {
@@ -453,8 +450,8 @@ describe('Director orchestration', () => {
     })) as { results: Array<{ status: string }> };
     expect(awaitRes.results[0].status).toBe('success');
 
-    // fleet_usage should show one subagent with non-zero token usage.
-    const usageRes = (await usage.execute({}, null as never, {
+    // fleet action:usage should show one subagent with non-zero token usage.
+    const usageRes = (await usage.execute({ action: 'usage' }, null as never, {
       signal: new AbortController().signal,
     })) as { total: { input: number } };
     expect(usageRes.total.input).toBeGreaterThan(0);
@@ -715,11 +712,8 @@ describe('Director orchestration', () => {
       'assign_task',
       'await_tasks',
       'collab_debug',
+      'fleet',
       'fleet_emit',
-      'fleet_health',
-      'fleet_session',
-      'fleet_status',
-      'fleet_usage',
       'roll_up',
       'spawn_subagent',
       'terminate_all',
