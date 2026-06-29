@@ -139,7 +139,10 @@ interface InvertedIndex {
   mtimeMs: number;
 }
 
-function buildInvertedIndex(entries: MemoryEntry[]): InvertedIndex {
+// Exported for the perf microbenchmark (tests/perf/memory-search.bench.ts),
+// which exercises the O(1) exact-lookup fast path against a large vocabulary.
+// Not part of the public API surface — internal to memory search.
+export function buildInvertedIndex(entries: MemoryEntry[]): InvertedIndex {
   const wordMap = new Map<string, number[]>();
   const tagMap = new Map<string, number[]>();
   const indexed: IndexedEntry[] = new Array(entries.length);
@@ -174,7 +177,8 @@ function buildInvertedIndex(entries: MemoryEntry[]): InvertedIndex {
  */
 const MIN_SUBSTRING_NEEDLE_LEN = 3;
 
-function searchIndex(
+// Exported alongside buildInvertedIndex for the perf microbenchmark.
+export function searchIndex(
   index: InvertedIndex,
   query: string,
   limit?: number,

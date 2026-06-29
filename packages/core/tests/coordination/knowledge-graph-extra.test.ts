@@ -68,6 +68,38 @@ describe('knowledge-graph — extra coverage', () => {
     expect(snap.subs).toBe(1);
   });
 
+  it('index-routed getAll preserves creation order even after an update', async () => {
+    // Three goals added in order g1, g2, g3.
+    const g1 = await kg.add({ type: 'goal', title: 'g1', description: '', status: 'pending', priority: 'medium', createdBy: 'a', createdAt: 'now', tags: [] } as never);
+    const g2 = await kg.add({ type: 'goal', title: 'g2', description: '', status: 'pending', priority: 'medium', createdBy: 'a', createdAt: 'now', tags: [] } as never);
+    const g3 = await kg.add({ type: 'goal', title: 'g3', description: '', status: 'pending', priority: 'medium', createdBy: 'a', createdAt: 'now', tags: [] } as never);
+
+    // Updating g1 does a remove+re-add in the type index, moving its id to the
+    // set's tail. Without seq-sorting, index-routed getAll would return g2,g3,g1.
+    await kg.update((g1 as { id: string }).id, { title: 'g1-updated' });
+
+    const order = kg.getGoals().map((g) => g.title);
+    expect(order).toEqual(['g1-updated', 'g2', 'g3']);
+
+    // Sanity: the ids are in creation order too.
+    const ids = kg.getGoals().map((g) => (g as { id: string }).id);
+    expect(ids).toEqual([(g1 as { id: string }).id, (g2 as { id: string }).id, (g3 as { id: string }).id]);
+  });
+
+  it('type-filtered getAll narrows by type then applies secondary predicates', async () => {
+    await kg.add({ type: 'goal', title: 'goal-pending', description: '', status: 'pending', priority: 'high', createdBy: 'a', createdAt: 'now', tags: [] } as never);
+    await kg.add({ type: 'goal', title: 'goal-done', description: '', status: 'done', priority: 'high', createdBy: 'a', createdAt: 'now', tags: [] } as never);
+    await kg.add(fact()); // a non-goal node that the type index must exclude
+
+    // type:goal index has 2 ids; the status predicate keeps exactly 1.
+    const pending = kg.getAll({ type: 'goal', status: 'pending' });
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.type).toBe('goal');
+
+    // A type with no nodes yields [] without touching the full node map.
+    expect(kg.getAll({ type: 'vote' })).toEqual([]);
+  });
+
   it('load() rebuilds state from both plain and {op:"update"} log lines', async () => {
     const gdir = path.join(dir, '_knowledge_graph');
     await fs.mkdir(gdir, { recursive: true });

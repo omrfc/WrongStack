@@ -181,6 +181,22 @@ export class KnowledgeGraph {
   private readonly filePath: string;
   private readonly graphFilePath: string;
 
+  /**
+   * Stable per-node insertion sequence. `nodes` (a Map) preserves insertion
+   * order even across `update()` (Map.set on an existing key keeps its slot),
+   * but the type index's `Set<string>` does NOT — `update()` removes then
+   * re-adds a node's id, moving it to the set's tail. Index-routed queries sort
+   * by this sequence so they return nodes in creation order, matching the old
+   * `nodes.values()` scan that callers like decision-history `slice(-10)` rely on.
+   */
+  private readonly seq = new Map<string, number>();
+  private seqCounter = 0;
+
+  /** Assign a stable insertion sequence the first time a node id is seen. */
+  private _trackSeq(id: string): void {
+    if (!this.seq.has(id)) this.seq.set(id, this.seqCounter++);
+  }
+
   /** Exposed for unit-testing only: read current index contents. */
   getIndex(): ReadonlyMap<string, ReadonlySet<string>> {
     return this.index;
@@ -200,6 +216,7 @@ export class KnowledgeGraph {
   async add(node: Omit<GraphNode, 'id'>): Promise<GraphNode> {
     const full: GraphNode = { id: randomUUID(), ...node } as GraphNode;
     this.nodes.set(full.id, full);
+    this._trackSeq(full.id);
     this._addToIndex(full, this._indexKeys(full));
     await this._persist(full);
     this._deliver(full);
@@ -230,7 +247,29 @@ export class KnowledgeGraph {
   }
 
   getAll(filter?: NodeFilter): GraphNode[] {
-    return Array.from(this.nodes.values()).filter((n) => this._matches(n, filter ?? {}));
+    const f = filter ?? {};
+
+    // Fast path: a type filter (the overwhelmingly common case — every
+    // getFacts/getGoals/getChanges/getDecisions call passes one) narrows the
+    // candidate set via the `type:` index instead of scanning every node.
+    // The index set is a guaranteed superset for `type:`, so the remaining
+    // `_matches` pass applies the secondary predicates with identical
+    // semantics. Candidates are sorted by insertion sequence to preserve the
+    // creation order the old full `nodes.values()` scan produced.
+    if (f.type) {
+      const ids = this.index.get(`type:${f.type}`);
+      if (!ids || ids.size === 0) return [];
+      const out: GraphNode[] = [];
+      for (const id of ids) {
+        const node = this.nodes.get(id);
+        if (node && this._matches(node, f)) out.push(node);
+      }
+      out.sort((a, b) => (this.seq.get(a.id) ?? 0) - (this.seq.get(b.id) ?? 0));
+      return out;
+    }
+
+    // No type filter — fall back to the full insertion-ordered scan.
+    return Array.from(this.nodes.values()).filter((n) => this._matches(n, f));
   }
 
   getGoals(filter?: Partial<{ status: GoalStatus; assignee: string; priority: GoalPriority }>): GoalNode[] {
@@ -442,9 +481,11 @@ export class KnowledgeGraph {
               this._removeFromIndex(oldNode, this._indexKeys(oldNode));
             }
             this.nodes.set(parsed.node.id, parsed.node);
+            this._trackSeq(parsed.node.id);
             this._addToIndex(parsed.node, this._indexKeys(parsed.node));
           } else {
             this.nodes.set(parsed.id, parsed);
+            this._trackSeq(parsed.id);
             this._addToIndex(parsed, this._indexKeys(parsed));
           }
         } catch { /* skip malformed lines */ }

@@ -488,11 +488,13 @@ export class AutonomousBrain implements BrainArbiter {
   }
 
   private _inferDecisionType(req: BrainDecisionRequest): AutonomousDecisionType {
-    if (req.question.toLowerCase().includes('spawn')) return 'spawn';
-    if (req.question.toLowerCase().includes('approve') || req.question.toLowerCase().includes('change')) return 'approve_change';
-    if (req.question.toLowerCase().includes('retry') || req.question.toLowerCase().includes('fail')) return 'retry_task';
-    if (req.question.toLowerCase().includes('priorit')) return 'prioritize_goals';
-    if (req.question.toLowerCase().includes('decompos')) return 'decompose_goal';
+    // Lowercase once instead of up to 5× per call.
+    const q = req.question.toLowerCase();
+    if (q.includes('spawn')) return 'spawn';
+    if (q.includes('approve') || q.includes('change')) return 'approve_change';
+    if (q.includes('retry') || q.includes('fail')) return 'retry_task';
+    if (q.includes('priorit')) return 'prioritize_goals';
+    if (q.includes('decompos')) return 'decompose_goal';
     return 'assign_task';
   }
 
