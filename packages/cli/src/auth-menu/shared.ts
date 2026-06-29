@@ -120,7 +120,7 @@ export function renderTopMenu(
     renderer.write(color.dim('  No providers configured yet.\n'));
     renderer.write(
       color.dim(
-        '  Use (a) to add one from the models.dev catalog, or (c) for a custom provider.\n',
+        '  Use (a) to add one from the models.dev catalog, (l) for a local server, or (c) for a custom provider.\n',
       ),
     );
   } else {
@@ -136,6 +136,9 @@ export function renderTopMenu(
 
   renderer.write(`\n  ${color.dim('Actions:')}\n`);
   renderer.write(`    ${color.bold('a')}  Add a provider (from catalog)\n`);
+  renderer.write(
+    `    ${color.bold('l')}  Add a local server ${color.dim('(OmniRoute / Ollama / vLLM / LM Studio)')}\n`,
+  );
   renderer.write(`    ${color.bold('c')}  Add a custom provider\n`);
   renderer.write(
     `    ${color.bold('s')}  Login with OAuth ${color.dim('(ChatGPT / Claude / Copilot)')}\n`,

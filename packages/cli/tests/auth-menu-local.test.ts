@@ -256,8 +256,19 @@ describe('runAuthLocal — flag handling', () => {
 
 describe('runAuthLocal — interactive picker', () => {
   it('saves the chosen preset when the user picks a number', async () => {
-    // Pick "1" (Ollama) and submit no key (noAuth → no prompt).
+    // Pick "1" (OmniRoute, the first entry) and submit no key (noAuth → no prompt).
     const { deps, configPath } = await setupDeps({ lines: ['1'] });
+    const code = await runAuthLocal(deps, { noProbe: true });
+    expect(code).toBe(0);
+    const saved = await readSaved(configPath);
+    expect((saved['omniroute'] as { baseUrl: string }).baseUrl).toBe(
+      'http://localhost:20128/v1',
+    );
+  });
+
+  it('saves Ollama when the user picks it by id', async () => {
+    // Ollama is no longer at position 1; pick it by id (noAuth → no prompt).
+    const { deps, configPath } = await setupDeps({ lines: ['ollama'] });
     const code = await runAuthLocal(deps, { noProbe: true });
     expect(code).toBe(0);
     const saved = await readSaved(configPath);

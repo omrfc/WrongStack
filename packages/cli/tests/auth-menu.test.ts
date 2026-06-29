@@ -505,6 +505,23 @@ describe('runAuthMenu', () => {
     expect(deps.renderer.writeError).toHaveBeenCalledWith(expect.stringMatching(/Invalid family/));
   });
 
+  it('l (local server) adds a keyless local preset from the menu', async () => {
+    const { deps, configPath } = await setupDeps({
+      // l -> local-server flow; pick omniroute by id (noAuth → no key prompt,
+      // noProbe path not available here, so the health probe runs against a
+      // server that isn't up → decline save-anyway? No: provide 'n' is not
+      // needed because we pick by id then the probe fails → save-anyway prompt.
+      // Pick 'omniroute', then 'y' to save anyway after the probe fails, then 'q'.
+      scripted: { lines: ['l', 'omniroute', 'y', 'q'] },
+    });
+    const code = await runAuthMenu(deps);
+    expect(code).toBe(0);
+    const raw = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    expect(raw.providers.omniroute).toBeDefined();
+    expect(raw.providers.omniroute.family).toBe('openai-compatible');
+    expect(raw.providers.omniroute.baseUrl).toBe('http://localhost:20128/v1');
+  });
+
   it('refuses to clobber a config file with non-ENOENT read error', async () => {
     // Point globalConfigPath at a directory — reading it returns EISDIR,
     // which is not ENOENT. The mutator throws to refuse overwriting.

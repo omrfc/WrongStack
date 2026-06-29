@@ -1,6 +1,7 @@
 import { color } from '@wrongstack/core';
 import { addCustomProvider, addFromCatalog } from './add-provider.js';
 import { loadProviders } from './helpers.js';
+import { runAuthLocal } from './local.js';
 import { runOAuthLoginMenu } from './oauth-menu.js';
 import { manageProvider } from './provider-menu.js';
 import { renderTopMenu } from './shared.js';
@@ -33,6 +34,12 @@ export async function runTopMenu(deps: AuthMenuDeps): Promise<number> {
     // Add from catalog
     if (choice === 'a' || choice === 'add') {
       await addFromCatalog(deps);
+      continue;
+    }
+
+    // Add a local server (OmniRoute / Ollama / vLLM / LM Studio)
+    if (choice === 'l' || choice === 'local') {
+      await runAuthLocal(deps);
       continue;
     }
 

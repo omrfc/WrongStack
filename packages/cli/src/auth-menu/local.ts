@@ -76,6 +76,13 @@ export interface LocalLlmPresetEntry {
  */
 export const LOCAL_LLM_PRESETS: readonly LocalLlmPresetEntry[] = [
   {
+    id: 'omniroute',
+    label: 'OmniRoute',
+    defaultBaseUrl: 'http://localhost:20128/v1',
+    noAuth: true,
+    hint: 'WrongStack local gateway — port 20128, no auth, auto-discovers models',
+  },
+  {
     id: 'ollama',
     label: 'Ollama',
     defaultBaseUrl: 'http://localhost:11434/v1',
@@ -548,7 +555,7 @@ async function pickLocalPreset(deps: AuthMenuDeps): Promise<LocalLlmPresetEntry 
 
   const answer = (
     await deps.reader.readLine(
-      `\n${color.amber('?')} Pick ${color.dim('(1-3, q to quit)')}: `,
+      `\n${color.amber('?')} Pick ${color.dim(`(1-${LOCAL_LLM_PRESETS.length}, q to quit)`)}: `,
     )
   )
     .trim()
