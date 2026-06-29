@@ -7,6 +7,14 @@
  * service construction (Phase 1c), route/dispatcher/connection wiring
  * (Phase 1b/1a), WS + HTTP server creation, and graceful shutdown.
  */
+import {
+  resolvePorts,
+  createSessionStartPayload,
+  createWsServers,
+  armEvents,
+  startHttpServer,
+  registerShutdown,
+} from './server-runtime.js';
 import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
@@ -255,59 +263,8 @@ export async function startWebUI(
   // the user already set WRONGSTACK_SHELL.
   ensureSessionShell();
 
-  const requestedWsPort = opts.wsPort ?? 3457;
-  // Bind to loopback IP by default (not the string "localhost", which on some
-  // hosts resolves to IPv6 ::1 and surprises older WS clients). Set WS_HOST or
-  // pass opts.wsHost to override (e.g. "0.0.0.0" for LAN access).
-  const wsHost = opts.wsHost ?? process.env['WEBUI_HOST'] ?? process.env['WS_HOST'] ?? '127.0.0.1';
-  const requestedHttpPort =
-    opts.httpPort ??
-    opts.webuiPort ??
-    opts.port ??
-    Number.parseInt(process.env['WEBUI_PORT'] ?? process.env['PORT'] ?? '3456', 10);
-  const publicUrl = opts.publicUrl ?? process.env['WEBUI_PUBLIC_URL'];
-  const publicWsUrl = opts.publicWsUrl ?? process.env['WEBUI_PUBLIC_WS_URL'];
-  const requireToken = opts.requireToken ?? envFlag('WEBUI_REQUIRE_TOKEN');
-
-  // Port resolution. Unless WEBUI_STRICT_PORT is set, auto-advance past any port
-  // already taken by another instance so running `wstackui` several times "just
-  // works" — the real ports are then stamped into the served HTML and the
-  // instance registry. Strict mode keeps the requested ports and lets bind fail
-  // loudly (useful behind a reverse proxy that expects fixed ports).
-  const strictPort =
-    process.env['WEBUI_STRICT_PORT'] === '1' || process.env['WEBUI_STRICT_PORT'] === 'true';
-  let wsPort = requestedWsPort;
-  let httpPort = requestedHttpPort;
-  if (!strictPort) {
-    // Resolve HTTP first, then WS excluding it, so successive instances land on
-    // tidy adjacent pairs (3456/3457, 3458/3459, …) instead of interleaving.
-    httpPort = await findFreePort(wsHost, requestedHttpPort);
-    wsPort = await findFreePort(wsHost, requestedWsPort, { exclude: new Set([httpPort]) });
-    if (httpPort !== requestedHttpPort) {
-      console.warn(
-        JSON.stringify({
-          level: 'warn',
-          event: 'webui.port_reassigned',
-          protocol: 'HTTP',
-          requested: requestedHttpPort,
-          assigned: httpPort,
-          timestamp: new Date().toISOString(),
-        }),
-      );
-    }
-    if (wsPort !== requestedWsPort) {
-      console.warn(
-        JSON.stringify({
-          level: 'warn',
-          event: 'webui.port_reassigned',
-          protocol: 'WS',
-          requested: requestedWsPort,
-          assigned: wsPort,
-          timestamp: new Date().toISOString(),
-        }),
-      );
-    }
-  }
+  const ports = await resolvePorts(opts);
+  const { wsHost, wsPort, httpPort, publicUrl, publicWsUrl, requireToken } = ports;
 
   console.log('[WebUI] Starting backend services...');
 
@@ -808,78 +765,16 @@ export async function startWebUI(
   // Centralised so initial connect, post-/new, and post-model.switch all
   // broadcast the same shape — frontend treats this as the single source of
   // truth for everything in the status bar (model, context window, project).
-  async function sessionStartPayload(): Promise<{
-    sessionId: string;
-    model: string;
-    provider: string;
-    maxContext: number;
-    /** USD per 1M input tokens (0 if unknown / free). */
-    inputCost: number;
-    /** USD per 1M output tokens. */
-    outputCost: number;
-    /** USD per 1M cache-read tokens. */
-    cacheReadCost: number;
-    projectName: string;
-    projectRoot: string;
-    cwd: string;
-    mode: string;
-    contextMode: string;
-    needsSetup?: boolean | undefined;
-  }> {
-    let maxContext = 0;
-    let inputCost = 0;
-    let outputCost = 0;
-    let cacheReadCost = 0;
-    try {
-      const m = await modelsRegistry.getModel(config.provider, config.model);
-      maxContext = m?.capabilities?.maxContext ?? 0;
-      // Fall back to the provider's raw model data from the registry when the
-      // resolved model has no maxContext (e.g. a user-defined or API-proxied
-      // model that wasn't in the models.dev catalog). DefaultModelsRegistry
-      // exposes getProvider() which gives us the model's limit.context directly.
-      if (!maxContext) {
-        try {
-          const provider = await (
-            modelsRegistry as {
-              getProvider(
-                id: string,
-              ): Promise<
-                { models: Array<{ id: string; limit?: { context?: number } }> } | undefined
-              >;
-            }
-          ).getProvider(config.provider);
-          const rawModel = provider?.models.find((mod) => mod.id === config.model);
-          maxContext = rawModel?.limit?.context ?? 0;
-        } catch {
-          /* best-effort — leave maxContext at whatever the registry set it */
-        }
-      }
-      // models.dev pricing is dollars per 1M tokens; some providers omit the
-      // field for free/unmetered plans (e.g. minimax-coding-plan) — in that
-      // case we report 0 and the cost chip just stays at $0.
-      const rates = getCostRates(m);
-      inputCost = rates.input;
-      outputCost = rates.output;
-      cacheReadCost = rates.cacheRead;
-    } catch {
-      // best-effort
-    }
-    return {
-      sessionId: session.id,
-      model: config.model,
-      provider: config.provider,
-      maxContext,
-      inputCost,
-      outputCost,
-      cacheReadCost,
-      projectName: path.basename(projectRoot) || projectRoot,
-      projectRoot,
-      cwd: workingDir,
-      mode: modeId,
-      contextMode: String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID),
-      ...(needsSetup ? { needsSetup: true } : {}),
-    };
-  }
+  const sessionStartPayload = createSessionStartPayload({
+    getConfig: () => config,
+    getSessionId: () => session.id,
+    getProjectRoot: () => projectRoot,
+    getWorkingDir: () => workingDir,
+    getModeId: () => modeId,
+    getContextMode: () => String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID),
+    getNeedsSetup: () => needsSetup,
+    modelsRegistry,
+  });
 
   // WebSocket server(s).
   //
@@ -893,204 +788,52 @@ export async function startWebUI(
   //
   // When the user explicitly sets WS_HOST (e.g. 0.0.0.0 or a LAN IP), we
   // respect that choice exactly and don't add a second listener.
-  // Generate a random WS auth token so only callers that know the token
-  // can connect. Printed to console on startup; the frontend reads it from
-  // the URL query param `?token=...`. Without a token, any client on the
-  // network can connect and send `user_message`/`key.add`/`model.switch`.
-  const wsToken = resolveAuthToken(opts.accessToken);
-  // Token is delivered through the printed first-load URL and then exchanged
-  // for an HttpOnly cookie by /ws-auth.
-  console.log('[WebUI] WS auth token ready');
-  const publicHostnames = [publicUrl, publicWsUrl]
-    .map((value) => {
-      if (!value) return undefined;
-      try {
-        return new URL(value).hostname;
-      } catch {
-        return undefined;
-      }
-    })
-    .filter((value): value is string => Boolean(value));
+  const wsResult = createWsServers(ports, opts.accessToken);
+  const { wssPrimary, wssSecondary, wsToken, clients } = wsResult;
 
-  // CSWSH guard + token auth: when the user exposes the socket beyond loopback,
-  // require the shared token; loopback connections bootstrap without one. The
-  // policy (DNS-rebinding Host guard, constant-time token compare, loopback
-  // bootstrap) lives in ./ws-auth.ts as pure functions — this closure just
-  // pulls the relevant fields off the incoming request and delegates.
-  const verifyClient = (info: {
-    origin: string;
-    secure: boolean;
-    req: import('node:http').IncomingMessage;
-  }) =>
-    verifyWsClient({
-      origin: info.origin,
-      url: info.req.url ?? '',
-      hostHeader: info.req.headers.host,
-      remoteAddress: info.req.socket.remoteAddress,
-      // C-2 fix: accept the token via the HttpOnly cookie set by
-      // `/ws-auth` (preferred) OR the URL query param (non-browser
-      // fallback). The cookie path closes the C-598 query-string
-      // exposure class.
-      cookieHeader: info.req.headers.cookie,
-      wsHost,
-      expectedToken: wsToken,
-      requireToken,
-      allowedHostnames: publicHostnames,
-      allowBrowserUrlToken: Boolean(publicWsUrl),
-    });
-  // Cap inbound frame size (8 MiB) so a single oversized message can't exhaust
-  // memory. Agent messages are small; large pastes/attachments stay well under.
-  const WS_MAX_PAYLOAD = 8 * 1024 * 1024;
-  const wssPrimary = new WebSocketServer({
-    port: wsPort,
-    host: wsHost,
-    verifyClient,
-    maxPayload: WS_MAX_PAYLOAD,
-  } as ConstructorParameters<typeof WebSocketServer>[0]);
-  const wssSecondary =
-    wsHost === '127.0.0.1'
-      ? new WebSocketServer({
-          port: wsPort,
-          host: '::1',
-          verifyClient,
-          maxPayload: WS_MAX_PAYLOAD,
-        } as ConstructorParameters<typeof WebSocketServer>[0])
-      : null;
-  const clients = new Map<WebSocket, ConnectedClient>();
-
-  // ── Subscribe to working directory changes from the CLI ──────────────
-  // When ctx.setWorkingDir() is called from the CLI (e.g. /wd, /cd, or
-  // the set_working_dir tool), update the server's workingDir reference
-  // and broadcast to all connected WebUI clients so the file explorer
-  // and the WorkingDirChip UI stay in sync.
+  // Subscribe to working directory changes from the CLI.
   context.onWorkingDirChanged((newDir) => {
     workingDir = newDir;
-    broadcast(clients, {
-      type: 'working_dir.changed',
-      payload: { cwd: newDir, projectRoot },
-    });
+    broadcast(clients, { type: 'working_dir.changed', payload: { cwd: newDir, projectRoot } });
   });
 
-  // ── Eternal-autonomy iteration broadcast (PR 4 of Phase 2) ─────────
-  // When the CLI passes `opts.subscribeEternalIteration`, hook the
-  // returned observer into a WS broadcast so every connected client
-  // gets a live stream of `JournalEntry` items as the engine ticks.
-  // The disposer is captured and invoked on shutdown() so the CLI's
-  // engine subscription is properly torn down with the webui.
+  // Eternal-autonomy iteration broadcast.
   let eternalSubscription: { dispose: () => void } | null = null;
   if (opts.subscribeEternalIteration) {
-    eternalSubscription = createEternalSubscription(
-      opts.subscribeEternalIteration,
-      broadcast,
-      () => clients,
-    );
+    eternalSubscription = createEternalSubscription(opts.subscribeEternalIteration, broadcast, () => clients);
   }
 
-  // Run-lock + pending confirms are shared between the connection handler
-  // (./connection-handler.ts) and the message dispatcher
-  // (./message-dispatcher.ts). Rate-limiting moved into the connection
-  // handler; the runLock guards concurrent agent.run() calls and is read
-  // through this control object so the dispatcher and the
-  // state.abortRunLock wiring agree.
   let _runLock: AbortController | null = null;
-  const runLockControl = {
-    get: () => _runLock,
-    set: (ctrl: AbortController | null) => {
-      _runLock = ctrl;
-    },
-  };
+  const runLockControl = { get: () => _runLock, set: (ctrl: AbortController | null) => { _runLock = ctrl; } };
 
-  console.log(
-    `[WebUI] WebSocket server running on ws://${wsHost}:${wsPort}` +
-      (wssSecondary ? ` (and ws://[::1]:${wsPort})` : ''),
-  );
-
-  // Pending permission confirmations. When the agent emits
-  // tool.confirm_needed, we store the resolve function here keyed by
-  // toolUseId. When the client sends tool.confirm_result back, we look
-  // it up and resolve — unblocking the agent loop.
   const pendingConfirms = new Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>();
 
   // Audit-level-aware session log bridge — persists tool/error/provider
   // events to the session JSONL with the same contract as the CLI. The
   // getter form resolves the CURRENT writer on every append so events
   // follow session.new / session.resume / projects.select swaps.
-  const sessionLogging = resolveSessionLoggingConfig(
-    config as never as Parameters<typeof resolveSessionLoggingConfig>[0],
-  );
-  const sessionBridge = createSessionEventBridge(
-    () => context.session ?? session,
-    sessionLogging.auditLevel,
-    { sampling: sessionLogging.sampling },
-  );
+  const sessionLogging = resolveSessionLoggingConfig(config as never as Parameters<typeof resolveSessionLoggingConfig>[0]);
+  const sessionBridge = createSessionEventBridge(() => context.session ?? session, sessionLogging.auditLevel, { sampling: sessionLogging.sampling });
 
-  let eventsArmed = false;
-  let disposeEvents: (() => void) | null = null;
-  // Captured from setupEvents so `POST /api/fleet/ping` can trigger an
-  // immediate fleet re-broadcast (push-on-write from a TUI/REPL).
-  let fleetBroadcast: (() => Promise<void>) | null = null;
-  const armOnce = (label: string): void => {
-    if (eventsArmed) return;
-    eventsArmed = true;
-    console.log(`[WebUI] Backend ready (${label})`);
-    disposeEvents = setupEvents({
-      events,
-      broadcast,
-      clients,
-      config,
-      context,
-      pendingConfirms,
-      globalConfigPath,
-      sessionBridge,
-      wpaths,
-      watcherMetrics,
-      onFleetBroadcaster: (fn) => {
-        fleetBroadcast = fn;
-      },
-    });
+  // watcherMetrics — shared by setupEvents (via armEvents) and the HTTP
+  // /debug/watcher-metrics endpoint. Defined early so armEvents can read it.
+  const watcherMetricsRef: FileWatcherMetrics = {
+    fileChangesDetected: 0,
+    filesProcessed: 0,
+    broadcastsSent: 0,
+    debounceResets: 0,
+    totalDebounceDelayMs: 0,
+    activeProjects: 0,
+    averageDebounceDelayMs: 0,
+    watcherActive: false,
   };
 
-  wssPrimary.on('listening', () => armOnce(`${wsHost}:${wsPort}`));
-  wssPrimary.on('error', (err) => {
-    console.error(
-      JSON.stringify({
-        level: 'error',
-        event: 'webui.ws_server_error',
-        host: wsHost,
-        message: toErrorMessage(err),
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  });
-
-  if (wssSecondary) {
-    wssSecondary.on('listening', () => armOnce(`::1:${wsPort}`));
-    wssSecondary.on('error', (err: NodeJS.ErrnoException) => {
-      // Best-effort secondary: if IPv6 loopback isn't available on this host
-      // (e.g. disabled in OS), just log and continue. Primary v4 is enough.
-      if (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL') {
-        console.warn(
-          JSON.stringify({
-            level: 'warn',
-            event: 'webui.ipv6_unavailable',
-            code: err.code,
-            message: err.message,
-            timestamp: new Date().toISOString(),
-          }),
-        );
-      } else {
-        console.error(
-          JSON.stringify({
-            level: 'error',
-            event: 'webui.ws_server_error',
-            host: '::1',
-            message: err.message,
-            timestamp: new Date().toISOString(),
-          }),
-        );
-      }
-    });
-  }
+  // Event arming + WS error handlers live in ./server-runtime.ts (Phase 1e).
+  let disposeEvents: (() => void) | null = null;
+  let fleetBroadcast: (() => Promise<void>) | null = null;
+  const eventArming = armEvents(wssPrimary, wssSecondary, wsHost, wsPort, {
+    events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths,
+  }, watcherMetricsRef);
 
   // ── Project manifest helpers ──────────────────────────────────────────
 
@@ -1335,103 +1078,28 @@ export async function startWebUI(
   // host (LAN exposure). Loopback binds skip the token check, mirroring
   // the WS verifyClient loopback-bootstrap policy.
 
-  // Shared metrics object for file watcher — populated by setupEvents and
-  // exposed via the /debug/watcher-metrics HTTP endpoint.
-  const watcherMetrics: FileWatcherMetrics = {
-    fileChangesDetected: 0,
-    filesProcessed: 0,
-    broadcastsSent: 0,
-    debounceResets: 0,
-    totalDebounceDelayMs: 0,
-    activeProjects: 0,
-    averageDebounceDelayMs: 0,
-    watcherActive: false,
-  };
-
-  const httpServer = createHttpServer({
-    host: wsHost,
-    distDir: path.resolve(import.meta.dirname, '../../dist'),
-    wsPort,
-    publicWsUrl,
-    globalRoot: wpaths.globalRoot,
-    apiToken: wsToken,
-    requireToken,
-    watcherMetrics,
-    onFleetPing: () => {
-      void fleetBroadcast?.();
-    },
-  });
-  // httpPort/wsPort were resolved (and possibly auto-advanced) at the top.
-  // Base dir for the running-instance registry — keep it next to the rest of
-  // the wstack home state (config.json lives here too).
-  const registryBaseDir = path.dirname(globalConfigPath);
-  httpServer.listen(httpPort, wsHost, () => {
-    const openUrl = buildWebUIAccessUrl({
-      host: wsHost,
-      port: httpPort,
-      token: wsToken,
-      publicUrl,
-    });
-    console.log(`[WebUI] HTTP server running on ${openUrl}`);
-    // Optionally pop the browser open (best-effort; the URL is always printed).
-    if (opts.open) openBrowser(openUrl);
-    // Record this instance so `wstackui --list` (and `~/.wrongstack/
-    // webui-instances.json`) show which ports are open for which project.
-    // Best-effort: a registry write failure must not affect serving.
-    void registerInstance(
-      {
-        pid: process.pid,
-        httpPort,
-        wsPort,
-        host: wsHost,
-        projectRoot,
-        projectName: path.basename(projectRoot) || projectRoot,
-        startedAt: new Date().toISOString(),
-        url: buildWebUIAccessUrl({ host: wsHost, port: httpPort, publicUrl }),
-      },
-      registryBaseDir,
-    ).catch((err) =>
-      console.warn(
-        JSON.stringify({
-          level: 'warn',
-          event: 'webui.instance_record_failed',
-          message: errMessage(err),
-          timestamp: new Date().toISOString(),
-        }),
-      ),
-    );
+  const httpServer = startHttpServer({
+    wsHost, httpPort, wsPort, wsToken, publicWsUrl, publicUrl, requireToken,
+    globalRoot: wpaths.globalRoot, globalConfigPath, projectRoot,
+    openBrowser: !!opts.open, watcherMetrics: watcherMetricsRef,
+    onFleetPing: () => { void eventArming.getFleetBroadcast()?.(); },
   });
 
-  // Graceful shutdown on SIGINT/SIGTERM — see `lifecycle.ts`. The session
-  // flush (session_end + close) is passed as a thunk so lifecycle stays
-  // decoupled from the session/tokenCounter types.
-  registerShutdownHandlers({
+  registerShutdown({
     flushSession: async () => {
-      await session.append({
-        type: 'session_end',
-        ts: new Date().toISOString(),
-        usage: tokenCounter.total(),
-      });
+      await session.append({ type: 'session_end', ts: new Date().toISOString(), usage: tokenCounter.total() });
       await session.close();
     },
     clients: () => clients.keys(),
-    servers: [httpServer, wssPrimary, wssSecondary],
-    // Drop this instance from the registry on a clean exit so the file reflects
-    // reality. Crash exits are healed by the next register()/list() prune pass.
+    servers: [httpServer, wssPrimary, ...(wssSecondary ? [wssSecondary] : [])],
     onShutdown: () => {
       credentialWatcherClose?.();
       brainMonitor.stop();
       void mcpRegistry.stopAll().catch(() => undefined);
-      if (disposeEvents) {
-        disposeEvents();
-        disposeEvents = null;
-      }
-      if (eternalSubscription) {
-        eternalSubscription.dispose();
-        eternalSubscription = null;
-      }
+      eventArming.getDispose()?.();
+      if (eternalSubscription) { eternalSubscription.dispose(); eternalSubscription = null; }
       codebaseIndexing.dispose();
-      return unregisterInstance(process.pid, registryBaseDir);
+      return unregisterInstance(process.pid, path.dirname(globalConfigPath));
     },
   });
 }
