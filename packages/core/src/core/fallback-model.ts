@@ -267,6 +267,7 @@ export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExte
           await deps.onModelSwitch?.(targetProviderId, parsed.model);
 
           deps.events.emit('provider.fallback', {
+            sessionId: ctx.session?.id,
             from,
             to: { providerId: nextProvider.id, model: parsed.model },
             status,

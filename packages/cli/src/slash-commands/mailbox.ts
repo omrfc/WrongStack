@@ -172,8 +172,11 @@ function parseTypeFlag(
     const candidate = rest[0].slice('type='.length) as MailboxMessageType;
     if (VALID.has(candidate)) {
       type = candidate;
-      rest.shift();
     }
+    // Always consume the `type=` flag — even an unknown value (which falls back
+    // to defaultType) is stripped from the body so recipients never see the
+    // literal flag text (e.g. "type=garbage").
+    rest.shift();
   }
   return { type, body: rest.join(' ') };
 }

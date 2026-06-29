@@ -70,7 +70,7 @@ describe('replaceTool ripgrep glob path (faked rg)', () => {
     cfg.versionCode = 0; // rg available
     cfg.files = [file]; // rg --files returns this path
     const result = await replaceTool.execute(
-      { pattern: 'OLD', replacement: 'NEW', files: '**/*.ts' },
+      { pattern: 'OLD', replacement: 'NEW', files: '**/*.ts', dry_run: false },
       ctx(),
       opts(),
     );
@@ -163,7 +163,7 @@ describe('replaceTool ripgrep glob path (faked rg)', () => {
     await fs.writeFile(file, 'z z z');
     cfg.versionCode = 1; // native walker
     const result = await replaceTool.execute(
-      { pattern: 'z', replacement: 'Q', files: '**/*.ts', replace_all: false },
+      { pattern: 'z', replacement: 'Q', files: '**/*.ts', replace_all: false, dry_run: false },
       ctx(),
       opts(),
     );
