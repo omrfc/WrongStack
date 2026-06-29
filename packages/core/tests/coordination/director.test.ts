@@ -701,7 +701,7 @@ describe('Director orchestration', () => {
     return { director: d, runner };
   }
 
-  it('director.tools() exposes all 14 tools including collab_debug and fleet_emit', async () => {
+  it('director.tools() exposes all 12 tools including collab_debug and fleet', async () => {
     const { director: d } = buildDirector();
     _director = d;
     const tools = d.tools();
