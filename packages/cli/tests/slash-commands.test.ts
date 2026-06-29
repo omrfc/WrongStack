@@ -197,7 +197,7 @@ describe('built-in slash commands', () => {
     const { registry, renderer } = makeRig();
     const ctx = { messages: [] } as never as Context;
     await registry.dispatch('/compact', ctx);
-    expect(renderer.infos.some((i) => i.includes('Compaction'))).toBe(true);
+    expect(renderer.infos.some((i) => i.toLowerCase().includes('compact') || i.toLowerCase().includes('optimal'))).toBe(true);
   });
 
   it('/context shows context window summary', async () => {

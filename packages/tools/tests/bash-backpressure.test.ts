@@ -1,5 +1,5 @@
 import * as os from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { bashTool } from '../src/bash.js';
 import { mkSandbox, newSignal } from './fixtures.js';
 
@@ -23,6 +23,23 @@ const isWin = os.platform() === 'win32';
  * shells expand without nested-Quote pain.
  */
 describe('bash backpressure — MAX_QUEUE_CHUNKS upper bound (P1 #3)', () => {
+  let originalShell: string | undefined;
+
+  beforeAll(() => {
+    originalShell = process.env['WRONGSTACK_SHELL'];
+    if (isWin) {
+      process.env['WRONGSTACK_SHELL'] = 'powershell';
+    }
+  });
+
+  afterAll(() => {
+    if (originalShell !== undefined) {
+      process.env['WRONGSTACK_SHELL'] = originalShell;
+    } else {
+      delete process.env['WRONGSTACK_SHELL'];
+    }
+  });
+
   // POSIX: seq 4000 | each line ~60 bytes → ~240 KB raw, far past MAX_OUTPUT.
   // Windows: a PowerShell script body. The bash tool selects PowerShell and
   // sends the script on stdin; nesting `powershell -Command ...` would make the

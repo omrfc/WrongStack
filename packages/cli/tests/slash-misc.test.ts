@@ -88,7 +88,7 @@ describe('buildCompactCommand', () => {
     const cmd = buildCompactCommand({ renderer, compactor } as never);
     const res = await cmd.run('', {} as never);
     expect(compactor.compact).toHaveBeenCalledWith({}, { aggressive: false });
-    expect(res?.message ?? '').toContain('1000 -> 600');
+    expect(res?.message ?? '').toContain('1000 → 600');
     expect(res?.message ?? '').toContain('summary: 300');
     expect(res?.message ?? '').toContain('truncate: 100');
   });
