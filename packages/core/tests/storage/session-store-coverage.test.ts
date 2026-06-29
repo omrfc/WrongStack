@@ -59,14 +59,42 @@ describe('DefaultSessionStore — observability + edge coverage', () => {
     expect(idx).toContain('compact-trigger');
   });
 
-  it('records a failure when compactIndex cannot write its temp file', async () => {
+  it('does not drop index entries when appends race a compaction (lock serialization)', async () => {
+    // Regression: appendToIndex/compactIndex now run under withFileLock, so a
+    // compaction rewrite can't overwrite a concurrently-appended entry. Fire
+    // many appends concurrently (each crosses the compaction threshold for the
+    // group) and assert every session id survives in the final index.
+    const ids = Array.from({ length: 40 }, (_, i) => `race-${i}`);
+    await Promise.all(
+      ids.map((id) =>
+        (store as never as { appendToIndex(s: unknown): Promise<void> }).appendToIndex({
+          id,
+          title: id,
+          startedAt: now(),
+          model: 'm',
+          provider: 'p',
+          tokenTotal: 0,
+        }),
+      ),
+    );
+    const list = await store.list(100);
+    const got = new Set(list.map((s) => s.id));
+    for (const id of ids) expect(got.has(id), `missing ${id}`).toBe(true);
+  });
+
+  it('records a failure when compactIndex cannot write the index', async () => {
     const indexFile = path.join(tmp, '_index.jsonl');
     await fs.writeFile(
       indexFile,
       JSON.stringify({ id: 'a', title: 't', startedAt: now(), model: 'm', provider: 'p', tokenTotal: 0 }) + '\n',
       'utf8',
     );
-    await fs.mkdir(`${indexFile}.compact.tmp`, { recursive: true });
+    // The rewrite now goes through atomicWrite (random temp suffix), so the
+    // old fixed-temp-path collision no longer forces a failure. Inject the
+    // failure at the lock-free compaction body instead — this still exercises
+    // compactIndex()'s try/catch/finally failure-emit wrapper.
+    (store as never as { compactIndexInner(): Promise<void> }).compactIndexInner = () =>
+      Promise.reject(new Error('disk full'));
     events.emit.mockClear();
     await (store as never as { compactIndex(): Promise<void> }).compactIndex();
     const writeFail = events.emit.mock.calls.find(

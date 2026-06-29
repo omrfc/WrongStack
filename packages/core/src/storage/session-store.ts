@@ -15,7 +15,7 @@ import type {
   SessionSummary,
   SessionWriter,
 } from '../types/session.js';
-import { atomicWrite, ensureDir } from '../utils/atomic-write.js';
+import { atomicWrite, ensureDir, withFileLock } from '../utils/atomic-write.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
 import { toErrorMessage } from '../utils/index.js';
 import { sessionScopedPath } from '../utils/session-scoped-path.js';
@@ -723,15 +723,29 @@ export class DefaultSessionStore implements SessionStore {
     // so it can include the traceId. Do NOT emit here to avoid duplicates.
     try {
       await ensureDir(this.dir);
-      const line = JSON.stringify(summary) + '\n';
-      await fsp.appendFile(this.indexFile, line, 'utf8');
-      this._indexCache = null;
-      this.invalidateShardManifestBySessionId(summary.id);
-      this.indexAppendCount++;
-      // Auto-compact the index periodically to remove tombstones and duplicates.
-      if (this.indexAppendCount >= DefaultSessionStore.COMPACT_EVERY) {
-        await this.compactIndex();
-        this.indexAppendCount = 0;
+      // Serialize the append (and any compaction it triggers) under the index
+      // file lock. The lock is per-FILE, so it also guards against a SECOND
+      // wstack process in the same project appending/compacting concurrently —
+      // without it, a compact() rewrite racing an append() silently drops the
+      // appended line (the source-of-truth .jsonl survives, but the listing
+      // cache loses the entry until rebuildIndex()).
+      let shouldCompact = false;
+      await withFileLock(this.indexFile, async () => {
+        const line = JSON.stringify(summary) + '\n';
+        await fsp.appendFile(this.indexFile, line, 'utf8');
+        this._indexCache = null;
+        this.invalidateShardManifestBySessionId(summary.id);
+        this.indexAppendCount++;
+        // Auto-compact periodically to remove tombstones and duplicates.
+        // compactIndexInner() is called WHILE the lock is held — it must not
+        // re-acquire it (withFileLock is not reentrant) or it would deadlock.
+        if (this.indexAppendCount >= DefaultSessionStore.COMPACT_EVERY) {
+          shouldCompact = true;
+          this.indexAppendCount = 0;
+        }
+      });
+      if (shouldCompact) {
+        await withFileLock(this.indexFile, () => this.compactIndexInner());
       }
     } catch {
       // best-effort â€” error surfaced via the storage.write event in doClose()
@@ -742,11 +756,13 @@ export class DefaultSessionStore implements SessionStore {
   private async writeTombstone(id: string): Promise<void> {
     try {
       await ensureDir(this.dir);
-      const line = JSON.stringify({ action: 'delete', id }) + '\n';
-      await fsp.appendFile(this.indexFile, line, 'utf8');
-      this._indexCache = null;
-      this.invalidateShardManifestBySessionId(id);
-      this.indexAppendCount++;
+      await withFileLock(this.indexFile, async () => {
+        const line = JSON.stringify({ action: 'delete', id }) + '\n';
+        await fsp.appendFile(this.indexFile, line, 'utf8');
+        this._indexCache = null;
+        this.invalidateShardManifestBySessionId(id);
+        this.indexAppendCount++;
+      });
     } catch {
       // best-effort
     }
@@ -754,20 +770,16 @@ export class DefaultSessionStore implements SessionStore {
 
   /**
    * Compact the index: read all entries, drop tombstones, deduplicate
-   * (keep latest per session), and rewrite. Atomic via temp+rename.
+   * (keep latest per session), and rewrite atomically. Acquires the index
+   * file lock so a concurrent append (this process or another wstack in the
+   * same project) can't be overwritten by the rewrite.
    */
   private async compactIndex(): Promise<void> {
     const t0 = Date.now();
     let outcome: 'success' | 'failure' = 'success';
     let errorMsg: string | undefined;
     try {
-      const entries = await this.readIndex();
-      if (entries.length === 0) return;
-      const tmp = `${this.indexFile}.compact.tmp`;
-      const lines = entries.map((s) => JSON.stringify(s)).join('\n') + '\n';
-      await fsp.writeFile(tmp, lines, 'utf8');
-      await fsp.rename(tmp, this.indexFile);
-      this._indexCache = null;
+      await withFileLock(this.indexFile, () => this.compactIndexInner());
     } catch (err) {
       outcome = 'failure';
       errorMsg = toErrorMessage(err);
@@ -775,6 +787,20 @@ export class DefaultSessionStore implements SessionStore {
       // Compact is internal â€” use 'session' as the session ID placeholder.
       this.emitWrite('~compact~', this.indexFile, 'compact', outcome, Date.now() - t0, undefined, errorMsg);
     }
+  }
+
+  /**
+   * Lock-free compaction body. The caller MUST already hold the index file
+   * lock (via withFileLock(this.indexFile, ...)). Uses atomicWrite for the
+   * rewrite so the temp file gets a random suffix (no collision between two
+   * compactions) and the Windows transient-EPERM rename retry.
+   */
+  private async compactIndexInner(): Promise<void> {
+    const entries = await this.readIndex();
+    if (entries.length === 0) return;
+    const lines = entries.map((s) => JSON.stringify(s)).join('\n') + '\n';
+    await atomicWrite(this.indexFile, lines, { mode: 0o600 });
+    this._indexCache = null;
   }
 
   /**
@@ -849,12 +875,16 @@ export class DefaultSessionStore implements SessionStore {
     /* v8 ignore next -- summaryFor() never rejects for a collected id (its .jsonl exists) */
     const summaries = await Promise.all(ids.map((id) => this.summaryFor(id).catch(() => null))); /* best-effort */
     const valid = summaries.filter((s): s is SessionSummary => s !== null);
-    // Atomic rewrite: write to temp, then rename.
-    const tmp = `${this.indexFile}.tmp`;
+    // Atomic rewrite under the index lock so it can't clobber a concurrent
+    // append (or be clobbered by a concurrent compaction). atomicWrite gives
+    // a random temp suffix (no collision with compactIndexInner's temp) and
+    // the Windows transient-EPERM rename retry. The expensive disk scan above
+    // runs OUTSIDE the lock to avoid holding it for the whole rebuild.
     const lines = valid.map((s) => JSON.stringify(s)).join('\n') + '\n';
-    await fsp.writeFile(tmp, lines, 'utf8');
-    await fsp.rename(tmp, this.indexFile);
-    this._indexCache = null;
+    await withFileLock(this.indexFile, async () => {
+      await atomicWrite(this.indexFile, lines, { mode: 0o600 });
+      this._indexCache = null;
+    });
     return valid.length;
   }
 
