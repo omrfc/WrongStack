@@ -54,6 +54,42 @@ describe('SecretScrubber', () => {
     expect(scrubbed).not.toContain(secret2);
   });
 
+  it('redacts a secret straddling the 64KB chunk boundary with no nearby newline', () => {
+    // The old newline-snap could only break on a newline in the back half of
+    // the chunk; a long newline-free line (base64 blob, minified log) cut a
+    // secret in half and leaked it. The forward whitespace-snap fixes this.
+    const CHUNK = 64 * 1024;
+    const secret = `ghp_${'a'.repeat(36)}`; // 40 chars, whitespace-free
+    for (const delta of [-20, -5, 0, 5]) {
+      // Pad so the secret lands right on the nominal boundary, surrounded by
+      // single spaces and otherwise newline-free filler.
+      const blob = `${'y'.repeat(CHUNK + delta)} ${secret} ${'z'.repeat(70_000)}`;
+      const out = s.scrub(blob);
+      expect(out, `delta=${delta}`).not.toContain(secret);
+      expect(out, `delta=${delta}`).toContain('[REDACTED:github_pat]');
+    }
+  });
+
+  it('redacts a high-entropy env secret straddling the chunk boundary', () => {
+    const CHUNK = 64 * 1024;
+    const v = 'A'.repeat(40);
+    const blob = `${'y'.repeat(CHUNK - 10)} MY_API_KEY=${v} ${'z'.repeat(70_000)}`;
+    const out = s.scrub(blob);
+    expect(out).not.toContain(v);
+    expect(out).toContain('[REDACTED:high_entropy_env]');
+  });
+
+  it('still redacts a secret after a >1KB whitespace-free run past the boundary', () => {
+    // No whitespace within the overlap window → the boundary falls back to the
+    // hard cut. A bounded secret can't be in that run (all are whitespace-free
+    // and ≤ ~560 chars), and a secret after the cut must still be redacted.
+    const CHUNK = 64 * 1024;
+    const secret = `ghp_${'b'.repeat(36)}`;
+    const blob = `${'y'.repeat(CHUNK + 5000)} ${secret}`;
+    const out = s.scrub(blob);
+    expect(out).not.toContain(secret);
+  });
+
   it('chunked path keeps total length roughly preserved (no truncation)', () => {
     // A long innocuous text should pass through every chunk and stay intact.
     const blob = 'safe-text\n'.repeat(8000); // ~80 KB

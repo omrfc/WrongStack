@@ -132,6 +132,21 @@ const COMBINED_REPLACEMENTS = SIMPLE_PATTERNS.map((p) => `[REDACTED:${p.type}]`)
 const SCRUB_CHUNK_BYTES = 64 * 1024;
 
 /**
+ * Overlap window used to nudge a chunk boundary onto a safe separator so a
+ * secret straddling the 64 KB cut isn't split in half (which would leave
+ * neither half matching, leaking the secret verbatim).
+ *
+ * Sized above the longest BOUNDED credential pattern: `high_entropy_env`
+ * caps its value at 512 chars (+ key name + quotes ≈ 560) and `bearer_token`
+ * at 512; every prefix-keyed pattern is far shorter. Because all of these
+ * patterns are whitespace-free, the first whitespace at/after the nominal cut
+ * is guaranteed to sit *past the end* of any such secret — so snapping the
+ * boundary forward to it keeps every bounded secret wholly inside one chunk.
+ * 1 KB gives comfortable headroom over the 560-char worst case.
+ */
+const SCRUB_OVERLAP_BYTES = 1024;
+
+/**
  * Quick pre-scan: check if the text contains any substring that MUST be
  * present for a credential pattern to match. If none are found, the text
  * is guaranteed clean — skip all regex passes (2 total: 16-pattern combined + high_entropy_env).
@@ -181,10 +196,12 @@ export class DefaultSecretScrubber implements SecretScrubber {
     // typical sessions are file paths, status messages, diffs, etc.).
     if (!hasCredentialAnchors(text)) return text;
 
-    // For oversize inputs, scrub in fixed chunks. We split on newlines
-    // where possible so secrets that span a few hundred bytes still get
-    // matched within a single chunk; only inputs above ~64 KB risk a
-    // boundary cutting a secret in half, and those are uncommon.
+    // For oversize inputs, scrub in fixed chunks to keep memory bounded.
+    // The boundary is snapped FORWARD to the next whitespace within an
+    // overlap window so a secret straddling the nominal 64 KB cut is never
+    // split in half. Every bounded credential pattern is whitespace-free, so
+    // the next whitespace at/after the cut necessarily falls past the end of
+    // any such secret — guaranteeing it stays wholly inside the current chunk.
     if (text.length <= SCRUB_CHUNK_BYTES) {
       return this.scrubOne(text);
     }
@@ -192,10 +209,24 @@ export class DefaultSecretScrubber implements SecretScrubber {
     let i = 0;
     while (i < text.length) {
       let end = Math.min(i + SCRUB_CHUNK_BYTES, text.length);
-      // Try to break on a newline near the boundary so we don't cut secrets.
       if (end < text.length) {
-        const nl = text.lastIndexOf('\n', end);
-        if (nl > i + SCRUB_CHUNK_BYTES / 2) end = nl + 1;
+        // Look for the first whitespace at/after the nominal cut, bounded by
+        // the overlap window. Extending forward (not backward) ensures any
+        // secret that began before `end` finishes before the new boundary.
+        const limit = Math.min(end + SCRUB_OVERLAP_BYTES, text.length);
+        let safe = -1;
+        for (let j = end; j < limit; j++) {
+          const ch = text.charCodeAt(j);
+          // space, \t, \n, \r
+          if (ch === 32 || ch === 9 || ch === 10 || ch === 13) {
+            safe = j;
+            break;
+          }
+        }
+        // Snap onto the whitespace if found; otherwise fall back to the hard
+        // cut (an unbroken >1 KB run with no whitespace can't be a bounded
+        // secret anyway — those are all ≤ ~560 chars and whitespace-free).
+        end = safe === -1 ? end : safe + 1;
       }
       out.push(this.scrubOne(text.slice(i, end)));
       i = end;
