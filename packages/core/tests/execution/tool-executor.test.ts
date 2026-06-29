@@ -517,6 +517,39 @@ describe('ToolExecutor', () => {
       expect(tool1.execute).toHaveBeenCalled();
       expect(tool2.execute).toHaveBeenCalled();
     });
+
+    it('enforces the per-iteration output cap CUMULATIVELY across parallel tools', async () => {
+      // Regression: budget was read by every parallel tool before any settled,
+      // so N tools each passed up to the full cap (N× the intended limit).
+      // Now the cap is applied synchronously against the live shared budget, so
+      // the combined output across all parallel tools cannot exceed the cap.
+      const big = 'x'.repeat(40_000); // each tool wants to emit ~40KB
+      const tools = ['a', 'b', 'c', 'd', 'e'].map((name) =>
+        makeTool({ name, execute: vi.fn().mockResolvedValue(big) }),
+      );
+      const cap = 50_000;
+      const executor = makeExecutor(tools, { perIterationOutputCapBytes: cap });
+      const result = await executor.executeBatch(
+        tools.map((t) => makeUse(t.name)),
+        makeCtx(),
+        'parallel',
+      );
+
+      expect(result.outputs).toHaveLength(5);
+      // Total content bytes across every tool result must be bounded by the cap
+      // (plus a small slack for enforceCap's truncation markers). Before the
+      // fix this was ~5×40KB = 200KB; the cap is 50KB.
+      const totalBytes = result.outputs.reduce((sum, o) => {
+        const c = o.result.type === 'tool_result' ? (o.result as ToolResultBlock).content : '';
+        return sum + Buffer.byteLength(typeof c === 'string' ? c : '', 'utf8');
+      }, 0);
+      // Allow generous slack for per-tool truncation markers, but it must be
+      // nowhere near the pre-fix 200KB.
+      expect(totalBytes).toBeLessThan(cap + 5_000);
+      // Budget must be fully consumed (or floored at 0), never negative.
+      expect(result.remainingBudget).toBeGreaterThanOrEqual(0);
+      expect(result.remainingBudget).toBeLessThan(cap);
+    });
   });
 
   describe('executeBatch — smart strategy', () => {

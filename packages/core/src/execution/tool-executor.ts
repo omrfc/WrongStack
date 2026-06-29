@@ -386,11 +386,18 @@ export class ToolExecutor {
         'tool.has_dangerous_capabilities': toolCapsForAudit.length > 0,
       });
       try {
-        // H2: executeTool returns the rendered block plus the exact byte
-        // count it spent against the iteration output cap. The cap was
-        // enforced inside `enforceCap`, so the spend is known without
-        // any second `Buffer.byteLength` walk.
-        let { block: result, bytes } = await this.executeTool(tool, use, ctx, budget);
+        // Split produce (async, concurrency-safe) from settle (synchronous,
+        // budget-mutating). The long tool run + serialize + scrub + spill
+        // happens here and touches no shared budget. The cap is then applied
+        // synchronously below against the LIVE budget, so parallel tools
+        // settling in sequence share one cumulative cap instead of each
+        // reading the same stale starting budget (which let N parallel tools
+        // pass N× the cap). Pass the current budget only as a spill-threshold
+        // hint, not as the authoritative cap.
+        const producedText = await this.produceToolOutput(tool, use, ctx, budget);
+        // ── Synchronous settle: no `await` between reading `budget` and
+        //    writing it back, so two parallel tools can't interleave here.
+        let { block: result, bytes } = this.settleToolOutput(tool, use, producedText, budget);
         budget -= bytes;
         // PostToolUse hooks: observe the result and optionally append
         // context (e.g. a linter note) that the model sees alongside the
@@ -544,6 +551,27 @@ export class ToolExecutor {
     ctx: Context,
     budget: number,
   ): Promise<{ block: ToolResultBlock; bytes: number }> {
+    const text = await this.produceToolOutput(tool, use, ctx, budget);
+    return this.settleToolOutput(tool, use, text, budget);
+  }
+
+  /**
+   * Async "produce" phase: run the tool, serialize, scrub, and spill an
+   * oversized output to a disk artifact. Returns the pre-cap text. This is
+   * the long-running, concurrency-safe part — it touches NO shared budget
+   * state, so multiple invocations can run in parallel without racing.
+   *
+   * The `budgetHint` only gates the disk-spill threshold (a heuristic for
+   * "is this output large enough to persist"); it is NOT the output cap.
+   * The authoritative cap is applied synchronously in settleToolOutput()
+   * against the live budget.
+   */
+  private async produceToolOutput(
+    tool: Tool,
+    use: ToolUseBlock,
+    ctx: Context,
+    budgetHint: number,
+  ): Promise<string> {
     this.opts.events?.emit('tool.started', {
       sessionId: ctx.session.id,
       name: tool.name,
@@ -554,12 +582,30 @@ export class ToolExecutor {
     const output = await this.runWithTimeout(tool, use.input, ctx.signal, ctx, use.id);
     const text = this.serializer.serialize(output, { toolName: tool.name, input: use.input, tool });
     const scrubbed = this.opts.secretScrubber.scrub(text);
-    const withArtifact = await maybePersistLargeToolOutput(tool.name, scrubbed, budget);
+    return maybePersistLargeToolOutput(tool.name, scrubbed, budgetHint);
+  }
+
+  /**
+   * Synchronous "settle" phase: enforce the output cap against the CURRENT
+   * budget, render, and build the result block. This MUST stay synchronous
+   * (no awaits) so that, in the parallel/smart strategies, two tools settling
+   * one after another against the shared closure budget can't interleave a
+   * stale read with a write. The first to settle consumes its bytes; the next
+   * settles against the reduced budget; once the budget hits 0, enforceCap
+   * truncates — making the per-iteration cap genuinely CUMULATIVE across
+   * parallel tools instead of degrading into a per-tool cap.
+   */
+  private settleToolOutput(
+    tool: Tool,
+    use: ToolUseBlock,
+    text: string,
+    budget: number,
+  ): { block: ToolResultBlock; bytes: number } {
     // enforceCap already walks the text to compute bytes for the budget
     // cap. Carry the residual budget back as `bytes` so the caller can
     // deduct the spend without a second `Buffer.byteLength` walk — and
     // never falls back to `JSON.stringify` on a structured value.
-    const { text: capped, newBudget } = this.serializer.enforceCap(withArtifact, budget);
+    const { text: capped, newBudget } = this.serializer.enforceCap(text, budget);
     this.hintRenderMode(tool.name);
     this.opts.renderer?.writeToolResult(tool.name, capped, false);
     return {
