@@ -11,6 +11,11 @@ import '@fontsource/ibm-plex-mono/600.css';
 import { App } from './App';
 import './index.css';
 import './syntax-highlight.css';
+import { startAnalyticsFlush } from './lib/analytics';
+
+// Start the analytics flush timer on app init
+startAnalyticsFlush();
+
 ReactDOM.createRoot(expectDefined(document.getElementById('root'))).render(
   <React.StrictMode>
     <App />

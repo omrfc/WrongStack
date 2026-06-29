@@ -3,19 +3,88 @@ import { useCallback } from 'react';
 export interface AnalyticsEvent {
   event: string;
   category: string;
-  label?: string;
-  value?: number;
-  metadata?: Record<string, unknown>;
+  label?: string | undefined;
+  value?: number | undefined;
+  metadata?: Record<string, unknown> | undefined;
   timestamp: string;
 }
 
 const ANALYTICS_QUEUE: AnalyticsEvent[] = [];
 const MAX_QUEUE_SIZE = 100;
 
+/** Interval (ms) between automatic flushes to the backend. */
+const FLUSH_INTERVAL_MS = 30_000;
+/** Minimum number of events before a flush is triggered. */
+const MIN_FLUSH_SIZE = 5;
+
+let flushTimer: ReturnType<typeof setInterval> | null = null;
+let isFlushing = false;
+
 function enqueueEvent(event: AnalyticsEvent): void {
   ANALYTICS_QUEUE.push(event);
   if (ANALYTICS_QUEUE.length > MAX_QUEUE_SIZE) {
     ANALYTICS_QUEUE.shift();
+  }
+
+  // Auto-flush when we hit the threshold
+  if (ANALYTICS_QUEUE.length >= MIN_FLUSH_SIZE && !isFlushing) {
+    flushAnalytics();
+  }
+}
+
+/** Flush the analytics queue to the backend. */
+export async function flushAnalytics(): Promise<void> {
+  if (isFlushing || ANALYTICS_QUEUE.length === 0) return;
+
+  isFlushing = true;
+  const events = ANALYTICS_QUEUE.splice(0, ANALYTICS_QUEUE.length);
+
+  try {
+    const res = await fetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(events),
+    });
+
+    if (!res.ok) {
+      // Re-queue events on failure so they can be retried
+      ANALYTICS_QUEUE.unshift(...events);
+      if (ANALYTICS_QUEUE.length > MAX_QUEUE_SIZE) {
+        ANALYTICS_QUEUE.length = MAX_QUEUE_SIZE;
+      }
+    }
+
+    // Log result in development
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      const result = await res.json().catch(() => ({ accepted: 0, rejected: 0 }));
+      console.log('[Analytics] Flushed', result.accepted, 'events, rejected', result.rejected);
+    }
+  } catch {
+    // Re-queue events on network failure
+    ANALYTICS_QUEUE.unshift(...events);
+    if (ANALYTICS_QUEUE.length > MAX_QUEUE_SIZE) {
+      ANALYTICS_QUEUE.length = MAX_QUEUE_SIZE;
+    }
+  } finally {
+    isFlushing = false;
+  }
+}
+
+/** Start the periodic flush timer. Call once on app init. */
+export function startAnalyticsFlush(): void {
+  if (flushTimer) return;
+  flushTimer = setInterval(() => {
+    if (ANALYTICS_QUEUE.length > 0) {
+      flushAnalytics();
+    }
+  }, FLUSH_INTERVAL_MS);
+}
+
+/** Stop the periodic flush timer. Call on app teardown. */
+export function stopAnalyticsFlush(): void {
+  if (flushTimer) {
+    clearInterval(flushTimer);
+    flushTimer = null;
   }
 }
 

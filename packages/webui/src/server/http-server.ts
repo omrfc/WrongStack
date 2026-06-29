@@ -37,6 +37,11 @@ import {
   handleApiSessionMessage,
   handleApiSessions,
 } from './http-server/api-handlers.js';
+import {
+  handleApiAnalyticsGet,
+  handleApiAnalyticsPost,
+  handleApiAnalyticsSummary,
+} from './http-server/analytics-handler.js';
 import { extractTokenFromCookie, isLoopbackBind, tokenMatches } from './ws-auth.js';
 import type { FileWatcherMetrics } from './setup-events.js';
 
@@ -249,7 +254,7 @@ export function isInsideDist(candidate: string, distDir: string): boolean {
 /**
  * Decode a `:id` path segment captured by the `/api/sessions/:id/*` routes.
  *
- * Session ids are `YYYY-MM-DD/HH-MM-SSZ_model_hash` — they contain a literal
+ * Session ids are `YYYY-MM-DD/sess_<ULID>` — they contain a literal
  * `/`. The frontend builds the URL with `encodeURIComponent(sessionId)`, so
  * that slash arrives as `%2F`. The route regex `([^/]+)` correctly captures
  * the whole percent-encoded segment (there is no real `/` in `%2F`), but the
@@ -451,6 +456,37 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
           return;
         }
         await handleApiFleetBroadcast(res, req, opts.globalRoot);
+        return;
+      }
+
+      // /api/analytics — ingest frontend analytics events.
+      // POST: accept a batch of events. GET: retrieve recent events.
+      // GET /api/analytics/summary: aggregated stats.
+      if (url.pathname === '/api/analytics' && req.method === 'POST') {
+        if (requireAccessToken && !accessTokenOk) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+        await handleApiAnalyticsPost(res, req);
+        return;
+      }
+      if (url.pathname === '/api/analytics' && req.method === 'GET') {
+        if (requireAccessToken && !accessTokenOk) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+        await handleApiAnalyticsGet(res, url);
+        return;
+      }
+      if (url.pathname === '/api/analytics/summary' && req.method === 'GET') {
+        if (requireAccessToken && !accessTokenOk) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+        await handleApiAnalyticsSummary(res);
         return;
       }
 
