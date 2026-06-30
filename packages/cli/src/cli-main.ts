@@ -96,6 +96,7 @@ import { promptRecovery } from './cli-recovery-prompt.js';
 import { applyNodeEnvDefault, applySessionShellDefault, runPreflight } from './preflight.js';
 import { wireContainer } from './boot/container-wiring.js';
 import { bindSystemPromptBuilder } from './boot/system-prompt-builder.js';
+import { subscribeBrainDecisionLog } from './boot/brain-decision-log.js';
 import { handleHelpVersionShortCircuit } from './boot/short-circuit-flags.js';
 import { handleHqShortCircuit } from './boot/short-circuit-hq.js';
 import { refreshRuntimeModelCatalog, resolveRuntimeMaxContext } from './context-limit.js';
@@ -255,7 +256,7 @@ export async function main(argv: string[]): Promise<number> {
     modelsRegistry,
     yoloDestructive:
       flags['yolo-destructive'] === true || flags['force-all-yolo'] === true,
-    confirmDestructive: flags['confirm-destructive'] === true,
+    confirmDestructive: true,
   });
 
   // Replay wiring (idea #2). When `--replay <sessionId>` is set, every
@@ -1278,48 +1279,11 @@ export async function main(argv: string[]): Promise<number> {
   container.bind(TOKENS.BrainArbiter, () => brain);
 
   // Decision log for /brain status — last 20 decisions across all sources.
-  const brainLog: Array<{
-    at: number;
-    kind: 'answered' | 'ask_human' | 'denied' | 'intervention';
-    question: string;
-    outcome: string;
-  }> = [];
-  const pushBrainLog = (entry: (typeof brainLog)[number]) => {
-    brainLog.push(entry);
-    if (brainLog.length > 20) brainLog.shift();
-  };
-  evOn('brain.decision_answered', (e) => {
-    pushBrainLog({
-      at: e.at,
-      kind: 'answered',
-      question: e.request.question,
-      outcome: e.decision.type === 'answer' ? (e.decision.optionId ?? e.decision.text) : '',
-    });
-  });
-  evOn('brain.decision_ask_human', (e) => {
-    pushBrainLog({
-      at: e.at,
-      kind: 'ask_human',
-      question: e.request.question,
-      outcome: 'escalated to human',
-    });
-  });
-  evOn('brain.decision_denied', (e) => {
-    pushBrainLog({
-      at: e.at,
-      kind: 'denied',
-      question: e.request.question,
-      outcome: e.decision.type === 'deny' ? e.decision.reason : '',
-    });
-  });
-  evOn('brain.intervention', (e) => {
-    pushBrainLog({
-      at: e.at,
-      kind: 'intervention',
-      question: e.request.question,
-      outcome: e.intervened ? 'steered the agent' : 'observed (no action)',
-    });
-  });
+  // Pulled out into a dedicated module as part of PR 8 / Stage 1 of the
+  // cli-main split refactor (see `next-1.md`). `brainLog` is captured by
+  // the closures produced later (see `getBrainLog: () => brainLog`).
+  const { brainLog, dispose: disposeBrainLog } = subscribeBrainDecisionLog(events);
+  teardownHandlers.push(disposeBrainLog);
 
   // ── Brain self-activation — watch the bus, intervene via mailbox steer ──
   // Tool-failure streaks and error storms engage the Brain proactively; a
