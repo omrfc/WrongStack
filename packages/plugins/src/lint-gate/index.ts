@@ -71,6 +71,12 @@ interface LintGateConfig {
   mode: Mode;
   severity: Severity;
   timeoutMs: number;
+  /**
+   * When mode='fix', only auto-fix issues matching these rule IDs.
+   * Empty = fix everything the linter can. Non-empty = fix only the
+   * listed rules, leave others as warnings.
+   */
+  fixRules: string[];
 }
 
 const DEFAULTS: LintGateConfig = {
@@ -78,6 +84,7 @@ const DEFAULTS: LintGateConfig = {
   mode: 'warn',
   severity: 'error',
   timeoutMs: 10_000,
+  fixRules: [],
 };
 
 function readConfig(raw: unknown): LintGateConfig {
@@ -88,6 +95,9 @@ function readConfig(raw: unknown): LintGateConfig {
     mode: r['mode'] === 'block' ? 'block' : r['mode'] === 'fix' ? 'fix' : 'warn',
     severity: r['severity'] === 'warning' ? 'warning' : 'error',
     timeoutMs: typeof r['timeoutMs'] === 'number' ? r['timeoutMs'] : DEFAULTS.timeoutMs,
+    fixRules: Array.isArray(r['fixRules'])
+      ? (r['fixRules'] as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [],
   };
 }
 
@@ -320,6 +330,12 @@ const plugin: Plugin = {
         default: 10000,
         description: 'Linter process timeout in milliseconds.',
       },
+      fixRules: {
+        type: 'array',
+        items: { type: 'string' },
+        default: [],
+        description: 'When mode=fix, only auto-fix issues matching these rule IDs (e.g. "lint/style/useImportType", "format"). Empty = fix everything the linter can.',
+      },
     },
   },
 
@@ -426,17 +442,39 @@ const plugin: Plugin = {
         if (toolName === 'write') {
           const fixedContent = lintAndFix(content, filePath, linter, cfg.timeoutMs);
           if (fixedContent !== content) {
-            // Linter changed the content — inject it.
             state.fixCount += 1;
+
+            // If fixRules is set, check which issues REMAIN after the
+            // fix. Issues NOT in fixRules are left as warnings — the
+            // linter fixed what it could for the allowed rules, but
+            // other issues persist.
+            let remainingSummary = '';
+            let remainingCount = 0;
+            if (cfg.fixRules.length > 0) {
+              const fixRuleSet = new Set(cfg.fixRules);
+              const remaining = filtered.filter((i) => !fixRuleSet.has(i.rule));
+              remainingCount = remaining.length;
+              if (remaining.length > 0) {
+                remainingSummary = remaining
+                  .slice(0, 10)
+                  .map((i) => `  • [${i.severity}] ${i.rule}: ${i.message}${i.line ? ` (line ${i.line})` : ''}`)
+                  .join('\n');
+              }
+            }
+
             api.log.info(`lint-gate: auto-fixed ${filtered.length} issue(s) in ${filePath}`, {
               severity: cfg.severity,
+              remaining: remainingCount,
             });
             return {
               decision: 'allow',
               modifiedInput: { ...inp, content: fixedContent },
               additionalContext:
                 `\n✅ lint-gate: auto-fixed ${filtered.length} linter issue(s) in the content ` +
-                `being written to '${filePath}'. The fixed content has been substituted automatically.`,
+                `being written to '${filePath}'. The fixed content has been substituted automatically.` +
+                (remainingCount > 0
+                  ? `\n${remainingCount} issue(s) remain (not in fixRules):\n${remainingSummary}`
+                  : ''),
             };
           }
           // Linter didn't change anything (unfixable rules) — fall
@@ -475,6 +513,7 @@ const plugin: Plugin = {
           mode: cfg.mode,
           severity: cfg.severity,
           timeoutMs: cfg.timeoutMs,
+          fixRules: cfg.fixRules,
           counters: {
             invocations: state.invocationCount,
             hits: state.hitCount,

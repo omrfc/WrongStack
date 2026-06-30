@@ -146,4 +146,21 @@ describe('config parsing', () => {
     const status = await getStatusTool(api).execute({});
     expect(status.counters.fixes).toBe(0);
   });
+
+  it('parses fixRules from config', async () => {
+    const api = makeApi({
+      extensions: { 'lint-gate': { mode: 'fix', fixRules: ['lint/style/useImportType', 'format'] } },
+    });
+    lintGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.mode).toBe('fix');
+    expect(status.fixRules).toEqual(['lint/style/useImportType', 'format']);
+  });
+
+  it('defaults fixRules to empty array', async () => {
+    const api = makeApi();
+    lintGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.fixRules).toEqual([]);
+  });
 });
