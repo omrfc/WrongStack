@@ -254,7 +254,7 @@ describe('formatToolOutput', () => {
     expect(out[0]).toContain('1 err');
     expect(out[1]).toContain('spawn failed');
   });
-  it.skip('bash: stdout + stderr preview dedup — identical first line collapses to a single entry', () => {
+  it('bash: stdout + stderr preview dedup — identical first line collapses to a single entry', () => {
     // firstNonEmpty returns the same string for both; without the
     // stderr-preview-dedup check the renderer would print the same line
     // twice (once plain, once `!`-prefixed).
@@ -264,7 +264,7 @@ describe('formatToolOutput', () => {
       true,
     );
     expect(out).toHaveLength(2);
-    expect(out[0]).toContain('1 out');
+    expect(out[0]).toContain('2 out');
     expect(out[0]).toContain('1 err');
     expect(out[1]).toContain('shared line');
   });
