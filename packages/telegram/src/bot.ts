@@ -200,10 +200,8 @@ export class TelegramBot {
       this.standbyTimer = null;
     }
     // Reject any pending approval requests so the host doesn't hang.
-    for (const [key, waiter] of this.callbackWaiters) {
-      clearTimeout(waiter.timer);
-      waiter.resolve({ approved: false, fromUser: 'shutdown' });
-      this.callbackWaiters.delete(key);
+    for (const key of Array.from(this.callbackWaiters.keys())) {
+      this.rejectWaiter(key, 'shutdown');
     }
     this.lock?.release();
     this.log.info('Telegram bot stopped');
@@ -514,9 +512,8 @@ export class TelegramBot {
    * Resolve any pending waiter for `key` with a `{ approved: false, fromUser }`
    * value, regardless of why the callback was rejected (allowlist, shutdown,
    * etc.). Returns true if a waiter was found and resolved, false otherwise.
-   * The caller is responsible for clearing its own Map entry — this helper
-   * centralizes the race-safe `delete → resolve` pattern in one place so
-   * the deny paths don't drift out of sync.
+   * This helper centralizes the race-safe `delete → resolve` pattern in one
+   * place so the deny and shutdown paths don't drift out of sync.
    */
   private rejectWaiter(key: string, fromUser: string): boolean {
     if (key === '') return false;
