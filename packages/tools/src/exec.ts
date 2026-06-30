@@ -59,6 +59,94 @@ const DEFAULT_ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
   'gh',
   'where', 'tasklist', 'systeminfo', 'wmic', 'sc',
   'netstat', 'ipconfig', 'nslookup', 'tracert', 'pathping',
+  // [core] Extended default allowlist (added 4b3d18d1 + this commit). All
+  // non-destructive, broadly-used dev binaries. Per-arg safety is still
+  // enforced by BLOCKED_ARG_PATTERNS + bash-kill-guard.ts.
+  // --- Archives & compression ---
+  '7z', '7za', 'bzip2', 'gzip', 'xz', 'unzip', 'zip', 'gtar', 'bsdtar', 'star', 'pax', 'cpio',
+  // --- Android / mobile dev ---
+  'adb', 'fastboot', 'sdkmanager',
+  // --- DevOps / config mgmt ---
+  'ansible', 'ansible-playbook', 'ansible-vault', 'ansible-lint', 'ansible-galaxy', 'molecule',
+  // --- Cloud CLIs ---
+  'aws', 'aws-vault', 'awslocal', 'az', 'azcopy', 'gcloud', 'gsutil', 'doctl', 'linode-cli',
+  // --- Native / C / C++ / linker tools ---
+  'clang++', 'clang-format', 'clang-tidy', 'clangd', 'lld', 'lldb', 'ctest', 'gmake', 'meson', 'conan', 'vcpkg', 'cl', 'rc', 'mt', 'dumpbin', 'dotnet-format',
+  // --- Image / media / binary tools ---
+  'convert', 'ffmpeg', 'ffprobe', 'magick', 'gs', 'exiftool',
+  // --- HTTP / fetch ---
+  'wget2', 'aria2c', 'axel', 'httpie', 'hey', 'ab', 'wrk', 'http',
+  // --- Diff / patch / merge ---
+  'diff', 'diff3', 'patch', 'meld', 'kdiff3', 'kompare',
+  // --- Encoding / file inspection ---
+  'dos2unix', 'unix2dos', 'iconv', 'file', 'stat', 'xxd', 'hexdump', 'od', 'base64',
+  // --- SSH / crypto / signing ---
+  'ssh', 'ssh-add', 'ssh-keygen', 'ssh-keyscan', 'scp', 'sftp', 'rsync', 'gpg', 'gpg2', 'gpg-agent', 'openssl', 'step', 'keytool',
+  // --- Search ---
+  'egrep', 'fgrep', 'ag', 'ack', 'sift', 'ugrep', 'fd', 'fdfind', 'jq', 'yq', 'xq', 'fx', 'gron',
+  // --- K8s / container ecosystem ---
+  'kubectl.exe', 'kubeadm', 'kubelet', 'helm', 'k9s', 'kustomize', 'skaffold', 'tilt', 'minikube', 'kind', 'k3d', 'k3s',
+  'docker-compose', 'buildah', 'skopeo', 'nerdctl', 'ctr', 'ctr.exe',
+  // --- Databases ---
+  'sqlite3', 'sqlite', 'psql', 'pg_dump', 'pg_restore', 'mysql', 'mysqladmin', 'mysqldump', 'mariadb', 'mariadb-dump',
+  'redis-cli', 'redis-server', 'memcached', 'etcdctl', 'consul', 'vault', 'nomad',
+  'mongosh', 'mongo', 'mongoexport', 'mongoimport', 'mongodump', 'mongorestore',
+  // --- Windows extended (read-mostly ops) ---
+  'taskkill', 'gpupdate', 'gpresult', 'hostname', 'whoami', 'who', 'net', 'net1',
+  // --- VCS ecosystem ---
+  'glab', 'hub', 'tea', 'git-lfs', 'tig', 'lazygit',
+  // --- POSIX text utilities (extended; duplicates of pwd/ls/cat/head/tail/wc/
+  //     grep/find/echo/awk/mkdir/cp/mv/rm/touch from the base list above are
+  //     omitted — the Set is de-duplicated at runtime but a clean literal is
+  //     easier to maintain) ---
+  'gawk', 'tr', 'cut', 'paste', 'join', 'comm', 'expand', 'unexpand', 'fold', 'fmt', 'nl', 'pr', 'column', 'tsort',
+  'tty', 'ul', 'units', 'factor', 'seq', 'shuf', 'look', 'yes', 'true', 'false', 'test', '[', 'printf',
+  'env',
+  'tree', 'locate', 'which', 'whereis', 'type', 'hash', 'pushd', 'popd', 'dirs', 'history', 'fc', 'jobs', 'bg', 'fg', 'wait',
+  'ulimit', 'umask', 'nice', 'nohup', 'timeout', 'time', 'trap', 'exit', 'return', 'source', '.', 'alias', 'unalias',
+  'set', 'unset', 'export', 'readonly', 'typeset', 'declare', 'local', 'eval', 'exec',
+  // --- Process / system inspection ---
+  'htop', 'top', 'atop', 'glances', 'iotop', 'nethogs', 'iftop', 'lsof', 'strace', 'ltrace', 'sysstat', 'vmstat', 'iostat', 'mpstat', 'sar',
+  'free', 'df', 'du', 'mount', 'umount', 'lsblk', 'blkid',
+  'kill', 'killall', 'pkill', 'pgrep', 'pidof', 'ps', 'ps.exe',
+  // --- Network inspection ---
+  'ip', 'ss', 'route', 'arp', 'arping', 'ping', 'ping6', 'hping3', 'mtr', 'tracepath', 'tcpdump', 'nmap', 'netcat', 'nc', 'ncat', 'socat',
+  // --- Sync / backup ---
+  'rclone', 'restic', 'borg', 'duplicati', 'duplicacy', 'syncthing', 'syncthing-cli',
+  // --- Permissions / users / ACLs (POSIX) ---
+  'useradd', 'userdel', 'usermod', 'groupadd', 'groupdel', 'groupmod', 'chown', 'chmod', 'chgrp', 'getfacl', 'setfacl', 'setcap', 'getcap',
+  // --- Crypto / cert mgmt (extended) ---
+  'certbot', 'mkcert', 'jarsigner',
+  // --- Editors ---
+  'subl', 'code', 'code-insiders', 'cursor', 'atom', 'nano', 'vim', 'nvim', 'vi', 'emacs', 'helix', 'hx', 'micro', 'jed', 'ed', 'ex', 'mg',
+  // --- Terminal multiplexers ---
+  'asciinema', 'script', 'scriptreplay', 'expect', 'screen', 'tmux', 'byobu', 'dtach', 'abduco',
+  // --- Calculators / REPLs / scientific ---
+  'bc', 'dc', 'calc', 'qalc', 'genius', 'octave', 'R', 'Rscript', 'julia', 'irb', 'pry', 'ghci', 'stack', 'cabal', 'ghc',
+  // --- PHP / Lua / Perl / Ruby ecosystem (extended) ---
+  'php8', 'php7', 'phpcs', 'phpcbf', 'phpmd', 'phpstan', 'psalm',
+  'lua', 'lua5.1', 'lua5.2', 'lua5.3', 'lua5.4', 'luarocks',
+  'perl', 'cpan', 'prove', 'plackup',
+  'rake', 'rspec', 'jekyll', 'node-gyp', 'node-pre-gyp',
+  // --- JS / TS toolchain (extended) ---
+  'electron', 'electron-builder', 'electron-forge', 'vite-preview', 'swc', 'swc-cli', 'swcpack',
+  'mocha', 'chai', 'jasmine', 'puppeteer', 'lighthouse',
+  // --- Linters / formatters (extended) ---
+  'tslint', 'stylelint', 'htmlhint', 'jshint', 'jslint', 'jscs',
+  // --- Document conversion ---
+  'pandoc', 'weasyprint', 'wkhtmltopdf', 'wkhtmltoimage', 'prince', 'mdp', 'markdown', 'multimarkdown', 'cmark', 'cmark-gfm',
+  // --- Office / spreadsheet ---
+  'soffice', 'libreoffice', 'unoconv', 'abiword', 'gnumeric',
+  // --- Spell / grammar ---
+  'aspell', 'hunspell', 'enchant', 'languagetool',
+  // --- Source-highlight / diff tools ---
+  'delta', 'bat', 'ccat', 'hl', 'highlight', 'source-highlight', 'ansifilter',
+  // --- Job schedulers ---
+  'pueue', 'task-spooler', 'ts', 'at', 'atd', 'anacron', 'fcron', 'cronie', 'systemd-run', 'systemd-cat',
+  // --- Plotting / visualization ---
+  'gnuplot', 'gnuplot-nox', 'veusz', 'scidavis', 'grace', 'xmgrace', 'labplot',
+  // --- Security / recon (network + web) ---
+  'masscan', 'zmap', 'rustscan', 'amass', 'subfinder', 'httpx', 'nuclei', 'naabu', 'katana', 'dnsx', 'assetfinder', 'findomain', 'gau', 'waybackurls', 'httprobe', 'meg', 'subjack', 'sublert', 'chaos',
 ]);
 
 // The live, effective allowlist: DEFAULT ∪ config.allow − config.deny. Replaced

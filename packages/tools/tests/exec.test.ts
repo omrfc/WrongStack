@@ -423,4 +423,86 @@ describe('exec command policy (configurable allowlist)', () => {
       expect(isExecCommandAllowed(cmd)).toBe(true);
     }
   });
+
+  it('default allowlist includes the [core] extended dev tooling set', () => {
+    // Smoke test: pick at least one representative from every [core] category
+    // added in this commit. We don't enumerate all ~280 entries — a duplicate
+    // check in CI catches that case — but we want a regression test that
+    // pins a name from each bucket so a future refactor that accidentally
+    // drops a category fails loudly.
+    for (const cmd of [
+      // Archives
+      '7z', 'xz', 'unzip',
+      // Android / mobile
+      'adb', 'fastboot',
+      // DevOps / config mgmt
+      'ansible', 'ansible-playbook',
+      // Cloud CLIs
+      'aws', 'az', 'gcloud',
+      // Native / linker
+      'clang-format', 'clangd', 'lld', 'lldb', 'meson', 'conan',
+      // Image / media
+      'ffmpeg', 'magick', 'exiftool',
+      // HTTP / fetch
+      'httpie', 'wget2',
+      // Diff / patch
+      'diff', 'patch', 'meld',
+      // Encoding / file inspection
+      'iconv', 'file', 'xxd', 'base64',
+      // SSH / crypto
+      'ssh', 'ssh-keygen', 'scp', 'rsync', 'gpg', 'openssl',
+      // Search
+      'jq', 'yq', 'fd', 'ugrep',
+      // K8s ecosystem
+      'helm', 'k9s', 'kustomize', 'skaffold', 'minikube', 'kind',
+      // Container ecosystem
+      'docker-compose', 'buildah', 'nerdctl',
+      // Databases
+      'sqlite3', 'psql', 'mysql', 'redis-cli', 'mongosh', 'etcdctl',
+      // Windows extended
+      'taskkill', 'hostname', 'whoami',
+      // VCS ecosystem
+      'glab', 'hub', 'lazygit', 'tig',
+      // POSIX extended
+      'tree', 'env', 'tr', 'cut', 'printf', 'timeout',
+      // Process / system
+      'htop', 'lsof', 'strace', 'kill', 'pkill', 'ps',
+      // Network
+      'ip', 'ss', 'tcpdump', 'nmap', 'socat',
+      // Sync / backup
+      'rclone', 'restic', 'borg',
+      // Permissions
+      'chown', 'chmod', 'setfacl',
+      // Crypto / cert
+      'certbot', 'mkcert',
+      // Editors
+      'vim', 'nvim', 'code', 'helix', 'micro',
+      // Multiplexers
+      'tmux', 'screen', 'expect',
+      // Calculators / REPLs
+      'bc', 'julia', 'irb', 'octave',
+      // PHP / Lua / Perl / Ruby
+      'phpcs', 'luarocks', 'cpan', 'rake',
+      // JS / TS toolchain extended
+      'electron', 'swc', 'mocha', 'puppeteer', 'lighthouse',
+      // Linters
+      'tslint', 'stylelint',
+      // Document conversion
+      'pandoc', 'wkhtmltopdf',
+      // Office
+      'soffice', 'libreoffice',
+      // Spell
+      'aspell', 'hunspell',
+      // Source highlight
+      'delta', 'bat',
+      // Job schedulers
+      'systemd-run', 'cronie',
+      // Plotting
+      'gnuplot', 'grace',
+      // Security / recon
+      'nmap', 'tcpdump', 'masscan', 'nuclei',
+    ]) {
+      expect(isExecCommandAllowed(cmd)).toBe(true);
+    }
+  });
 });
