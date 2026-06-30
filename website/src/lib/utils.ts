@@ -22,7 +22,7 @@ export const META = {
 export const heroStats = [
   { value: '36', label: 'built-in tools' },
   { value: '17', label: 'bundled skills' },
-  { value: '~110', label: 'model providers' },
+  { value: '~140', label: 'model providers' },
   { value: '10', label: 'official plugins' },
 ] as const;
 
