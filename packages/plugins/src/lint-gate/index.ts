@@ -316,7 +316,7 @@ const plugin: Plugin = {
         type: 'string',
         enum: ['block', 'warn', 'fix'],
         default: 'warn',
-        description: '"block" refuses the write/edit; "warn" injects lint errors as context; "fix" auto-runs the linter with --write/--fix and substitutes the fixed content (write only; edit falls back to warn).',
+        description: '"block" refuses the write/edit; "warn" injects lint errors as context; "fix" auto-runs the linter with --write/--fix and substitutes the fixed content (write: full file; edit: new_string snippet in isolation — file-level rules like import sorting are not checked on snippets).',
       },
       severity: {
         type: 'string',
@@ -436,9 +436,7 @@ const plugin: Plugin = {
       }
 
       if (cfg.mode === 'fix') {
-        // Auto-fix only works for `write` — we can replace the entire
-        // content. For `edit`, we can't safely re-derive the
-        // new_string from a whole-file fix, so fall through to warn.
+        // Auto-fix for `write`: fix the entire content.
         if (toolName === 'write') {
           const fixedContent = lintAndFix(content, filePath, linter, cfg.timeoutMs);
           if (fixedContent !== content) {
@@ -480,7 +478,41 @@ const plugin: Plugin = {
           // Linter didn't change anything (unfixable rules) — fall
           // through to warn.
         }
-        // edit or no fix applied — warn instead.
+
+        // Auto-fix for `edit`: fix only the `new_string` in isolation.
+        // We write just the new_string to a temp file, lint+fix it,
+        // and if the linter changed it, substitute the fixed version
+        // back into the edit's new_string field via modifiedInput.
+        //
+        // Limitation: rules that depend on file-level context (import
+        // sorting, unused imports, file-level formatting) won't fire
+        // on an isolated snippet. But style/format rules (indentation,
+        // quotes, semicolons, trailing commas) work fine — and those
+        // are the most common auto-fixable issues the LLM introduces.
+        if (toolName === 'edit') {
+          const newStr = inp['new_string'] as string | undefined;
+          if (typeof newStr === 'string' && newStr.length > 0) {
+            const fixedNewStr = lintAndFix(newStr, filePath, linter, cfg.timeoutMs);
+            if (fixedNewStr !== newStr) {
+              state.fixCount += 1;
+              api.log.info(`lint-gate: auto-fixed new_string in edit for ${filePath}`, {
+                severity: cfg.severity,
+              });
+              return {
+                decision: 'allow',
+                modifiedInput: { ...inp, new_string: fixedNewStr },
+                additionalContext:
+                  `\n✅ lint-gate: auto-fixed lint issue(s) in the new_string being edited ` +
+                  `into '${filePath}'. The fixed new_string has been substituted automatically. ` +
+                  `Note: file-level rules (import sorting, unused imports) are not checked on ` +
+                  `isolated snippets — run a full lint after the edit if needed.`,
+              };
+            }
+            // new_string was clean or linter couldn't fix it — fall
+            // through to warn for the whole-file issues found earlier.
+          }
+        }
+        // No fix applied — warn instead.
       }
 
       // mode === 'warn' — inject context but let the call through.
