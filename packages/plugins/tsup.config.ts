@@ -17,6 +17,7 @@ export default defineConfig({
     'lint-gate': 'src/lint-gate/index.ts',
     'branch-guard': 'src/branch-guard/index.ts',
     'diff-summary': 'src/diff-summary/index.ts',
+    'commit-validator': 'src/commit-validator/index.ts',
   },
   format: ['esm'],
   dts: true,
