@@ -16,6 +16,7 @@ export default defineConfig({
     'token-budget': 'src/token-budget/index.ts',
     'lint-gate': 'src/lint-gate/index.ts',
     'branch-guard': 'src/branch-guard/index.ts',
+    'diff-summary': 'src/diff-summary/index.ts',
   },
   format: ['esm'],
   dts: true,

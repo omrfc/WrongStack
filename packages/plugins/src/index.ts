@@ -51,3 +51,4 @@ export { default as todoTrackerPlugin } from './todo-tracker/index.js';
 export { default as tokenBudgetPlugin } from './token-budget/index.js';
 export { default as lintGatePlugin } from './lint-gate/index.js';
 export { default as branchGuardPlugin } from './branch-guard/index.js';
+export { default as diffSummaryPlugin } from './diff-summary/index.js';
