@@ -49,8 +49,14 @@ const state = {
   warningFired: false,
   /** Whether the stop has already fired (one-shot). */
   stopFired: false,
+  /** Whether the warning context has been injected into the LLM (one-shot). */
+  warnContextInjected: false,
+  /** Whether the stop context has been injected into the LLM (one-shot). */
+  stopContextInjected: false,
   /** Stop hook unregister handle. */
   hookUnregister: null as null | (() => void),
+  /** PostToolUse hook unregister handle. */
+  postHookUnregister: null as null | (() => void),
   /** Last token breakdown — surfaced by health(). */
   lastRequest: null as null | {
     model: string;
@@ -143,7 +149,10 @@ const plugin: Plugin = {
     state.requestCount = 0;
     state.warningFired = false;
     state.stopFired = false;
+    state.warnContextInjected = false;
+    state.stopContextInjected = false;
     state.hookUnregister = null;
+    state.postHookUnregister = null;
     state.lastRequest = null;
 
     const cfg = readConfig(api.config.extensions?.['token-budget']);
@@ -227,6 +236,49 @@ const plugin: Plugin = {
       };
     });
 
+    // Register a PostToolUse hook that injects budget status into the
+    // LLM's context after every tool call. This is how the LLM "feels"
+    // the budget pressure — without it, the warning/stop events fire
+    // but the LLM never sees them (emitCustom is an inter-plugin
+    // channel, not an LLM-facing channel).
+    //
+    // The hook fires on every tool (matcher '*'). When the warning
+    // threshold has been crossed (one-shot), it injects a "wrap up"
+    // additionalContext. When the stop threshold is reached, it injects
+    // an urgent "stop now" context. Both are one-shot per threshold
+    // crossing; after the initial injection, the hook is silent so it
+    // doesn't spam the context window on every subsequent tool call.
+    state.postHookUnregister = api.registerHook('PostToolUse', '*', () => {
+      if (cfg.limit <= 0) return;
+      const percent = Math.round((state.totalTokens / cfg.limit) * 100);
+      const remaining = Math.max(cfg.limit - state.totalTokens, 0);
+
+      // One-shot: first time crossing stopPercent after a tool call.
+      if (state.stopFired && !state.stopContextInjected) {
+        state.stopContextInjected = true;
+        return {
+          additionalContext:
+            `\n🛑 token-budget: HARD LIMIT REACHED — ${state.totalTokens.toLocaleString()} / ${cfg.limit.toLocaleString()} tokens (${percent}%). ` +
+            `You must stop here. Do NOT start any new task. Summarize what was accomplished and list any remaining work.`,
+        };
+      }
+
+      // One-shot: first time crossing warnPercent after a tool call.
+      if (state.warningFired && !state.warnContextInjected) {
+        state.warnContextInjected = true;
+        return {
+          additionalContext:
+            `\n⚠️ token-budget: ${percent}% of budget used (${state.totalTokens.toLocaleString()} / ${cfg.limit.toLocaleString()} tokens, ${remaining.toLocaleString()} remaining). ` +
+            `Start wrapping up — prioritize finishing the current task over starting new ones.`,
+        };
+      }
+
+      // After the one-shot injections, stay silent. The
+      // token_budget_status tool is available for the LLM to check
+      // the exact remaining budget if needed.
+      return;
+    });
+
     // --- token_budget_status tool ---
     api.tools.register({
       name: 'token_budget_status',
@@ -277,6 +329,14 @@ const plugin: Plugin = {
       }
       state.hookUnregister = null;
     }
+    if (state.postHookUnregister) {
+      try {
+        state.postHookUnregister();
+      } catch {
+        // best-effort
+      }
+      state.postHookUnregister = null;
+    }
     const final = {
       totalTokens: state.totalTokens,
       requestCount: state.requestCount,
@@ -289,6 +349,8 @@ const plugin: Plugin = {
     state.requestCount = 0;
     state.warningFired = false;
     state.stopFired = false;
+    state.warnContextInjected = false;
+    state.stopContextInjected = false;
     state.lastRequest = null;
     api.log.info('token-budget: teardown complete', { final });
   },

@@ -46,12 +46,15 @@ function getStopHook(api: MockApi): (input: unknown) => { decision?: string; rea
 beforeEach(() => vi.clearAllMocks());
 
 describe('token-budget plugin', () => {
-  it('registers token_budget_status tool and a Stop hook', () => {
+  it('registers token_budget_status tool, a Stop hook, and a PostToolUse hook', () => {
     const api = makeApi();
     tokenBudgetPlugin.setup(api as never);
     expect(api.tools.register).toHaveBeenCalledTimes(1);
-    expect(api.registerHook).toHaveBeenCalledTimes(1);
-    expect(api.registerHook.mock.calls[0]![0]).toBe('Stop');
+    // Stop hook + PostToolUse hook
+    expect(api.registerHook).toHaveBeenCalledTimes(2);
+    const events = api.registerHook.mock.calls.map((c: unknown[]) => c[0]);
+    expect(events).toContain('Stop');
+    expect(events).toContain('PostToolUse');
   });
 
   it('subscribes to provider.response events', () => {
@@ -231,5 +234,77 @@ describe('teardown + H1 pattern', () => {
   it('teardown is safe to call before setup (defensive)', () => {
     const api = makeApi();
     expect(() => tokenBudgetPlugin.teardown!(api as never)).not.toThrow();
+  });
+});
+
+// ── PostToolUse context injection ────────────────────────────────────────
+//
+// When the budget crosses the warn/stop thresholds, the PostToolUse
+// hook injects additionalContext so the LLM "feels" the pressure.
+
+function getPostHook(api: MockApi): () => { additionalContext?: string } | void {
+  const call = api.registerHook.mock.calls.find(([event]: unknown[]) => event === 'PostToolUse');
+  if (!call) throw new Error('PostToolUse hook not registered');
+  return (call as unknown[])[2] as ReturnType<typeof getPostHook>;
+}
+
+describe('PostToolUse context injection', () => {
+  it('injects warning context when warnPercent is crossed', () => {
+    const api = makeApi({ extensions: { 'token-budget': { limit: 10000, warnPercent: 80 } } });
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+    const postHook = getPostHook(api);
+
+    // Cross 80% = 8000 tokens
+    handler({ usage: { input: 5000, output: 3000 }, ctx: { model: 'gpt-4o' } });
+
+    // First PostToolUse call after threshold → injects context
+    const result1 = postHook();
+    expect(result1?.additionalContext).toContain('token-budget');
+    expect(result1?.additionalContext).toContain('80%');
+
+    // Second call → silent (one-shot)
+    const result2 = postHook();
+    expect(result2).toBeUndefined();
+  });
+
+  it('injects stop context when stopPercent is crossed', () => {
+    const api = makeApi({ extensions: { 'token-budget': { limit: 1000, stopPercent: 100 } } });
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+    const postHook = getPostHook(api);
+
+    // Exhaust the budget
+    handler({ usage: { input: 600, output: 400 }, ctx: { model: 'gpt-4o' } });
+
+    // PostToolUse → stop context
+    const result = postHook();
+    expect(result?.additionalContext).toContain('HARD LIMIT');
+    expect(result?.additionalContext).toContain('stop');
+  });
+
+  it('stays silent when no threshold crossed', () => {
+    const api = makeApi({ extensions: { 'token-budget': { limit: 10000 } } });
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+    const postHook = getPostHook(api);
+
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
+
+    expect(postHook()).toBeUndefined();
+  });
+
+  it('stays silent when limit=0 (tracking only)', () => {
+    const api = makeApi();
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+    const postHook = getPostHook(api);
+
+    // Accumulate lots
+    for (let i = 0; i < 10; i++) {
+      handler({ usage: { input: 100000, output: 50000 }, ctx: { model: 'gpt-4o' } });
+    }
+
+    expect(postHook()).toBeUndefined();
   });
 });
