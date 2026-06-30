@@ -15,6 +15,7 @@ export default defineConfig({
     'todo-tracker': 'src/todo-tracker/index.ts',
     'token-budget': 'src/token-budget/index.ts',
     'lint-gate': 'src/lint-gate/index.ts',
+    'branch-guard': 'src/branch-guard/index.ts',
   },
   format: ['esm'],
   dts: true,
