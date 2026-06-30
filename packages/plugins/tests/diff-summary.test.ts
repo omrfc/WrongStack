@@ -166,6 +166,71 @@ describe('config parsing', () => {
     const status = await getStatusTool(api).execute({});
     expect(status.maxLines).toBe(50);
   });
+
+  it('defaults includeContext to 3', async () => {
+    const api = makeApi();
+    diffSummaryPlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.includeContext).toBe(3);
+  });
+
+  it('parses includeContext from config', async () => {
+    const api = makeApi({ extensions: { 'diff-summary': { includeContext: 0 } } });
+    diffSummaryPlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.includeContext).toBe(0);
+  });
+});
+
+describe('includeContext in git diff command', () => {
+  it('passes -U0 when includeContext=0', () => {
+    const api = makeApi({ extensions: { 'diff-summary': { includeContext: 0 } } });
+    diffSummaryPlugin.setup(api as never);
+    const hook = getHook(api);
+    hook({
+      toolName: 'write',
+      toolInput: { path: 'src/test.ts', content: 'x' },
+      toolResult: { content: 'ok', isError: false },
+    });
+    // Verify the mock was called with -U0 in the diff command
+    const diffCall = mockExecSync.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).includes('git diff') && !(c[0] as string).includes('ls-files'),
+    );
+    expect(diffCall).toBeDefined();
+    expect((diffCall![0] as string)).toContain('-U0');
+  });
+
+  it('passes -U5 when includeContext=5', () => {
+    const api = makeApi({ extensions: { 'diff-summary': { includeContext: 5 } } });
+    diffSummaryPlugin.setup(api as never);
+    const hook = getHook(api);
+    hook({
+      toolName: 'write',
+      toolInput: { path: 'src/test.ts', content: 'x' },
+      toolResult: { content: 'ok', isError: false },
+    });
+    const diffCall = mockExecSync.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).includes('git diff') && !(c[0] as string).includes('ls-files'),
+    );
+    expect(diffCall).toBeDefined();
+    expect((diffCall![0] as string)).toContain('-U5');
+  });
+
+  it('passes -U3 by default', () => {
+    const api = makeApi();
+    diffSummaryPlugin.setup(api as never);
+    const hook = getHook(api);
+    hook({
+      toolName: 'write',
+      toolInput: { path: 'src/test.ts', content: 'x' },
+      toolResult: { content: 'ok', isError: false },
+    });
+    const diffCall = mockExecSync.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).includes('git diff') && !(c[0] as string).includes('ls-files'),
+    );
+    expect(diffCall).toBeDefined();
+    expect((diffCall![0] as string)).toContain('-U3');
+  });
 });
 
 describe('teardown + H1 pattern', () => {

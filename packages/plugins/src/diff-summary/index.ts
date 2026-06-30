@@ -68,12 +68,19 @@ interface DiffSummaryConfig {
   showStat: boolean;
   /** "diff" (unified diff), "stat" (counts only), "off" (disabled). */
   mode: Mode;
+  /**
+   * Number of context lines around each change in the unified diff.
+   * Maps to git's `-U<N>` flag. 0 = no context (compact), 3 = git
+   * default, higher = more surrounding lines for orientation.
+   */
+  includeContext: number;
 }
 
 const DEFAULTS: DiffSummaryConfig = {
   maxLines: 50,
   showStat: true,
   mode: 'diff',
+  includeContext: 3,
 };
 
 function readConfig(raw: unknown): DiffSummaryConfig {
@@ -83,6 +90,7 @@ function readConfig(raw: unknown): DiffSummaryConfig {
     maxLines: typeof r['maxLines'] === 'number' && r['maxLines'] > 0 ? r['maxLines'] : DEFAULTS.maxLines,
     showStat: r['showStat'] !== false,
     mode: r['mode'] === 'stat' ? 'stat' : r['mode'] === 'off' ? 'off' : 'diff',
+    includeContext: typeof r['includeContext'] === 'number' && r['includeContext'] >= 0 ? r['includeContext'] : DEFAULTS.includeContext,
   };
 }
 
@@ -108,7 +116,7 @@ interface DiffResult {
  *
  * Returns null if not in a git repo or git is unavailable.
  */
-function getGitDiff(filePath: string, cwd?: string): DiffResult | null {
+function getGitDiff(filePath: string, contextLines: number, cwd?: string): DiffResult | null {
   const opts = {
     encoding: 'utf-8' as const,
     timeout: 3_000,
@@ -127,13 +135,14 @@ function getGitDiff(filePath: string, cwd?: string): DiffResult | null {
 
   try {
     let rawDiff: string;
+    const contextFlag = `-U${contextLines}`;
     if (isTracked) {
       // Standard diff for tracked files
-      rawDiff = execSync(`git diff -- "${filePath}"`, opts);
+      rawDiff = execSync(`git diff ${contextFlag} -- "${filePath}"`, opts);
     } else {
       // New/untracked file — diff against /dev/null
       try {
-        rawDiff = execSync(`git diff --no-index /dev/null "${filePath}"`, opts);
+        rawDiff = execSync(`git diff --no-index ${contextFlag} /dev/null "${filePath}"`, opts);
       } catch (err: unknown) {
         // git diff --no-index exits 1 when there ARE differences (which is
         // what we want). stdout has the diff.
@@ -217,6 +226,12 @@ const plugin: Plugin = {
         default: 'diff',
         description: '"diff" injects unified diff; "stat" injects only +N -M counts; "off" disables the hook.',
       },
+      includeContext: {
+        type: 'number',
+        minimum: 0,
+        default: 3,
+        description: 'Context lines around each change (git -U<N>). 0 = compact (no surrounding lines), 3 = git default, higher = more orientation.',
+      },
     },
   },
 
@@ -248,7 +263,7 @@ const plugin: Plugin = {
 
       state.invocationCount += 1;
 
-      const result = getGitDiff(filePath, cwd);
+      const result = getGitDiff(filePath, cfg.includeContext, cwd);
       if (!result) {
         state.fallbackCount += 1;
         return; // not a git repo or git failed — silent
@@ -300,6 +315,7 @@ const plugin: Plugin = {
           mode: cfg.mode,
           maxLines: cfg.maxLines,
           showStat: cfg.showStat,
+          includeContext: cfg.includeContext,
           counters: {
             invocations: state.invocationCount,
             injected: state.injectedCount,
