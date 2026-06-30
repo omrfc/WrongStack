@@ -91,7 +91,10 @@ export async function applyWrongStackPack(
   if (pack.slashCommands) {
     const cmds = [...pack.slashCommands];
     host.slashCommands.registerAll(cmds, owner);
-    for (const c of cmds) registeredCommandNames.push(c.name);
+    // SlashCommandRegistry stores plugin-owned commands under `${owner}:${name}`;
+    // track the real lookup key so teardown can unregister them.
+    for (const c of cmds)
+      registeredCommandNames.push(owner === 'core' ? c.name : `${owner}:${c.name}`);
   }
   if (pack.extensions && host.extensions) {
     for (const ext of pack.extensions) {
@@ -113,17 +116,17 @@ export async function applyWrongStackPack(
       // then tools, then providers. Extensions are unregistered before
       // tools/commands because extensions may depend on those capabilities;
       // tearing them down first avoids dangling refs.
-      for (const unregister of unregisterExtensions.reverse()) {
-        unregister();
+      for (let i = unregisterExtensions.length - 1; i >= 0; i--) {
+        unregisterExtensions[i]!();
       }
-      for (const name of registeredCommandNames.reverse()) {
-        host.slashCommands.unregister(name);
+      for (let i = registeredCommandNames.length - 1; i >= 0; i--) {
+        host.slashCommands.unregister(registeredCommandNames[i]!);
       }
-      for (const name of registeredToolNames.reverse()) {
-        host.tools.unregister(name);
+      for (let i = registeredToolNames.length - 1; i >= 0; i--) {
+        host.tools.unregister(registeredToolNames[i]!);
       }
-      for (const type of registeredProviderTypes.reverse()) {
-        host.providers.unregister(type);
+      for (let i = registeredProviderTypes.length - 1; i >= 0; i--) {
+        host.providers.unregister(registeredProviderTypes[i]!);
       }
       throw setupErr;
     }
@@ -133,19 +136,19 @@ export async function applyWrongStackPack(
     pack,
     owner,
     async teardown() {
-      for (const unregister of unregisterExtensions.reverse()) {
-        unregister();
+      for (let i = unregisterExtensions.length - 1; i >= 0; i--) {
+        unregisterExtensions[i]!();
       }
       // Unregister commands, tools, and providers so the same pack can be
       // re-loaded cleanly without name/type conflicts.
-      for (const name of registeredCommandNames.reverse()) {
-        host.slashCommands.unregister(name);
+      for (let i = registeredCommandNames.length - 1; i >= 0; i--) {
+        host.slashCommands.unregister(registeredCommandNames[i]!);
       }
-      for (const name of registeredToolNames.reverse()) {
-        host.tools.unregister(name);
+      for (let i = registeredToolNames.length - 1; i >= 0; i--) {
+        host.tools.unregister(registeredToolNames[i]!);
       }
-      for (const type of registeredProviderTypes.reverse()) {
-        host.providers.unregister(type);
+      for (let i = registeredProviderTypes.length - 1; i >= 0; i--) {
+        host.providers.unregister(registeredProviderTypes[i]!);
       }
       if (pack.teardown) {
         if (!opts.api) {
@@ -175,7 +178,8 @@ export async function applyWrongStackPacks(
     // process.emitWarning so they don't mask the original error but
     // remain visible — a silent teardown failure can leave state
     // half-initialized in ways that make the next run fail mysteriously.
-    for (const mounted of applied.reverse()) {
+    for (let i = applied.length - 1; i >= 0; i--) {
+      const mounted = applied[i]!;
       await mounted.teardown().catch((teardownErr) => {
         const detail = teardownErr instanceof Error ? teardownErr.message : String(teardownErr);
         process.emitWarning(

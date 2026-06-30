@@ -1,11 +1,11 @@
 import {
   EventBus,
   ExtensionRegistry,
+  type Provider,
   ProviderRegistry,
   SlashCommandRegistry,
-  ToolRegistry,
-  type Provider,
   type Tool,
+  ToolRegistry,
 } from '@wrongstack/core';
 import { describe, expect, it } from 'vitest';
 import {
@@ -126,6 +126,9 @@ describe('runtime host composition', () => {
     await applied.teardown();
 
     expect(host.extensions.list()).toEqual([]);
+    expect(host.tools.get('noop')).toBeUndefined();
+    expect(host.providers.has('noop')).toBe(false);
+    expect(host.slashCommands.get('test-pack:hello')).toBeUndefined();
   });
 
   it('rolls back previously applied packs when a later pack fails', async () => {
@@ -150,7 +153,8 @@ describe('runtime host composition', () => {
     const warnings: string[] = [];
     const originalEmit = process.emitWarning;
     // process.emitWarning has multiple overload signatures — capture as any.
-    process.emitWarning = ((msg: string) => warnings.push(String(msg))) as typeof process.emitWarning;
+    process.emitWarning = ((msg: string) =>
+      warnings.push(String(msg))) as typeof process.emitWarning;
     try {
       const flaky: WrongStackPack = {
         name: 'flaky',
@@ -175,7 +179,7 @@ describe('runtime host composition', () => {
 
   it('invokes pack.teardown(api) when teardown is defined and api is provided', async () => {
     const host = hostParts();
-    let teardownCalledWith: unknown ;
+    let teardownCalledWith: unknown;
     const api = { token: 'api-instance' } as never;
     const pack: WrongStackPack = {
       name: 'with-teardown',
@@ -190,5 +194,89 @@ describe('runtime host composition', () => {
     const applied = await applyWrongStackPack(host, pack, { api });
     await applied.teardown();
     expect(teardownCalledWith).toBe(api);
+  });
+
+  it('teardown is idempotent — calling it twice does not throw or re-register', async () => {
+    const host = hostParts();
+    const pack: WrongStackPack = {
+      name: 'idempotent-pack',
+      tools: [noopTool],
+      providers: [{ type: 'noop', family: 'openai-compatible', create: () => noopProvider }],
+      slashCommands: [
+        {
+          name: 'hi',
+          description: 'Hi.',
+          async run() {
+            return { message: 'hi' };
+          },
+        },
+      ],
+      extensions: [{ name: 'idempotent-ext' }],
+    };
+
+    const applied = await applyWrongStackPack(host, pack);
+    await applied.teardown();
+    await applied.teardown();
+
+    expect(host.extensions.list()).toEqual([]);
+    expect(host.tools.get('noop')).toBeUndefined();
+    expect(host.providers.has('noop')).toBe(false);
+    expect(host.slashCommands.get('idempotent-pack:hi')).toBeUndefined();
+  });
+
+  it('rolls back and then allows a clean teardown after a setup error', async () => {
+    const host = hostParts();
+    const first: WrongStackPack = {
+      name: 'first',
+      tools: [noopTool],
+      extensions: [{ name: 'first-ext' }],
+    };
+    const second: WrongStackPack = {
+      name: 'second',
+      setup() {
+        throw new Error('setup-boom');
+      },
+    };
+
+    await expect(applyWrongStackPacks(host, [first, second], { api: {} as never })).rejects.toThrow(
+      'setup-boom',
+    );
+
+    expect(host.extensions.list()).toEqual([]);
+    expect(host.tools.get('noop')).toBeUndefined();
+  });
+
+  it('rolls back packs in reverse registration order during error rollback', async () => {
+    const host = hostParts();
+    const order: string[] = [];
+    const first: WrongStackPack = {
+      name: 'first',
+      async setup() {
+        order.push('first-setup');
+      },
+      async teardown() {
+        order.push('first-teardown');
+      },
+    };
+    const second: WrongStackPack = {
+      name: 'second',
+      async setup() {
+        order.push('second-setup');
+      },
+      async teardown() {
+        order.push('second-teardown');
+      },
+    };
+    const third: WrongStackPack = {
+      name: 'third',
+      setup() {
+        throw new Error('third-boom');
+      },
+    };
+
+    await expect(
+      applyWrongStackPacks(host, [first, second, third], { api: {} as never }),
+    ).rejects.toThrow('third-boom');
+    expect(order).toEqual(['first-setup', 'second-setup', 'second-teardown', 'first-teardown']);
   });
 });
