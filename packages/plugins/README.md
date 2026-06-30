@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Thirteen focused, single-purpose plugins ship in this package and load
+Fourteen focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -34,6 +34,7 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 11 | [`token-budget`](./src/token-budget) | `token_budget_status` | `Stop` | Enforces a per-session token budget — warns at `warnPercent`, stops agent loop at `stopPercent` |
 | 12 | [`lint-gate`](./src/lint-gate) | `lint_gate_status` | `PreToolUse` (`write\|edit`) | Runs biome/eslint on would-be file content before write or edit commits; blocks or warns on lint issues |
 | 13 | [`branch-guard`](./src/branch-guard) | `branch_guard_status` | `PreToolUse` (`bash\|git_autocommit`) | Blocks commits, pushes, and merges to protected branches (default: main, master) |
+| 14 | [`diff-summary`](./src/diff-summary) | `diff_summary_status` | `PostToolUse` (`write\|edit`) | Injects compact git diff into LLM context after every write or edit |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -353,6 +354,37 @@ git stash → git checkout -b feat/my-change → git stash pop → git commit ..
 Each operation type can be individually toggled. `git_autocommit`
 tool calls are treated as commits.
 
+### 14. `diff-summary` — post-write/edit diff injection
+
+**Tools**: `diff_summary_status`
+**Hooks**: `PostToolUse` (matcher `write|edit`)
+
+After every `write` or `edit` completes, runs `git diff -- <path>`
+and injects a capped unified diff into the LLM's context as
+`additionalContext`. Gives the LLM immediate visibility into what its
+change actually did to the file — confirming the edit applied correctly
+and showing surrounding context.
+
+```jsonc
+{
+  "extensions": {
+    "diff-summary": {
+      "maxLines": 50,       // cap diff context at N lines
+      "showStat": true,     // include "+N -M" summary line
+      "mode": "diff"        // "diff" | "stat" | "off"
+    }
+  }
+}
+```
+
+**Modes**:
+- **`diff`** (default): injects unified diff body (capped at `maxLines`) + `+N -M` header
+- **`stat`**: injects only `+N -M` counts (no diff body)
+- **`off`**: disabled entirely
+
+For untracked/new files: uses `git diff --no-index /dev/null <path>`.
+For non-git repos: silent fallback (no injection). Skips on tool errors.
+
 ## Configuration patterns
 
 There are two surfaces for plugin configuration:
@@ -390,7 +422,7 @@ To disable a single built-in without removing its config:
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
 `todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
-`token-budget`, `lint-gate`, `branch-guard`) follow a strict lifecycle to survive hot-reload
+`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's
