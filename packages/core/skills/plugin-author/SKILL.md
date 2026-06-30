@@ -19,7 +19,7 @@ Guides the creation and maintenance of first-party plugins in
 the `Plugin` interface from `@wrongstack/core`, registering tools,
 hooks, slash commands, or pipelines into the agent's runtime.
 
-There are currently **14 official plugins** in the suite:
+There are currently **15 official plugins** in the suite:
 
 | Plugin | Tools | Hooks | Stateful |
 |--------|-------|-------|----------|
@@ -37,6 +37,7 @@ There are currently **14 official plugins** in the suite:
 | `lint-gate` | `lint_gate_status` | `PreToolUse` (`write\|edit`) | ✅ teardown+health |
 | `branch-guard` | `branch_guard_status` | `PreToolUse` (`bash\|git_autocommit`) | ✅ teardown+health |
 | `diff-summary` | `diff_summary_status` | `PostToolUse` (`write\|edit`) | ✅ teardown+health |
+| `commit-validator` | `commit_validator_status` | `PreToolUse` (`bash\|git_autocommit`) | ✅ teardown+health |
 
 ## Rules
 

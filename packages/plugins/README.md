@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Fourteen focused, single-purpose plugins ship in this package and load
+Fifteen focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -35,6 +35,7 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 12 | [`lint-gate`](./src/lint-gate) | `lint_gate_status` | `PreToolUse` (`write\|edit`) | Runs biome/eslint on would-be file content before write or edit commits; blocks or warns on lint issues |
 | 13 | [`branch-guard`](./src/branch-guard) | `branch_guard_status` | `PreToolUse` (`bash\|git_autocommit`) | Blocks commits, pushes, and merges to protected branches (default: main, master) |
 | 14 | [`diff-summary`](./src/diff-summary) | `diff_summary_status` | `PostToolUse` (`write\|edit`) | Injects compact git diff into LLM context after every write or edit |
+| 15 | [`commit-validator`](./src/commit-validator) | `commit_validator_status` | `PreToolUse` (`bash\|git_autocommit`) | Validates conventional-commit format before git_autocommit or bash git commit runs |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -385,6 +386,42 @@ and showing surrounding context.
 For untracked/new files: uses `git diff --no-index /dev/null <path>`.
 For non-git repos: silent fallback (no injection). Skips on tool errors.
 
+### 15. `commit-validator` — conventional-commit enforcement
+
+**Tools**: `commit_validator_status`
+**Hooks**: `PreToolUse` (matcher `bash|git_autocommit`)
+
+Parses the commit message from `git commit -m "..."` (bash) or the
+`message` field (git_autocommit) and validates it against the
+conventional-commit format:
+
+```
+<type>[(scope)][!]: <description>
+```
+
+**Checks**:
+- Valid format (type + colon + subject)
+- Type is in `allowedTypes` (if configured; empty = allow all standard + custom)
+- Scope is present (if `requireScope: true`)
+- Subject ≤ `maxSubjectLength` (default: 72)
+- Subject does not end with a period
+
+```jsonc
+{
+  "extensions": {
+    "commit-validator": {
+      "mode": "block",          // "block" | "warn"
+      "requireScope": false,    // require (scope) in message
+      "allowedTypes": [],       // empty = all; or ["feat", "fix", "docs"]
+      "maxSubjectLength": 72
+    }
+  }
+}
+```
+
+Standard types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
+`test`, `build`, `ci`, `chore`, `revert`.
+
 ## Configuration patterns
 
 There are two surfaces for plugin configuration:
@@ -422,7 +459,7 @@ To disable a single built-in without removing its config:
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
 `todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
-`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`) follow a strict lifecycle to survive hot-reload
+`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's

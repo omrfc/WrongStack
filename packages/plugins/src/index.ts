@@ -1,7 +1,7 @@
 /**
  * @wrongstack/plugins — Official WrongStack Plugin Suite
  *
- * Exported plugins (14 total):
+ * Exported plugins (15 total):
  *  1. auto-doc         — Auto-generates JSDoc/TSDoc (dryRun for preview)
  *  2. git-autocommit  — AI-powered commit messages (git_autocommit/status_summary removed)
  *  3. shell-check     — Runs shellcheck on files or directories (merged)
@@ -22,6 +22,8 @@
  *                        merges to protected branches (default: main, master)
  * 14. diff-summary    — Post-tool hook that injects a compact git diff
  *                        into the LLM context after every write or edit
+ * 15. commit-validator — Pre-tool hook that validates conventional-commit
+ *                        format before git_autocommit or bash git commit runs
  *
  * Removed (use the equivalent built-in tools instead — see
  * `DEPRECATED_PLUGIN_NAMES` in `packages/cli/src/wiring/plugins.ts`
