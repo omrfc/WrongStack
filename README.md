@@ -8,7 +8,7 @@
 
 [![npm](https://img.shields.io/npm/v/wrongstack?style=flat-square&color=0b7285&label=npm)](https://www.npmjs.com/package/wrongstack)
 [![downloads](https://img.shields.io/npm/dm/wrongstack?style=flat-square&color=0b7285)](https://www.npmjs.com/package/wrongstack)
-[![node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
+[![node](https://img.shields.io/badge/node-%E2%89%A5%2022.19-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![tests](https://img.shields.io/badge/tests-passing-2f9e44?style=flat-square)](#status)
 [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
@@ -37,7 +37,7 @@ WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **mu
 
 ## Requirements
 
-- **Node.js** ≥ 22.0.0
+- **Node.js** ≥ 22.19.0
 - **pnpm** ≥ 9.0.0 (recommended) or npm
 
 ## Install
@@ -380,7 +380,7 @@ Four-layer observability:
 ### Security
 
 - **Permission policy** (`trust.json`): per-tool allow/deny, persisted to disk, applies to subagents
-- **YOLO mode** (`--yolo` or `/yolo`): skips all permission prompts — for CI and trusted workflows
+- **YOLO mode** (`--yolo` or `/yolo`): auto-approves normal project work; clearly destructive calls still require explicit confirmation
 - **Bash tool env allowlist**: `WRONGSTACK_BASH_ENV_PASSTHROUGH=1` disables the allowlist (legacy unsafe mode — see `SECURITY.md`)
 - **`WRONGSTACK_FETCH_ALLOW_PRIVATE=1`**: enables localhost/private IPs in the `fetch` tool
 - **AES-256-GCM** encryption for all secrets at rest
@@ -424,23 +424,19 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.276.2.** The tool consolidation, local-gateway
-auto-discovery, and WebUI modularization release. A **tool-family consolidation**
-pass merges duplicate tools, standardizes params and categories, and retires the
-redundant `web-search` / `json-path` plugin stubs (folded into the built-in
-`search` and `json` tools). **Local-LLM gateway auto-discovery** adds OmniRoute to
-the built-in catalog, probes keyless loopback gateways for their model list at
-boot, and surfaces those keyless providers across every picker — CLI startup,
-`/model`, the `wstack auth` menu, and the WebUI provider selectors — with
-local-server presets (OmniRoute / Ollama / vLLM / LM Studio). The **WebUI server
-god-module** was split into an 11-module `server/` layout, alongside F5
-client-state resilience, browser-side subscription OAuth login, an analytics
-dashboard, and a referral surface. Plus a **CI workflow + structured-error
-migration** (bare `Error` → `WrongStackError` across 5 packages), a `review`
-mailbox message type, kernel/security/storage/execution hardening, and a
-memory-search O(1) fast path. All workspace packages and the marketing site are
-aligned to `0.276.2` in lockstep. Additive only — no breaking changes for end
-users.
+**Current release: 0.277.0.** The permission-hardening, Windows command-shim,
+and tool-output polish release. **YOLO** now auto-approves normal trusted work
+while clearly destructive shell/exec/write calls still prompt; the legacy
+`--confirm-destructive`, `--yolo-destructive`, and `--force-all-yolo` flags are
+compatibility-only and do not bypass that gate. Windows `.cmd` / `.bat` launches
+now use a vetted `cmd.exe` shim across tools and ACP paths, fixing
+path-with-spaces cases without reopening shell-injection risk. `search` and
+`fetch` are smoother auto-permission read-only network tools; search parsing,
+ranking, fallback, and caching are more resilient; and the TUI now shows exec
+danger chips plus consistent bash/shell/exec previews. Also includes
+project-root containment fixes for `design` / `json` file paths, broader
+default `exec` developer tooling, dependency updates through `@types/node@26`,
+and lockstep `0.277.0` package alignment.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -457,7 +453,7 @@ wstack auth login chatgpt
 wrongstack          # provider list → model list → save prompt → REPL
 wrongstack --tui    # same, then enters TUI
 
-# TUI + YOLO (skip all permission prompts)
+# TUI + YOLO (auto-approve normal project work)
 wrongstack --tui --yolo
 
 # Specific provider/model — skip the picker
@@ -510,7 +506,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 --no-features        Minimal kernel — no MCP, plugins, memory, models.dev, skills
 --no-models-refresh  Skip the boot-time models.dev catalog refresh (offline/CI)
 --token-saving-mode  Lean prompt: 10 Tier-1 tools, compact skills, lazy MCP (mcp_use)
---yolo               Auto-allow all tool calls (don't ask for confirmation)
+--yolo               Auto-approve normal project work; destructive calls still prompt
 --director           Enable Director-based fleet orchestration (LLM-driven subagent planning)
 --goal "<task>"      Boot directly into goal mode — GOAL preamble injected, TUI auto-enabled
 --ask "<text>"       Submit one turn verbatim on TUI boot (no preamble)
@@ -548,7 +544,7 @@ Every built-in command is tagged with a category (`Run` · `Session` · `Inspect
 | `/queue` | _(TUI)_ Show, clear, or delete entries from the in-flight message queue. `/queue picker on\|off` toggles the mid-run send-mode picker (Queue / By the way / Steer) that pops when you submit a plain message while the agent is busy |
 | `/plan show\|add\|start\|done\|remove\|clear` | Per-session plan JSON. Mirrored to disk; surfaces `📋 ⌛N ☐N ✓N` chip in TUI status bar |
 | `/autonomy off\|suggest\|on\|eternal\|parallel\|stop\|toggle` | Self-driving mode. `suggest` shows next steps without executing; `on` auto-continues; `eternal` runs goal-driven loop; `parallel` fans out 4-8 subagents per tick. TUI shows `∞ AUTO` / `∞ SUGGEST` / `ETERNAL` / `⟳ PARALLEL` chip |
-| `/yolo on\|off\|toggle` | Flip YOLO mode (auto-approve all tool calls). `/yolo` alone shows status. TUI shows `⚠ YOLO` chip |
+| `/yolo on\|off\|toggle` | Flip YOLO mode (auto-approve normal project work; destructive calls still prompt). `/yolo` alone shows status. TUI shows `⚠ YOLO` chip |
 | `/interrupt` (aliases `/stop`, `/int`) | Stop the in-flight leader run **and** terminate the whole fleet — for when `Esc` is eaten by tmux or you're driving from the WebUI. REPL `Ctrl+C` now also stops subagents |
 | `/mode` | Switch persona: `default`, `code-reviewer`, `code-auditor`, `architect`, `debugger`, `tester`, `devops`, `refactorer`. Custom modes in `~/.wrongstack/modes/` |
 | `/model` | _(TUI)_ Two-step provider → model picker. In the plain REPL, relaunch with `--provider` / `--model` |
@@ -698,10 +694,10 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **9300+ tests passing** across 500+ test files in the 0.276.2 release gate
+- **9300+ tests passing** across 500+ test files in the 0.277.0 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
-- Node 22+ only, ESM-only, no CommonJS bundles
+- Node 22.19+ only, ESM-only, no CommonJS bundles
 - Release gate verified locally: `pnpm audit --audit-level=moderate` + `pnpm typecheck` + `pnpm test` + `pnpm build`
 - Threat model: [`SECURITY.md`](SECURITY.md)
 

@@ -7,17 +7,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.277.0] — 2026-06-30
+
+> The **permission hardening, Windows command-shim, and tool-output polish**
+> release. YOLO now auto-approves normal trusted work while still forcing an
+> explicit per-call approval for clearly destructive operations; the legacy
+> destructive override flags remain accepted for compatibility but no longer
+> bypass that gate. Windows `.cmd` / `.bat` execution now goes through a vetted
+> `cmd.exe` shim across tools and ACP launch paths, fixing path-with-spaces
+> failures without reopening shell-injection holes. Search/fetch are smoother
+> as auto-permission read-only network tools, search parsing/ranking is more
+> resilient, and the TUI now renders command danger levels plus consistent
+> bash/exec output previews. Also includes project-root containment fixes for
+> design/json file paths, dependency updates through `@types/node@26`, and
+> lockstep `0.277.0` package alignment.
+
+### Added
+
+- **TUI exec danger chips.** Tool history now surfaces `exec` danger metadata as
+  compact `DESTRUCTIVE` / `CAUTION` banners with the first matching reason, plus
+  stacked secondary reasons when present.
+
+- **Windows command-shim helpers.** New vetted `buildWin32CmdShimInvocation()`
+  helpers in the tools, CLI, and ACP paths launch `.cmd` / `.bat` wrappers
+  through `cmd.exe /d /c call ...` with metacharacter rejection and quoted
+  arguments.
+
+- **Broader default `exec` allowlist.** The restricted `exec` tool now covers a
+  much wider set of common developer, Windows, cloud, archive, database, VCS,
+  security, document-conversion, and inspection commands while retaining
+  argument-level destructive-pattern checks.
+
+- **Brain decision-log module.** The rolling `/brain status` log subscription
+  moved out of `cli-main.ts` into `packages/cli/src/boot/brain-decision-log.ts`
+  with dedicated tests and teardown handling.
+
 ### Changed
 
-- **Major dependency bump: `@types/node` 25.9.4 → 26.0.1 across all 14
-  workspaces.** Added `engines.node: ">=22.19.0"` is already satisfied (Node 26
-  is in the supported range). TypeScript 6.0.3 is compatible. No source-code
-  changes required; the bump tracks upstream Node type definitions matching the
-  runtime the project already pins. Root `overrides.undici-types` raised from
-  `^8.4.0` to `^8.5.0` to align with `@types/node@26`'s `~8.3.0` requirement
-  under pnpm's override resolution. Verified with `pnpm typecheck` across all
-  16 workspaces and `pnpm audit --audit-level=high` (no vulnerabilities).
+- **YOLO destructive confirmation is always on.** `--yolo` and `/yolo` now mean
+  "auto-approve normal project work"; clearly destructive shell/exec/write
+  operations still prompt. `--confirm-destructive`, `--yolo-destructive`, and
+  `--force-all-yolo` are deprecated compatibility flags and do not bypass the
+  destructive gate. Session soft-allows are one-shot, and the destructive gate
+  runs before trust-file allow rules.
 
+- **Search and fetch are auto-permission read-only network tools.** Both still
+  carry the `net.outbound` capability and SSRF/private-network safeguards, but
+  ordinary web lookup no longer needs a confirmation prompt.
+
+- **Search result handling is more resilient.** DuckDuckGo and Bing parsers now
+  handle modern markup variants, unwrap redirect URLs, decode HTML entities,
+  rank by query overlap after URL de-duping, and fall back to DuckDuckGo when
+  Google/Bing return no relevant static results. Cache entries preserve the
+  effective result source.
+
+- **Command output previews are standardized.** TUI formatting now handles both
+  `stdout`/`stderr` and `output`/`error` result shapes, accepts `timed_out` and
+  `timedOut`, and uses one compact line-count/preview shape for `bash`,
+  `shell`, and `exec`.
+
+- **Dependency and runtime metadata refreshed.** `@types/node` moved from
+  `25.9.4` to `26.0.1` across all 14 workspaces, `undici-types` to `^8.5.0`,
+  Biome to `^2.5.1`, and Playwright to `^1.61.1`; the root engine floor is now
+  `node >=22.19.0`. TypeScript 6.0.3 remains compatible, and the root
+  `typecheck` script now runs the recursive workspace typecheck without
+  `--parallel`. Verified with `pnpm typecheck` across all 16 workspaces and
+  `pnpm audit --audit-level=high` (no vulnerabilities).
+
+### Fixed
+
+- **CWE-22 path containment fixes.** `design { action: "materialize" }` now
+  rejects caller-supplied output paths that would escape the project root, and
+  the `json` tool resolves file reads through the project containment helper.
+
+- **Windows `.cmd` / `.bat` spawning with paths that contain spaces.** `exec`,
+  `outdated`, spawn-background helpers, CLI utilities, and ACP probe/transport
+  paths now use the same shim instead of Node's `shell: true` argument path.
+
+- **TUI diff background compatibility.** DiffBlock background washes now render
+  only when the terminal reports background-color support, avoiding washed-out
+  blocks on limited terminals.
+
+- **Autonomy next-step drift while todos are open.** REPL/TUI suggestion parsing
+  suppresses `<next_steps>` while live todos are still pending or in progress,
+  preventing `/next` and auto-suggest flows from pivoting away mid-task.
+
+- **Shadow-agent and fleet shutdown races.** Shadow passes now bail after
+  `workComplete()`, expected internal spawn-budget races are swallowed, and
+  fleet/director manifest writes are flushed and serialized on shutdown.
+
+- **Plugin/tool packaging edge cases.** `@wrongstack/tools/codebase-index` is
+  now exported for plugin consumers, and a new built-in executor smoke test
+  asserts permission/mutation invariants across registered tools.
+
+### Changed — versions
+
+- **All workspace packages aligned to 0.277.0**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/plugins`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`,
+  `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`,
+  `@wrongstack/acp`, `@wrongstack/bench`, and the umbrella `apps/wrongstack`.
+  The marketing site (`website/`) is aligned in lockstep. The interim
+  `0.276.3` and `0.276.4` bumps are folded into this documented release.
 
 ## [0.276.2] — 2026-06-29
 
