@@ -308,3 +308,75 @@ describe('PostToolUse context injection', () => {
     expect(postHook()).toBeUndefined();
   });
 });
+
+// ── Wildcard model matching ─────────────────────────────────────────────
+
+describe('model wildcard matching', () => {
+  it('matches exact model name (no wildcard)', async () => {
+    const api = makeApi({ extensions: { 'token-budget': { limit: 100000, model: 'gpt-4o' } } });
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
+    handler({ usage: { input: 5000, output: 5000 }, ctx: { model: 'claude-3-5-sonnet' } });
+
+    const result = await getStatusTool(api).execute({});
+    // Only gpt-4o counted (1500), claude excluded
+    expect(result.consumed).toBe(1500);
+  });
+
+  it('matches with trailing wildcard "gpt-4*"', async () => {
+    const api = makeApi({ extensions: { 'token-budget': { limit: 100000, model: 'gpt-4*' } } });
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+
+    // All three should match "gpt-4*"
+    handler({ usage: { input: 1000, output: 0 }, ctx: { model: 'gpt-4' } });
+    handler({ usage: { input: 2000, output: 0 }, ctx: { model: 'gpt-4o' } });
+    handler({ usage: { input: 3000, output: 0 }, ctx: { model: 'gpt-4o-mini' } });
+    // This should NOT match
+    handler({ usage: { input: 99999, output: 0 }, ctx: { model: 'claude-3-5-sonnet' } });
+
+    const result = await getStatusTool(api).execute({});
+    // 1000 + 2000 + 3000 = 6000
+    expect(result.consumed).toBe(6000);
+  });
+
+  it('matches with wildcard "claude-*"', async () => {
+    const api = makeApi({ extensions: { 'token-budget': { limit: 100000, model: 'claude-*' } } });
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+
+    handler({ usage: { input: 1000, output: 0 }, ctx: { model: 'claude-3-5-sonnet' } });
+    handler({ usage: { input: 2000, output: 0 }, ctx: { model: 'claude-3-opus' } });
+    handler({ usage: { input: 99999, output: 0 }, ctx: { model: 'gpt-4o' } });
+
+    const result = await getStatusTool(api).execute({});
+    // Only claude models counted
+    expect(result.consumed).toBe(3000);
+  });
+
+  it('case-insensitive matching', async () => {
+    const api = makeApi({ extensions: { 'token-budget': { limit: 100000, model: 'GPT-4*' } } });
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+
+    handler({ usage: { input: 1000, output: 0 }, ctx: { model: 'gpt-4o' } });
+    handler({ usage: { input: 2000, output: 0 }, ctx: { model: 'GPT-4O-MINI' } });
+
+    const result = await getStatusTool(api).execute({});
+    expect(result.consumed).toBe(3000);
+  });
+
+  it('empty string = all models', async () => {
+    const api = makeApi({ extensions: { 'token-budget': { limit: 100000, model: '' } } });
+    tokenBudgetPlugin.setup(api as never);
+    const handler = getResponseHandler(api);
+
+    handler({ usage: { input: 1000, output: 0 }, ctx: { model: 'gpt-4o' } });
+    handler({ usage: { input: 2000, output: 0 }, ctx: { model: 'claude-3-5-sonnet' } });
+
+    const result = await getStatusTool(api).execute({});
+    expect(result.consumed).toBe(3000);
+  });
+});

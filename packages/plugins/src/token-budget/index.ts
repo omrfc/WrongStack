@@ -88,6 +88,20 @@ const DEFAULTS: TokenBudgetConfig = {
   model: '',
 };
 
+/**
+ * Check if a model name matches a pattern. Supports '*' as a trailing
+ * wildcard: "gpt-4*" matches "gpt-4", "gpt-4o", "gpt-4o-mini".
+ * No wildcard = exact match (case-insensitive).
+ */
+function modelMatches(pattern: string, model: string): boolean {
+  if (pattern === '') return true;
+  if (pattern.endsWith('*')) {
+    const prefix = pattern.slice(0, -1).toLowerCase();
+    return model.toLowerCase().startsWith(prefix);
+  }
+  return model.toLowerCase() === pattern.toLowerCase();
+}
+
 function readConfig(raw: unknown): TokenBudgetConfig {
   if (!raw || typeof raw !== 'object') return { ...DEFAULTS };
   const r = raw as Record<string, unknown>;
@@ -136,7 +150,7 @@ const plugin: Plugin = {
       model: {
         type: 'string',
         default: '',
-        description: 'Restrict counting to a specific model. Empty string = count all models.',
+        description: 'Restrict counting to a specific model. Supports "*" trailing wildcard (e.g. "gpt-4*" matches gpt-4o, gpt-4o-mini). Empty string = count all models.',
       },
     },
   },
@@ -166,8 +180,13 @@ const plugin: Plugin = {
       const usage = p?.usage;
       if (!usage) return;
 
-      // Filter by model if configured.
-      if (cfg.model !== '' && p?.ctx?.model !== cfg.model) return;
+      // Filter by model if configured. Supports '*' wildcard suffix:
+      // "gpt-4*" matches gpt-4, gpt-4o, gpt-4o-mini, etc.
+      // Empty string = count all models.
+      if (cfg.model !== '' && p?.ctx?.model !== undefined) {
+        const model = p.ctx.model;
+        if (!modelMatches(cfg.model, model)) return;
+      }
 
       const promptTokens = usage.input ?? 0;
       const completionTokens = usage.output ?? 0;
