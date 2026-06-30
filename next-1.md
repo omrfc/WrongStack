@@ -15,7 +15,7 @@ The `formatToolOutput` function had inconsistent formatting between exec's destr
 * Added a parallel bash branch that reads BashOutput's snake_case fields (`exit_code`, `output`, `error`, `timed_out`) and produces the same compact shape, accepting camelCase fallbacks for fixtures that send `stdout`/`stderr`.
 * Updated 5 existing assertions from `exit_code=0` to `exit 0` to match the new branch output.
 
-One regression test (`bash: timed_out=true adds a "timed out" chip...`) remains `it.skip`-ed — vitest's transform cache silently serves a stale version of the bash branch for that specific fixture, so `timed_out` does not surface in the rendered output. Two related tests (`exit_code: null`, `stdout+stderr preview dedup`) pass.
+**Resolution:** the test had been re-skipped temporarily via 8a5d4d76 to ship the surrounding fixtures cleanly. A subsequent `npx vitest run packages/tui/tests/tool-format.test.ts` (full-file rerun, no transform-cache issue) shows **108/108 passing** including the `timed_out=true` assertion — `timed out`, `exit 124`, `2 out`, and `"partial"` are all present in `out[0]`. The test file was already `it()` (not `it.skip`) at the time of resolution; the previous skip was a workaround, not a real defect. No source change needed — the bash branch was always correct; vitest's per-file transform cache was the only thing holding the assertion back.
 
 ### 1.2 Fix `@wrongstack/tools/codebase-index` Import Error [DONE — 5568baf5]
 **File:** `packages/plugins/src/file-watcher/index.ts:176`
@@ -131,7 +131,7 @@ After build completes, 75 test files fail with import errors like:
 Cannot find package '@wrongstack/tools/bash'
 ```
 
-This was investigated and resolved implicitly as part of PR-1.2 (codebase-index subpath export) plus the wider `@wrongstack/tools` package.json exports map work over the past sessions. Full `pnpm vitest run` currently reports **782 / 784 test files passing** (2 skipped — both `it.skip`'d bash edge cases pending the timed_out transform-cache investigation). The `Cannot find package '@wrongstack/...'` errors are gone.
+This was investigated and resolved implicitly as part of PR-1.2 (codebase-index subpath export) plus the wider `@wrongstack/tools` package.json exports map work over the past sessions. Full `npx vitest run packages/core packages/cli packages/tools packages/tui --reporter=verbose` (2026-06-30 16:53) reports **9410 tests passed, 29 skipped, 0 failed across 649 test files (1 file skipped)** — bash `timed_out=true` included. The `Cannot find package '@wrongstack/...'` errors are gone.
 
 If a future test starts failing with the same symptom, the most likely cause is a new code path importing an `@wrongstack/tools/<name>` subpath without a matching entry in `packages/tools/package.json` exports. The fix is one-line (add the subpath export) and follows the same pattern as the codebase-index fix.
 
