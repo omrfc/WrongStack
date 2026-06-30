@@ -94,10 +94,28 @@ describe('resolveWin32Command — gh.exe path-with-spaces regression', () => {
   // gh is not installed (env-dependent).
 
   it.skipIf(process.platform !== 'win32')(
-    'resolves bare "gh" to "C:\\Program Files\\GitHub CLI\\gh.exe" when installed',
+    'resolves bare "gh" to a path with spaces when installed (env-driven)',
     () => {
-      const ghPath = 'C:\\Program Files\\GitHub CLI\\gh.exe';
-      if (!fs.existsSync(ghPath)) return; // env-dependent: gh not installed
+      // Env-driven location lookup so CI is deterministic. Three resolution
+      // modes, in priority order:
+      //   1. WRONGSTACK_REGRESSION_GH_PATH set AND the file exists → use that.
+      //   2. Default install path exists → use "C:\Program Files\GitHub CLI\gh.exe".
+      //   3. Neither → skip (returns a no-op, the test still passes).
+      //
+      // The test is skipIf(not win32) above, so non-Windows runners always
+      // skip regardless of env. The hermetic test above
+      // ('resolves a bare command to a .exe in a path containing spaces')
+      // already covers the generic case; this one pins the specific real-world
+      // gh.exe location that historically failed for users.
+      const overridePath = process.env['WRONGSTACK_REGRESSION_GH_PATH'];
+      const defaultPath = 'C:\\Program Files\\GitHub CLI\\gh.exe';
+      const ghPath =
+        overridePath && fs.existsSync(overridePath)
+          ? overridePath
+          : fs.existsSync(defaultPath)
+            ? defaultPath
+            : null;
+      if (ghPath === null) return; // neither override nor default available — skip
 
       // Point PATH at the dir so the resolver finds the bare name.
       process.env['PATHEXT'] = '.EXE';
