@@ -50,8 +50,8 @@ const DEFAULT_PRICING = { input: 5.0, output: 15.0 };
 // Module-level state, shared between `setup`, `teardown`, and `health`.
 //
 // Why module-level? The Plugin interface in @wrongstack/core does not
-// thread state from `setup` → `teardown`. Two reasons the override map
-// needs module scope:
+// thread state from `setup` → `teardown`. Three reasons these maps need
+// module scope:
 //   1. `estimateCost()` is called inside the `provider.response` event
 //      handler — that handler closes over `pricingOverrides` if we keep
 //      it local to setup, but the cleaner pattern (mirroring cron /
@@ -59,10 +59,14 @@ const DEFAULT_PRICING = { input: 5.0, output: 15.0 };
 //      scope so teardown can clear it cleanly on reload.
 //   2. The `lastCost` snapshot is for `health()` to report, which
 //      needs to survive across the tool boundary.
+//   3. The `bundledFromRegistry` map is hydrated from
+//      `api.modelsRegistry.load()` on setup; once populated, the
+//      `provider.response` event handler reads it synchronously.
 //
-// Setup re-initializes both (idempotent re-init on plugin reload);
+// Setup re-initializes all three (idempotent re-init on plugin reload);
 // teardown clears them and logs.
 const pricingOverrides: Record<string, { input: number; output: number }> = {};
+const bundledFromRegistry: Record<string, { input: number; output: number }> = {};
 const lastCost = { usd: 0, model: null as string | null, at: null as string | null };
 
 interface CostTrackerConfig {
@@ -79,14 +83,21 @@ function readCostTrackerConfig(raw: Record<string, unknown> | undefined): CostTr
 
 function estimateCost(model: string, promptTokens: number, completionTokens: number): number {
   // Lookup chain (first hit wins):
-  //   1. pricingOverrides[model]   — user-supplied, takes precedence
-  //   2. PRICING[model]             — bundled baseline
-  //   3. DEFAULT_PRICING             — fallback for unknown models
-  // All keys are normalized to lowercase so user overrides match
+  //   1. pricingOverrides[model]   — user-supplied config, highest priority
+  //   2. bundledFromRegistry[model] — models.dev catalog (api.modelsRegistry)
+  //   3. PRICING[model]             — bundled baseline
+  //   4. DEFAULT_PRICING             — fallback for unknown models
+  // All keys are normalized to lowercase so all sources match
   // regardless of how the provider reports the model name (gpt-4o
-  // vs GPT-4o vs gpt-4O).
+  // vs GPT-4o vs gpt-4O). The registry layer is hydrated once per
+  // setup() from a cache file; subsequent reloads come from the same
+  // module-scope map.
   const key = model.toLowerCase();
-  const pricing = pricingOverrides[key] ?? PRICING[key] ?? DEFAULT_PRICING;
+  const pricing =
+    pricingOverrides[key] ??
+    bundledFromRegistry[key] ??
+    PRICING[key] ??
+    DEFAULT_PRICING;
   const inputCost = (promptTokens / 1_000_000) * pricing.input;
   const outputCost = (completionTokens / 1_000_000) * pricing.output;
   return inputCost + outputCost;
@@ -143,9 +154,57 @@ const plugin: Plugin = {
     for (const k of Object.keys(pricingOverrides)) {
       delete pricingOverrides[k];
     }
+    for (const k of Object.keys(bundledFromRegistry)) {
+      delete bundledFromRegistry[k];
+    }
     lastCost.usd = 0;
     lastCost.model = null;
     lastCost.at = null;
+
+    // Hydrate `bundledFromRegistry` from the host's models registry if
+    // one is provided. The registry's `load()` is cached (subsequent
+    // calls are in-memory) and returns the models.dev payload. We
+    // flatten it into a lowercase-keyed { input, output } map. On any
+    // failure (no network, no cache, no model entries) we log a
+    // warning and proceed with the bundled PRICING table as the
+    // baseline — the lookup chain's other layers still cover
+    // common models.
+    if (api.modelsRegistry) {
+      void (async () => {
+        try {
+          const payload = await api.modelsRegistry!.load();
+          let hydrated = 0;
+          for (const provider of Object.values(payload)) {
+            const providerModels = provider?.models;
+            if (!providerModels) continue;
+            for (const [modelId, model] of Object.entries(providerModels)) {
+              const cost = model?.cost;
+              if (
+                cost &&
+                typeof cost.input === 'number' &&
+                typeof cost.output === 'number'
+              ) {
+                bundledFromRegistry[modelId.toLowerCase()] = {
+                  input: cost.input,
+                  output: cost.output,
+                };
+                hydrated += 1;
+              }
+            }
+          }
+          api.log.info('cost-tracker: hydrated pricing from models registry', {
+            models: hydrated,
+          });
+        } catch (err) {
+          // Defensive: a broken or absent registry must not break
+          // cost-tracking. The lookup chain falls through to PRICING.
+          api.log.warn(
+            'cost-tracker: failed to hydrate pricing from models registry — using bundled PRICING',
+            err,
+          );
+        }
+      })();
+    }
 
     const rawConfig = api.config.extensions?.['cost-tracker'] as
       | Record<string, unknown>
@@ -371,10 +430,15 @@ const plugin: Plugin = {
   teardown(api) {
     // Mirror of the H1 pattern: clear module-scope state on unload so
     // the next setup() starts fresh and a reload cycle doesn't
-    // accumulate stale overrides or last-cost snapshots.
+    // accumulate stale overrides, registry snapshots, or last-cost
+    // entries.
     const overrideCount = Object.keys(pricingOverrides).length;
+    const registryCount = Object.keys(bundledFromRegistry).length;
     for (const k of Object.keys(pricingOverrides)) {
       delete pricingOverrides[k];
+    }
+    for (const k of Object.keys(bundledFromRegistry)) {
+      delete bundledFromRegistry[k];
     }
     const finalLast = { ...lastCost };
     lastCost.usd = 0;
@@ -382,6 +446,7 @@ const plugin: Plugin = {
     lastCost.at = null;
     api.log.info('cost-tracker: teardown complete', {
       overrideCount,
+      registryCount,
       lastModel: finalLast.model,
     });
   },
@@ -402,6 +467,7 @@ const plugin: Plugin = {
           ? 'cost-tracker: no requests recorded yet this session'
           : `cost-tracker: last ${lastCost.model} cost=${lastCost.usd.toFixed(6)} at ${lastCost.at}`,
       overrideCount: Object.keys(pricingOverrides).length,
+      registryCount: Object.keys(bundledFromRegistry).length,
       lastCostUsd: lastCost.usd,
       lastCostModel: lastCost.model,
       lastCostAt: lastCost.at,

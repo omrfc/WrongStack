@@ -8,6 +8,7 @@ import type {
   HealthRegistry,
   Logger,
   MetricsSinkView,
+  ModelsRegistry,
   Plugin,
   PromptLoader,
   ProviderRegistry,
@@ -105,6 +106,12 @@ export interface PluginsWiringDeps {
   hookRegistry?: import('@wrongstack/core').HookRegistry | undefined;
   sessionWriter: SessionWriter;
   metricsSink?: MetricsSinkView | undefined;
+  /**
+   * Models registry (models.dev-backed catalog of providers, models, and
+   * per-token pricing). Forwarded to plugins that need model metadata
+   * (cost-tracker, billing reports). Optional — minimal hosts may omit.
+   */
+  modelsRegistry?: ModelsRegistry | undefined;
   /** Health registry — injected so the observability built-in can run /health. */
   healthRegistry?: HealthRegistry | undefined;
   /** Skill loader — injected so the skills built-in can list/read skills. */
@@ -196,6 +203,7 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
     agent,
     sessionWriter,
     metricsSink,
+    modelsRegistry,
     healthRegistry,
     skillLoader,
     promptLoader,
@@ -310,6 +318,7 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
         log,
         extensions: agent.extensions,
         hookRegistry,
+        modelsRegistry,
         sessionWriter: {
           transcriptPath: sessionWriter.transcriptPath,
           append: (e: Record<string, unknown> & { type: string; ts: string }) =>

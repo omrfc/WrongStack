@@ -10,6 +10,7 @@ import type { ToolRegistry } from '../registry/tool-registry.js';
 import type { ToolWrapper } from '../registry/tool-registry.js';
 import type { Config } from '../types/config.js';
 import type { Logger } from '../types/logger.js';
+import type { ModelsRegistry } from '../types/models-registry.js';
 import type {
   MCPRegistryView,
   MetricsSinkView,
@@ -62,6 +63,14 @@ export interface PluginAPIInit {
    * When not provided, a noop sink is used.
    */
   metricsSink?: MetricsSinkView | undefined;
+  /**
+   * The host's models registry (models.dev-backed catalog of providers,
+   * models, and per-token pricing). When provided, plugins that need
+   * model metadata (cost-tracker, billing reports) can query it instead
+   * of relying on bundled tables. Optional — minimal hosts/tests may
+   * omit it.
+   */
+  modelsRegistry?: ModelsRegistry | undefined;
   config: Config;
   /**
    * The host's ConfigStore. Used to wire `api.onConfigChange()`.
@@ -97,6 +106,7 @@ export class DefaultPluginAPI implements PluginAPI {
   readonly metrics: MetricsSinkView;
   readonly config: Config;
   readonly log: Logger;
+  readonly modelsRegistry: ModelsRegistry | undefined;
   private readonly configStore:
     | { watch(cb: (next: unknown, prev: unknown) => void): () => void }
     | undefined;
@@ -116,6 +126,7 @@ export class DefaultPluginAPI implements PluginAPI {
     this.extensions = init.extensions ?? new ExtensionRegistry();
     this.session = init.sessionWriter ?? noopSession;
     this.metrics = init.metricsSink ? scopedMetrics(init.metricsSink, owner) : noopMetrics;
+    this.modelsRegistry = init.modelsRegistry;
 
     // Convert concrete pipelines to read-only views before passing to plugins.
     const pipelines = init.pipelines as never as Record<string, Pipeline<unknown>>;

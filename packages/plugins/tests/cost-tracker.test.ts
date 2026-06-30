@@ -418,3 +418,183 @@ describe('pricingOverrides', () => {
     expect(result.usage.totalCostUsd).toBeCloseTo(0.002, 7);
   });
 });
+
+// ── modelsRegistry hydration ──────────────────────────────────────────────────
+//
+// The PluginAPI exposes an optional `modelsRegistry` (models.dev catalog).
+// When present, cost-tracker hydrates a module-scope `bundledFromRegistry`
+// map at setup() time and inserts it as layer 2 of the lookup chain:
+//   1. pricingOverrides (user config)  — highest priority
+//   2. bundledFromRegistry (models.dev) — NEW
+//   3. PRICING (bundled baseline)
+//   4. DEFAULT_PRICING (last-resort fallback)
+
+interface FakeModelsRegistry {
+  load: ReturnType<typeof vi.fn>;
+}
+
+function makeApiWithRegistry(payload: Record<string, unknown> | Error) {
+  const base = makeApi();
+  const load = vi.fn();
+  if (payload instanceof Error) {
+    load.mockRejectedValue(payload);
+  } else {
+    load.mockResolvedValue(payload);
+  }
+  base.modelsRegistry = { load } as unknown as FakeModelsRegistry;
+  return { api: base, load };
+}
+
+describe('modelsRegistry hydration', () => {
+  it('hydrates bundledFromRegistry from a valid payload', async () => {
+    const { api } = makeApiWithRegistry({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        models: {
+          'gpt-4o-from-registry': { id: 'gpt-4o-from-registry', cost: { input: 7, output: 21 } },
+          'gpt-5-future': { id: 'gpt-5-future', cost: { input: 100, output: 200 } },
+        },
+      },
+    });
+    costTrackerPlugin.setup(api as any);
+    // The hydration is fire-and-forget — give it a tick to settle.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const result = await costTrackerPlugin.health!();
+    expect(result.registryCount).toBe(2);
+  });
+
+  it('registry layer beats bundled PRICING for known models', async () => {
+    const { api } = makeApiWithRegistry({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        // Override the bundled gpt-4o price (5/15) with a custom one
+        // (8/24). bundledFromRegistry must take precedence over PRICING.
+        models: {
+          'gpt-4o': { id: 'gpt-4o', cost: { input: 8, output: 24 } },
+        },
+      },
+    });
+    costTrackerPlugin.setup(api as any);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const handler = getResponseHandler(api);
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
+
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const result = await summaryTool.execute({});
+    // Registry rate: (1000/1e6)*8 + (500/1e6)*24 = 0.008 + 0.012 = 0.02
+    // Bundled rate would be: (1000/1e6)*5 + (500/1e6)*15 = 0.0125
+    expect(result.usage.totalCostUsd).toBeCloseTo(0.02, 7);
+  });
+
+  it('user override still beats registry layer (priority chain intact)', async () => {
+    const { api } = makeApiWithRegistry({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        models: { 'gpt-4o': { id: 'gpt-4o', cost: { input: 8, output: 24 } } },
+      },
+    });
+    api.config.extensions['cost-tracker'] = {
+      pricingOverrides: { 'gpt-4o': { input: 100, output: 200 } },
+    };
+    costTrackerPlugin.setup(api as any);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const handler = getResponseHandler(api);
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
+
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const result = await summaryTool.execute({});
+    // Override rate: (1000/1e6)*100 + (500/1e6)*200 = 0.1 + 0.1 = 0.2
+    expect(result.usage.totalCostUsd).toBeCloseTo(0.2, 7);
+  });
+
+  it('skips registry entries that lack cost.input or cost.output', async () => {
+    const { api } = makeApiWithRegistry({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        models: {
+          'no-cost-model': { id: 'no-cost-model' }, // no cost field
+          'partial-cost': { id: 'partial-cost', cost: { input: 1 } }, // missing output
+          'wrong-type': { id: 'wrong-type', cost: { input: 'free', output: 'cheap' } },
+          'valid-model': { id: 'valid-model', cost: { input: 1, output: 2 } },
+        },
+      },
+    });
+    costTrackerPlugin.setup(api as any);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Only the valid entry should land in the registry map.
+    const result = await costTrackerPlugin.health!();
+    expect(result.registryCount).toBe(1);
+  });
+
+  it('falls back to bundled PRICING when registry.load() throws', async () => {
+    const { api } = makeApiWithRegistry(new Error('network unreachable'));
+    costTrackerPlugin.setup(api as any);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The setup must not throw and bundledFromRegistry stays empty.
+    const result = await costTrackerPlugin.health!();
+    expect(result.registryCount).toBe(0);
+    expect(api.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('failed to hydrate pricing from models registry'),
+      expect.any(Error),
+    );
+
+    // Lookup chain falls through to bundled PRICING for gpt-4o.
+    const handler = getResponseHandler(api);
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const summary = await summaryTool.execute({});
+    // Bundled rate: (1000/1e6)*5 + (500/1e6)*15 = 0.005 + 0.0075 = 0.0125
+    expect(summary.usage.totalCostUsd).toBeCloseTo(0.0125, 7);
+  });
+
+  it('no registry → bundledFromRegistry stays empty, lookup uses bundled PRICING', async () => {
+    // Default makeApi() has no modelsRegistry field — confirms the
+    // "host did not provide one" path is handled.
+    const api = makeApi();
+    costTrackerPlugin.setup(api as any);
+    const result = await costTrackerPlugin.health!();
+    expect(result.registryCount).toBe(0);
+
+    const handler = getResponseHandler(api);
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'claude-3-5-sonnet' } });
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const summary = await summaryTool.execute({});
+    // Bundled claude-3-5-sonnet: input=3, output=15
+    // (1000/1e6)*3 + (500/1e6)*15 = 0.003 + 0.0075 = 0.0105
+    expect(summary.usage.totalCostUsd).toBeCloseTo(0.0105, 7);
+  });
+
+  it('teardown clears bundledFromRegistry (H1 pattern)', async () => {
+    const { api } = makeApiWithRegistry({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        models: { 'gpt-4o': { id: 'gpt-4o', cost: { input: 7, output: 21 } } },
+      },
+    });
+    costTrackerPlugin.setup(api as any);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const before = await costTrackerPlugin.health!();
+    expect(before.registryCount).toBe(1);
+
+    costTrackerPlugin.teardown!(api as any);
+    const after = await costTrackerPlugin.health!();
+    expect(after.registryCount).toBe(0);
+  });
+});

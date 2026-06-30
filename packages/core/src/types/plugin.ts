@@ -9,7 +9,7 @@ import type { TextBlock } from './blocks.js';
 import type { Config } from './config.js';
 import type { HookEvent, HookMatcher, InProcessHook } from './hooks.js';
 import type { Logger } from './logger.js';
-import type { WireFamily } from './models-registry.js';
+import type { ModelsRegistry, WireFamily } from './models-registry.js';
 import type { Provider, Request, Response } from './provider.js';
 import type { SlashCommand } from './slash-command.js';
 import type { SystemPromptContributor } from './system-prompt-contributor.js';
@@ -148,6 +148,15 @@ export interface PluginAPI {
    * Returns an unsubscribe function.
    */
   onConfigChange(handler: (next: Readonly<Config>, prev: Readonly<Config>) => void): () => void;
+  /**
+   * The models registry (models.dev-backed catalog of providers, models,
+   * and per-token pricing). Optional — some hosts may not construct one
+   * (e.g. minimal CLI invocations, tests). Plugins that need pricing
+   * data (cost-tracker, billing reports) should treat this as the
+   * preferred source when present and fall back to a bundled table
+   * otherwise.
+   */
+  modelsRegistry?: ModelsRegistry | undefined;
 }
 
 /**

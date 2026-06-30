@@ -951,6 +951,7 @@ export async function main(argv: string[]): Promise<number> {
     agent: agent,
     sessionWriter: context.session,
     metricsSink,
+    modelsRegistry,
     healthRegistry,
     skillLoader: config.features.skills ? skillLoader : undefined,
     promptLoader: config.features.prompts === false ? undefined : promptLoader,
