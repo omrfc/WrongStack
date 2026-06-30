@@ -46,6 +46,15 @@ function getRegisteredHook(api: MockApi): (input: {
   return (call as unknown[])[2] as ReturnType<typeof getRegisteredHook>;
 }
 
+function getRegisteredPostHook(api: MockApi): (input: {
+  toolName?: string;
+  toolResult?: { content: string; isError: boolean };
+}) => { additionalContext?: string | undefined } | void {
+  const call = api.registerHook.mock.calls[1];
+  if (!call) throw new Error('PostToolUse hook not registered');
+  return (call as unknown[])[2] as ReturnType<typeof getRegisteredPostHook>;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -450,5 +459,111 @@ describe('teardown + H1 pattern', () => {
     const api = makeApi();
     // No setup — teardown should still not throw
     expect(() => secretScannerPlugin.teardown!(api as any)).not.toThrow();
+  });
+});
+
+// ── PostToolUse hook ────────────────────────────────────────────────────
+//
+// The PostToolUse hook scans tool OUTPUT for secrets that leaked
+// through. Since the tool has already run, it cannot block — instead
+// it injects additionalContext so the LLM knows the output is sensitive.
+
+describe('PostToolUse hook', () => {
+  it('registers a PostToolUse hook with the default matcher "*"', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    // First call = PreToolUse, second call = PostToolUse
+    expect(api.registerHook).toHaveBeenCalledTimes(2);
+    const [event, matcher] = api.registerHook.mock.calls[1]!;
+    expect(event).toBe('PostToolUse');
+    expect(matcher).toBe('*');
+  });
+
+  it('returns additionalContext when tool output contains a secret', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredPostHook(api);
+
+    // Build a credential at runtime to dodge the file-level redactor.
+    const key = 'AKIA' + 'IOSFODNN7EXAMPLE';
+    const result = hook({
+      toolName: 'bash',
+      toolResult: { content: `export AWS_KEY=${key}`, isError: false },
+    });
+    expect(result).toBeDefined();
+    expect(result!.additionalContext).toContain('secret-scanner');
+    expect(result!.additionalContext).toContain('plaintext credential');
+  });
+
+  it('does not inject context when output is clean', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredPostHook(api);
+
+    const result = hook({
+      toolName: 'read',
+      toolResult: { content: 'console.log("hello world")', isError: false },
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it('bumps leakCount and sets lastLeak on detection', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredPostHook(api);
+    const key = 'ghp_' + 'a'.repeat(36);
+
+    hook({
+      toolName: 'read',
+      toolResult: { content: `token: ${key}`, isError: false },
+    });
+
+    const statusTool = getRegisteredTool(api, 'secret_scanner_status');
+    const status = await statusTool.execute({});
+    expect(status.counters.leak).toBe(1);
+    expect(status.lastLeak).not.toBeNull();
+    expect(status.lastLeak.toolName).toBe('read');
+  });
+
+  it('respects enabled=false (skips output scanning)', () => {
+    const api = makeApi({ extensions: { 'secret-scanner': { enabled: false } } });
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredPostHook(api);
+
+    const key = 'AKIA' + 'IOSFODNN7EXAMPLE';
+    const result = hook({
+      toolName: 'bash',
+      toolResult: { content: key, isError: false },
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it('teardown unregisters both hooks', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    // Both registerHook calls return vi.fn() (spy)
+    const preUnreg = api.registerHook.mock.results[0]!.value;
+    const postUnreg = api.registerHook.mock.results[1]!.value;
+
+    secretScannerPlugin.teardown!(api as any);
+
+    expect(preUnreg).toHaveBeenCalled();
+    expect(postUnreg).toHaveBeenCalled();
+  });
+
+  it('teardown zeros leakCount + lastLeak', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredPostHook(api);
+    const key = 'AKIA' + 'IOSFODNN7EXAMPLE';
+    hook({
+      toolName: 'bash',
+      toolResult: { content: key, isError: false },
+    });
+
+    secretScannerPlugin.teardown!(api as any);
+    const health = await secretScannerPlugin.health!();
+    expect(health.counters.leak).toBe(0);
+    expect(health.lastLeak).toBeNull();
   });
 });

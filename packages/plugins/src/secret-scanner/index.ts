@@ -1,10 +1,10 @@
 /**
- * secret-scanner plugin — Pre-tool hook that blocks (or redacts) tools
- * whose arguments contain plaintext credentials.
+ * secret-scanner plugin — Pre-tool and post-tool hooks that block, redact,
+ * or warn about plaintext credentials flowing into or out of tools.
  *
  * Tools registered:
  * - secret_scanner_status  : Show which patterns are active, recent
- *                            blocks, and current mode.
+ *                            blocks/leaks, and current mode.
  * - secret_scanner_test    : Run the scanner against a user-supplied
  *                            string and report which patterns matched.
  *
@@ -12,13 +12,19 @@
  * - PreToolUse with matcher `bash|write|edit` (configurable). Default
  *   action is to BLOCK; the plugin can also auto-redact the offending
  *   fields via `HookOutcome.modifiedInput`.
+ * - PostToolUse with matcher `*` (configurable via `postToolUseMatcher`).
+ *   Scans tool OUTPUT for secrets that leaked through. Since the tool
+ *   has already run, the hook cannot block — instead it injects an
+ *   `additionalContext` warning so the LLM knows the output contains
+ *   a secret and should NOT echo it, store it, or commit it.
  *
  * Why a separate plugin from the built-in `DefaultSecretScrubber`?
  * The scrubber is *output* sanitization (replace secrets with
  * `[REDACTED:type]` before they leave the system). The scanner is
  * *prevention* (stop the tool from running with a secret in the first
- * place). They share the same threat model but act at different points
- * in the pipeline.
+ *   place) + *detection* (flag secrets that leaked through the output).
+ * They share the same threat model but act at different points in the
+ * pipeline.
  */
 import type { Plugin } from '@wrongstack/core';
 
@@ -107,14 +113,24 @@ const state = {
   blockCount: 0,
   redactCount: 0,
   allowCount: 0,
-  /** Most recent block — surfaced by `secret_scanner_status`. */
+  /** PostToolUse: secrets detected in tool output. */
+  leakCount: 0,
+  /** Most recent PreToolUse block — surfaced by `secret_scanner_status`. */
   lastBlock: null as null | {
     toolName: string;
     matchedTypes: string[];
     when: string;
   },
-  /** Hook handle so teardown can unregister. */
+  /** Most recent PostToolUse leak — surfaced by `secret_scanner_status`. */
+  lastLeak: null as null | {
+    toolName: string;
+    matchedTypes: string[];
+    when: string;
+  },
+  /** PreToolUse hook handle so teardown can unregister. */
   hookUnregister: null as null | (() => void),
+  /** PostToolUse hook handle so teardown can unregister. */
+  postHookUnregister: null as null | (() => void),
 };
 
 // ---------------------------------------------------------------------------
@@ -217,16 +233,19 @@ function redactInput(input: unknown): unknown {
 type Mode = 'block' | 'redact' | 'allow';
 
 interface SecretScannerConfig {
-  /** Tool-name matcher — pipe-delimited case-insensitive list, or '*'. */
+  /** PreToolUse: Tool-name matcher — pipe-delimited case-insensitive list, or '*'. */
   matcher: string;
-  /** Action when a match is found. */
+  /** PostToolUse: Tool-name matcher for output scanning. Default '*' (all tools). */
+  postToolUseMatcher: string;
+  /** Action when a match is found in tool INPUT (PreToolUse). */
   mode: Mode;
-  /** Set to false to short-circuit the hook entirely (no scanning). */
+  /** Set to false to short-circuit both hooks entirely (no scanning). */
   enabled: boolean;
 }
 
 const DEFAULTS: SecretScannerConfig = {
   matcher: 'bash|write|edit',
+  postToolUseMatcher: '*',
   mode: 'block',
   enabled: true,
 };
@@ -237,6 +256,7 @@ function readConfig(raw: unknown): SecretScannerConfig {
   const mode: Mode = r['mode'] === 'redact' || r['mode'] === 'allow' ? r['mode'] : 'block';
   return {
     matcher: typeof r['matcher'] === 'string' ? r['matcher'] : DEFAULTS.matcher,
+    postToolUseMatcher: typeof r['postToolUseMatcher'] === 'string' ? r['postToolUseMatcher'] : DEFAULTS.postToolUseMatcher,
     mode,
     enabled: r['enabled'] === false ? false : true,
   };
@@ -307,6 +327,55 @@ function buildHook(cfg: SecretScannerConfig, log: { warn: (msg: string, ...rest:
 }
 
 // ---------------------------------------------------------------------------
+// PostToolUse hook — scan tool OUTPUT for leaked secrets
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a PostToolUse hook that scans the tool's output for secrets.
+ *
+ * Unlike PreToolUse, the tool has ALREADY run — we cannot block or
+ * redact. Instead we inject `additionalContext` so the LLM knows:
+ * "the tool output contains a plaintext secret — do NOT echo it,
+ * store it, commit it, or send it to a third party."
+ *
+ * The counter is always bumped regardless of mode — detecting a leak
+ * in `allow` mode is still operationally important.
+ */
+function buildPostHook(cfg: SecretScannerConfig, log: { warn: (msg: string, ...rest: unknown[]) => void }) {
+  return (input: {
+    toolName?: string | undefined;
+    toolResult?: { content: string; isError: boolean } | undefined;
+  }): { additionalContext?: string | undefined } | void => {
+    if (!cfg.enabled) return;
+    const result = input.toolResult;
+    if (!result || typeof result.content !== 'string') return;
+
+    const matched = findMatches(result.content);
+    if (matched.length === 0) return;
+
+    // A secret leaked through the tool output. We can't un-run the
+    // tool, but we CAN tell the LLM to treat this output as sensitive.
+    const toolName = input.toolName ?? 'unknown';
+    const summary = matched.join(', ');
+    const when = new Date().toISOString();
+
+    state.leakCount += 1;
+    state.lastLeak = { toolName, matchedTypes: matched, when };
+
+    log.warn(
+      `[secret-scanner] POST-TOOL LEAK: ${toolName} output matched ${summary}`,
+    );
+
+    return {
+      additionalContext:
+        `\n⚠️ secret-scanner: the output of '${toolName}' contains what appears to be ` +
+        `plaintext credential(s) (${summary}). Do NOT echo, store, commit, or transmit ` +
+        `this value. Treat it as compromised and advise the user to rotate it.`,
+    };
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
@@ -323,13 +392,18 @@ const plugin: Plugin = {
     properties: {
       matcher: {
         type: 'string',
-        description: 'Tool-name matcher passed to the hook registry (pipe-delimited case-insensitive, or "*")',
+        description: 'PreToolUse: Tool-name matcher (pipe-delimited case-insensitive, or "*")',
+      },
+      postToolUseMatcher: {
+        type: 'string',
+        default: '*',
+        description: 'PostToolUse: Tool-name matcher for output leak detection. Default "*" scans all tool outputs.',
       },
       mode: {
         type: 'string',
         enum: ['block', 'redact', 'allow'],
         description:
-          'Action on a match: "block" refuses the tool call, "redact" rewrites the input with [REDACTED:type], "allow" only logs',
+          'PreToolUse action on a match: "block" refuses the tool call, "redact" rewrites the input with [REDACTED:type], "allow" only logs',
       },
       enabled: { type: 'boolean', default: true },
     },
@@ -340,7 +414,11 @@ const plugin: Plugin = {
     state.blockCount = 0;
     state.redactCount = 0;
     state.allowCount = 0;
+    state.leakCount = 0;
     state.lastBlock = null;
+    state.lastLeak = null;
+    state.hookUnregister = null;
+    state.postHookUnregister = null;
 
     const cfg = readConfig(api.config.extensions?.['secret-scanner']);
     const log = {
@@ -352,6 +430,10 @@ const plugin: Plugin = {
     // function we keep for teardown.
     const hook = buildHook(cfg, log);
     state.hookUnregister = api.registerHook('PreToolUse', cfg.matcher, hook);
+
+    // Register the PostToolUse hook for output leak detection.
+    const postHook = buildPostHook(cfg, log);
+    state.postHookUnregister = api.registerHook('PostToolUse', cfg.postToolUseMatcher, postHook);
 
     // --- secret_scanner_status tool ---
     api.tools.register({
@@ -367,14 +449,17 @@ const plugin: Plugin = {
           enabled: cfg.enabled,
           mode: cfg.mode,
           matcher: cfg.matcher,
+          postToolUseMatcher: cfg.postToolUseMatcher,
           patternCount: PATTERNS.length,
           patternTypes: PATTERNS.map((p) => p.type),
           counters: {
             block: state.blockCount,
             redact: state.redactCount,
             allow: state.allowCount,
+            leak: state.leakCount,
           },
           lastBlock: state.lastBlock,
+          lastLeak: state.lastLeak,
         };
       },
     });
@@ -413,7 +498,7 @@ const plugin: Plugin = {
   },
 
   teardown(api) {
-    // H1 pattern: unregister the hook + zero counters on unload.
+    // H1 pattern: unregister both hooks + zero counters on unload.
     if (state.hookUnregister) {
       try {
         state.hookUnregister();
@@ -423,34 +508,49 @@ const plugin: Plugin = {
       }
       state.hookUnregister = null;
     }
+    if (state.postHookUnregister) {
+      try {
+        state.postHookUnregister();
+      } catch {
+        // same defensive catch
+      }
+      state.postHookUnregister = null;
+    }
     const finalCounters = {
       block: state.blockCount,
       redact: state.redactCount,
       allow: state.allowCount,
+      leak: state.leakCount,
     };
     state.blockCount = 0;
     state.redactCount = 0;
     state.allowCount = 0;
+    state.leakCount = 0;
     state.lastBlock = null;
+    state.lastLeak = null;
     api.log.info('secret-scanner: teardown complete', { counters: finalCounters });
   },
 
   async health() {
     // /diag plugins wants a yes/no plus context. The hook is "ok" as
-    // long as the plugin is loaded; surface counters + last block so
-    // an operator can confirm the scanner is live.
+    // long as the plugin is loaded; surface counters + last block/leak
+    // so an operator can confirm the scanner is live.
     return {
       ok: true,
       message:
-        state.lastBlock === null
-          ? `secret-scanner: ${state.blockCount + state.redactCount + state.allowCount} invocations, no blocks`
-          : `secret-scanner: last block at ${state.lastBlock.when} on ${state.lastBlock.toolName} (${state.lastBlock.matchedTypes.join(', ')})`,
+        state.lastLeak !== null
+          ? `secret-scanner: last leak at ${state.lastLeak.when} on ${state.lastLeak.toolName} (${state.lastLeak.matchedTypes.join(', ')})`
+          : state.lastBlock !== null
+            ? `secret-scanner: last block at ${state.lastBlock.when} on ${state.lastBlock.toolName} (${state.lastBlock.matchedTypes.join(', ')})`
+            : `secret-scanner: ${state.blockCount + state.redactCount + state.allowCount + state.leakCount} invocations, no blocks or leaks`,
       counters: {
         block: state.blockCount,
         redact: state.redactCount,
         allow: state.allowCount,
+        leak: state.leakCount,
       },
       lastBlock: state.lastBlock,
+      lastLeak: state.lastLeak,
     };
   },
 };
