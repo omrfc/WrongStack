@@ -251,6 +251,108 @@ mutates `ctx.todos`). The plugin never touches `ctx.todos` directly
 }
 ```
 
+### 11. `token-budget` — per-session token enforcement
+
+**Tools**: `token_budget_status`
+**Hooks**: `Stop` + `PostToolUse` (matcher `*`)
+
+Complements `cost-tracker` (which tracks cost in USD) by enforcing a
+**hard token budget**. When usage crosses `warnPercent`, a one-shot
+`PostToolUse` injection tells the LLM to start wrapping up. When it
+crosses `stopPercent`, the `Stop` hook blocks the agent loop.
+
+```jsonc
+{
+  "extensions": {
+    "token-budget": {
+      "limit": 500000,       // hard token limit (prompt + completion)
+      "warnPercent": 80,     // inject "wrap up" at this %
+      "stopPercent": 100,    // trigger Stop at this %
+      "model": ""            // "" = all models; or restrict to one
+    }
+  }
+}
+```
+
+`limit: 0` (default) = tracking only (no enforcement). The
+`token_budget_status` tool reports the exact consumed/remaining
+breakdown.
+
+### 12. `lint-gate` — pre-write lint enforcement
+
+**Tools**: `lint_gate_status`
+**Hooks**: `PreToolUse` (matcher `write|edit`)
+
+Runs biome (or eslint) on the would-be file content **before** the
+write or edit commits it. For `write`, the full content is linted
+via a temp file. For `edit`, the current file is read, the
+`old_string → new_string` replacement is applied in-memory, and the
+result is linted.
+
+```jsonc
+{
+  "extensions": {
+    "lint-gate": {
+      "linter": "auto",       // "biome" | "eslint" | "auto"
+      "mode": "warn",         // "block" | "warn" | "fix"
+      "severity": "error",    // "error" | "warning"
+      "timeoutMs": 10000,     // linter process timeout
+      "fixRules": []          // when mode=fix, limit auto-fix to these rules only
+    }
+  }
+}
+```
+
+**Modes**:
+- **`block`**: refuses the write/edit; LLM must fix lint errors first
+- **`warn`** (default): injects lint errors as context; write proceeds
+- **`fix`**: auto-runs `biome check --write` / `eslint --fix`, substitutes
+  the fixed content via `modifiedInput` (`write` only; `edit` falls back
+  to `warn`). Use `fixRules` to limit which rules are auto-fixed:
+
+```jsonc
+// Only auto-fix formatting and import types; leave noExplicitAny as warning
+{
+  "extensions": {
+    "lint-gate": {
+      "mode": "fix",
+      "fixRules": ["format", "lint/style/useImportType"]
+    }
+  }
+}
+```
+
+### 13. `branch-guard` — protected branch enforcement
+
+**Tools**: `branch_guard_status`
+**Hooks**: `PreToolUse` (matcher `bash|git_autocommit`)
+
+Blocks `git commit`, `git push`, and `git merge` on protected branches
+(default: `main`, `master`). Checks the current branch via
+`git branch --show-current`. When the working tree is dirty, the
+block reason includes a safe stash workflow:
+
+```
+git stash → git checkout -b feat/my-change → git stash pop → git commit ...
+```
+
+```jsonc
+{
+  "extensions": {
+    "branch-guard": {
+      "branches": ["main", "master", "release/*"],
+      "mode": "block",         // "block" | "warn"
+      "blockCommit": true,
+      "blockPush": true,
+      "blockMerge": true
+    }
+  }
+}
+```
+
+Each operation type can be individually toggled. `git_autocommit`
+tool calls are treated as commits.
+
 ## Configuration patterns
 
 There are two surfaces for plugin configuration:
