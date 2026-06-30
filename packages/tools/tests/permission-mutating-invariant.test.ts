@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ToolCapabilities } from '@wrongstack/core';
 import { builtinTools } from '../src/builtin.js';
 
 /**
@@ -87,6 +88,44 @@ describe('builtin tool permission/mutating invariant (H7)', () => {
     expect(denied, `Tools with permission='deny' should be removed: ${denied.join(', ')}`).toEqual(
       [],
     );
+  });
+
+  it('auto-permission tools do not declare dangerous capabilities', () => {
+    const dangerous = new Set([
+      'fs.write',
+      'fs.write.outside-project',
+      'shell.arbitrary',
+      'shell.restricted',
+      'shell.exec',
+      'package.install',
+      'config.mutate',
+      'mcp.proxy',
+      'subagent.spawn',
+      'tool.mutate.any',
+      'memory.write',
+      'memory.delete',
+    ]);
+    const offenders = builtinTools
+      .filter((t) => t.permission === 'auto' && (t.capabilities ?? []).some((c) => dangerous.has(c)))
+      .map((t) => `${t.name} (${(t.capabilities ?? []).join(', ')})`);
+
+    expect(
+      offenders,
+      `Auto tools must not carry dangerous capabilities: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('every builtin capability is centrally registered', () => {
+    const known = new Set<string>(Object.values(ToolCapabilities));
+    const offenders = builtinTools
+      .flatMap((t) => (t.capabilities ?? []).map((cap) => ({ tool: t.name, cap })))
+      .filter(({ cap }) => !known.has(cap))
+      .map(({ tool, cap }) => `${tool} (${cap})`);
+
+    expect(
+      offenders,
+      `Builtin tools must use ToolCapabilities values: ${offenders.join(', ')}`,
+    ).toEqual([]);
   });
 
   it('mutating: true tools declare at least one capability', () => {

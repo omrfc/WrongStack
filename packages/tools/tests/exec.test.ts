@@ -53,7 +53,7 @@ describe('execTool', () => {
 
   it('rejects unknown commands not in allowlist', async () => {
     const ctx = makeCtx();
-    const result = await execTool.execute({ command: 'curl' }, ctx, makeOpts());
+    const result = await execTool.execute({ command: 'definitely-not-wstack' }, ctx, makeOpts());
     expect(result.allowed).toBe(false);
     expect(result.stderr).toContain('not in allowlist');
   });

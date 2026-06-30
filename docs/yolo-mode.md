@@ -7,18 +7,18 @@ explicit deny rules.
 Current behavior:
 
 - `--yolo` enables broad auto-approval.
-- Clearly destructive calls are also auto-approved by default.
-- `--confirm-destructive` opts back into prompts for clearly destructive calls
-  while leaving YOLO enabled for everything else.
+- Clearly destructive calls still require explicit confirmation.
+- `--confirm-destructive` is kept for compatibility; the destructive gate is
+  on by default.
 - `--yolo-destructive` and `--force-all-yolo` are accepted for compatibility,
-  but they are not needed for broad YOLO behavior.
+  but they do not bypass destructive-operation confirmation.
 
 ## Quick Reference
 
 | Surface | How to use it |
 |---|---|
 | CLI flag | `wrongstack --yolo` |
-| Destructive confirmation opt-in | `wrongstack --yolo --confirm-destructive` |
+| Destructive confirmation | Always on for clearly destructive calls |
 | Interactive prompt | Answer `Y` at the "YOLO mode?" prompt during boot; default is yes |
 | Slash command | `/yolo`, `/yolo on`, `/yolo off`, `/yolo toggle` |
 | Programmatic | `permissionPolicy.setYolo(true)` |
@@ -36,29 +36,30 @@ execution. The first matching rule wins:
 2. Session soft allow         -> auto
 3. Trust file deny pattern    -> deny
 4. Tool default deny          -> deny
-5. Trust file allow pattern   -> auto
-6. Trust file auto flag       -> auto
-7. YOLO                       -> auto
-   - with confirmDestructive: clearly destructive calls prompt
-8. Smart bypass (write+read)  -> auto
-9. Tool default               -> auto for non-mutating auto tools
-10. Confirm prompt / event    -> confirm
+5. YOLO destructive gate      -> confirm
+6. Trust file allow pattern   -> auto
+7. Trust file auto flag       -> auto
+8. YOLO                       -> auto
+9. Smart bypass (write+read)  -> auto
+10. Tool default              -> auto for non-mutating auto tools
+11. Confirm prompt / event    -> confirm
 ```
 
-This means trust-file deny rules and `permission: 'deny'` still win over YOLO.
+This means trust-file deny rules and `permission: 'deny'` still win over YOLO,
+while destructive calls are checked before trust-file allow rules.
 
 ## Destructive Confirmation
 
-`--confirm-destructive` activates the input-aware destructive gate while YOLO
-is on. The policy checks:
+The input-aware destructive gate is active while YOLO is on. The policy checks:
 
-- `bash` commands such as `rm -rf /`, `git reset --hard`, `DROP TABLE`, or
-  pipe-to-shell installers.
+- `bash` / `shell` / `exec` commands such as `rm -rf /`, `git reset --hard`,
+  `DROP TABLE`, encoded PowerShell, or pipe-to-shell installers.
 - File mutation tools targeting paths outside the project root.
 - Tools declared with `riskTier: 'destructive'`.
 
-Without `--confirm-destructive`, those calls are auto-approved by YOLO unless a
-deny rule blocks them earlier.
+Normal project work still auto-runs in YOLO: build/test commands, in-project
+edits, package installs, formatters, network fetch/search, and other
+non-destructive tool calls.
 
 ## Runtime Toggle
 
@@ -86,7 +87,7 @@ Permission decisions can report these relevant sources:
 | Source | Meaning |
 |---|---|
 | `yolo` | Auto-approved because YOLO mode is active |
-| `yolo_destructive` | `--confirm-destructive` is active and the call needs approval |
+| `yolo_destructive` | YOLO is active and a clearly destructive call needs approval |
 | `trust` | Matched an allow rule or trust-file auto flag |
 | `deny` | Explicitly denied by a pattern or tool declaration |
 | `user` | User answered a permission prompt |
@@ -100,19 +101,20 @@ for the rest of the session:
 
 | Answer | Effect |
 |---|---|
-| `y` | `allowOnce()` auto-approves this tool/pattern for the session |
+| `y` | `allowOnce()` auto-approves this tool/pattern once for the immediate re-run |
 | `n` | `denyOnce()` blocks this tool/pattern for the session |
 | `a` | `trust()` writes a permanent allow rule to `trust.json` |
 | `d` | `deny()` writes a permanent deny rule to `trust.json` |
 
-These session maps are cleared when the trust file is reloaded.
+The one-shot allow entry is consumed on first use. The session maps are also
+cleared when the trust file is reloaded.
 
 ## Security Notes
 
 | Concern | Mitigation |
 |---|---|
-| Accidental destructive commands | Use `--confirm-destructive`; trust-file deny patterns are evaluated before YOLO |
-| Project-boundary escape | With `--confirm-destructive`, outside-project file mutations prompt |
+| Accidental destructive commands | Destructive shell/exec/file operations prompt even in YOLO |
+| Project-boundary escape | Outside-project file mutations prompt |
 | YOLO left on unintentionally | TUI status and `/yolo` show the current state |
 | Subagent privilege escalation | Subagents use `AutoApprovePermissionPolicy`, which denies dangerous capabilities, MCP tools, and legacy risky names by default |
 | Trust file poisoning | Trust is per project at `~/.wrongstack/projects/<hash>/trust.json`; encrypted secrets are separate |
@@ -143,11 +145,9 @@ import { DefaultPermissionPolicy } from '@wrongstack/core';
 const policy = new DefaultPermissionPolicy({
   trustFile: '/path/to/trust.json',
   yolo: true,
-  confirmDestructive: true,
 });
 
 policy.setYolo(false);
-policy.setConfirmDestructive(true);
 
 const isYolo = policy.getYolo();
 const destructiveGate = policy.getConfirmDestructive();

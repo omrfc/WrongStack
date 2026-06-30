@@ -61,7 +61,7 @@ interface Tool<I, O> {
 | `inputSchema` | JSON Schema subset (no `$ref`, no `format`). Validated by `validateAgainstSchema` before `execute` runs. |
 | `permission` | `auto` runs without prompting. `confirm` prompts the user. `deny` rejects calls without prompting (useful for read-only modes). |
 | `mutating` | UI hint that this tool may change the workspace. Doesn't enforce anything — `permission` is the real gate. |
-| `riskTier` | Optional risk classification: `safe`, `standard`, or `destructive`. YOLO auto-approves normal project work; clearly destructive calls still prompt unless `--yolo-destructive` is active. |
+| `riskTier` | Optional risk classification: `safe`, `standard`, or `destructive`. YOLO auto-approves normal project work; clearly destructive calls still prompt. |
 | `capabilities` | Optional capability tags (e.g. `['fs.read']`, `['net.outbound']`). Used by the permission policy and plugin mutation rules to decide who can invoke or modify the tool. See **Capability Model** below. |
 | `maxOutputBytes` | Hard cap. The executor truncates and emits a warning. |
 | `timeoutMs` | Hard cap. After this, the executor aborts via the run's `AbortController`. |
@@ -73,7 +73,7 @@ interface Tool<I, O> {
 - **`auto`** — runs without prompting. Use for read-only or clearly-safe
   ops. The user can still globally enable `--yolo` to skip `confirm`
   prompts for normal project work; clearly destructive calls still require
-  `--yolo-destructive`.
+  confirmation.
 - **`confirm`** — prompts the user before each call. Use for write paths,
   shell execution, network mutations, anything reviewable.
 - **`deny`** — rejected before `execute` runs. Mostly used by per-tool
@@ -104,10 +104,9 @@ doesn't own if the plugin declares a matching `toolMutateCapabilities` entry.
 | `fs.write` | Writes or modifies files | `write`, `edit`, `replace`, `patch`, `plan` |
 | `fs.write.outside-project` | Writes outside `projectRoot` | `scaffold` (templates), `codebase-index` |
 | `shell.arbitrary` | Runs arbitrary shell commands | `bash` |
-| `shell.restricted` | Runs allowlisted commands | `exec`, `git`, `audit`, `lint`, `typecheck`, `test` |
-| `shell.exec` | Runs a specific formatter | `format` |
-| `net.outbound` | Makes outbound network requests | `fetch`, `search` |
-| `network` | Checks for outdated packages | `outdated` |
+| `shell.restricted` | Runs allowlisted commands | `exec`, `git`, `audit`, `lint`, `format`, `typecheck`, `test` |
+| `shell.exec` | Runs a specific formatter-style shell command | plugin tools |
+| `net.outbound` | Makes outbound network requests | `fetch`, `search`, `outdated` |
 | `memory.read` | Reads from agent memory | `memory` (read/search), `search_memory`, `find_related_memories` |
 | `memory.write` | Writes to agent memory | `memory` (write), `remember` |
 | `memory.delete` | Deletes from agent memory | `memory` (delete), `forget` |

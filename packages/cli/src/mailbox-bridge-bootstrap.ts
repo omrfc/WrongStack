@@ -27,6 +27,7 @@ import { spawn } from 'node:child_process';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { readLiveLock, type MailboxBridgeLock } from '@wrongstack/core/coordination';
+import { buildWin32CmdShimInvocation } from './utils/win32-cmd.js';
 
 export const MAILBOX_BRIDGE_BOOTSTRAP_TIMEOUT_MS = 5_000;
 export const MAILBOX_BRIDGE_HEALTHZ_PROBE_MS = 500;
@@ -184,21 +185,21 @@ function defaultSpawn(args: string[], cwd: string): SpawnedChild {
   // When we can see our own JS entry, re-launch it under the SAME node
   // binary. `spawn(scriptPath)` cannot execute a `.js` directly on
   // Windows and relies on a shebang on POSIX, so always go through
-  // `process.execPath`. Otherwise fall back to `wstack` on PATH — which
-  // on Windows is a `.cmd`/`.ps1` shim, so it needs `shell:true` to be
-  // resolved at all.
+  // `process.execPath`. Otherwise fall back to `wstack` on PATH; on Windows
+  // the cmd shim helper resolves `.cmd` wrappers without Node's shell+args
+  // deprecation path.
   let cmd: string;
   let spawnArgs: string[];
-  let useShell = false;
+  let shim: ReturnType<typeof buildWin32CmdShimInvocation> | null = null;
   if (cliEntry && /wstack|wrongstack|index\.(js|ts|mjs|cjs)$/.test(cliEntry)) {
     cmd = process.execPath;
     spawnArgs = [cliEntry, ...args];
   } else {
     cmd = 'wstack';
     spawnArgs = args;
-    useShell = isWin;
+    if (isWin) shim = buildWin32CmdShimInvocation(cmd, spawnArgs);
   }
-  const child = spawn(cmd, spawnArgs, {
+  const child = spawn(shim?.command ?? cmd, shim?.args ?? spawnArgs, {
     cwd,
     // `detached` gives the bridge its own process group on POSIX so it
     // outlives the REPL. On win32 it forces a visible console window
@@ -207,7 +208,7 @@ function defaultSpawn(args: string[], cwd: string): SpawnedChild {
     detached: !isWin,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
-    shell: useShell,
+    ...(shim ? { windowsVerbatimArguments: shim.windowsVerbatimArguments } : {}),
     env: process.env,
   });
   return {

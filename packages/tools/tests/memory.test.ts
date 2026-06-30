@@ -39,6 +39,15 @@ function fakeStore() {
 }
 
 describe('memory tools', () => {
+  it('gates persistent memory writes but leaves memory reads automatic', () => {
+    const { store } = fakeStore();
+    expect(rememberTool(store).permission).toBe('confirm');
+    expect(rememberTool(store).mutating).toBe(true);
+    expect(forgetTool(store).permission).toBe('confirm');
+    expect(searchMemoryTool(store).permission).toBe('auto');
+    expect(relatedMemoryTool(store).permission).toBe('auto');
+  });
+
   it('remember appends with default scope', async () => {
     const { store, calls } = fakeStore();
     const tool = rememberTool(store);

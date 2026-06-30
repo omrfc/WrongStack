@@ -2,7 +2,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertSafeWin32ShellArgs, resolveWin32Command } from '../src/_win32-resolve.js';
+import {
+  assertSafeWin32ShellArgs,
+  buildWin32CmdShimInvocation,
+  resolveWin32Command,
+} from '../src/_win32-resolve.js';
 
 const realPlatform = process.platform;
 const realPath = process.env['PATH'];
@@ -149,8 +153,8 @@ describe('assertSafeWin32ShellArgs', () => {
     ).not.toThrow();
   });
 
-  it('rejects command chaining and redirection metacharacters', () => {
-    for (const bad of ['a & calc', 'x | whoami', 'in < f', 'out > f', 'line1\nline2', 'cr\rinject', 'nul\0byte']) {
+  it('rejects command chaining, redirection, and quote-breaking metacharacters', () => {
+    for (const bad of ['a & calc', 'x | whoami', 'in < f', 'out > f', '"breakout"', 'line1\nline2', 'cr\rinject', 'nul\0byte']) {
       expect(() => assertSafeWin32ShellArgs(['ok', bad])).toThrow(/command injection|metacharacter/i);
     }
   });
@@ -161,5 +165,22 @@ describe('assertSafeWin32ShellArgs', () => {
 
   it('is a no-op for an empty arg list', () => {
     expect(() => assertSafeWin32ShellArgs([])).not.toThrow();
+  });
+});
+
+describe('buildWin32CmdShimInvocation', () => {
+  it('builds a cmd.exe invocation without shell:true or argv concatenation', () => {
+    const invocation = buildWin32CmdShimInvocation('C:\\Program Files\\nodejs\\pnpm.cmd', [
+      'test',
+      'space arg',
+    ]);
+
+    expect(invocation.command.toLowerCase()).toMatch(/cmd\.exe$/);
+    expect(invocation.args).toEqual([
+      '/d',
+      '/c',
+      'call "C:\\Program Files\\nodejs\\pnpm.cmd" "test" "space arg"',
+    ]);
+    expect(invocation.windowsVerbatimArguments).toBe(true);
   });
 });

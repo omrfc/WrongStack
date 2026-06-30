@@ -87,7 +87,7 @@ Double-encoding (`%252e%252e`) is decoded once by `new URL()` to `%2e%2e`, which
 **CWE:** [CWE-862](https://cwe.mitre.org/data/definitions/862.html) — Unintended Unauthorized Action
 **Severity:** Medium-High
 
-**Status:** ✅ FIXED — `mutating: true` added to `mcp_control`, `shellcheck`, `shellcheck (scan mode)`, `search`, and `outdated`. These tools now trigger the confirmation gate in the permission policy at `permission-policy.ts:188-195`.
+**Status:** ✅ FIXED — side-effecting tools (`mcp_control`, `mcp_use`, `design`, `remember`, `shellcheck`, `shellcheck` scan mode, `outdated`) are confirmation-gated. Read-only web research tools (`fetch`, `search`) are `permission: 'auto'`, `mutating: false`, and declare `net.outbound`; the permission policy auto-approves them while the fetch layer still enforces SSRF protections, HTTPS-by-default, private-IP blocking, redirect re-validation, and output caps.
 
 The permission policy at `permission-policy.ts:188-195` was designed to gate side-effecting tools:
 ```ts
@@ -96,22 +96,25 @@ if (tool.permission === 'auto' && !tool.mutating) {
 }
 ```
 
-The gate correctly requires `mutating: true` for confirmation. **However, tools with side effects incorrectly declare `mutating: false`:**
+The gate correctly requires `mutating: true` for confirmation. The fixed state is:
 
-| Tool | Side Effect | `mutating` |
+| Tool | Risk / behavior | Current gate |
 |------|-------------|------------|
-| `mcp_control` (enable) | **Writes config file** + spawns MCP server process | `false` |
-| `shellcheck` / `shellcheck (scan mode)` | `execFileSync('shellcheck', ...)` | `false` |
-| `search` | Outbound HTTP requests to DuckDuckGo | `false` |
-| `outdated` | Spawns `npm/pnpm/yarn outdated` (hits npm registry) | `false` |
+| `mcp_control` (enable) | **Writes config file** + spawns MCP server process | confirmation-gated |
+| `mcp_use` | Proxies third-party MCP tool execution | confirmation-gated |
+| `design` | Persists design-kit state / can materialize theme files | confirmation-gated |
+| `remember` | Writes persistent memory | confirmation-gated |
+| `shellcheck` / `shellcheck` scan mode | Runs a local executable | confirmation-gated |
+| `fetch` / `search` | Read-only outbound HTTP(S), SSRF-guarded | auto-approved |
+| `outdated` | Spawns `npm/pnpm/yarn outdated` (hits npm registry) | confirmation-gated |
 
 **Worst case (`mcp_control`):** A WS-connected client can call `mcp_control(enable)` with a malicious MCP server preset — this:
 1. Writes attacker-controlled config to `wrongstack config.json` (persists across restarts)
 2. Spawns the malicious server process immediately
 
-**Root cause:** The `mutating` flag doesn't capture all observable side effects (network, disk write, process spawn). The comment at line 188 acknowledges this risk but the affected tools don't follow through.
+**Root cause:** The `mutating` flag must track real side effects (disk write, process spawn, package-manager execution), while read-only outbound HTTP is represented by the separate `net.outbound` capability and guarded in the fetch layer.
 
-**Recommendation:** Set `mutating: true` on `mcp_control`, `shellcheck`, `shellcheck (scan mode)`, `search`, and `outdated` tools.
+**Regression rule:** Side-effecting network tools stay `mutating: true` / confirmation-gated; read-only web research tools may be `permission: 'auto'` only when they are SSRF-guarded and non-mutating.
 
 ---
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { EventBus } from '@wrongstack/core';
 import {
   type BrainDecisionEntry,
   subscribeBrainDecisionLog,
@@ -118,5 +119,19 @@ describe('subscribeBrainDecisionLog', () => {
     expect(brainLog).toEqual<BrainDecisionEntry[]>([
       { at: 9000, kind: 'intervention', question: 'manual', outcome: 'manual entry' },
     ]);
+  });
+
+  it('disposes listeners on a real EventBus without losing method binding', () => {
+    const events = new EventBus();
+    const { brainLog, dispose } = subscribeBrainDecisionLog(events);
+
+    expect(() => dispose()).not.toThrow();
+    events.emit('brain.decision_answered', {
+      at: 1000,
+      request: { question: 'after dispose?' },
+      decision: { type: 'answer', optionId: 'no' },
+    });
+
+    expect(brainLog).toEqual([]);
   });
 });

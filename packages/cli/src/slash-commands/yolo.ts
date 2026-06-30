@@ -10,12 +10,12 @@ export function buildYoloCommand(opts: SlashCommandContext): SlashCommand {
     help: [
       'Usage:',
       '  /yolo              Show current YOLO status',
-      '  /yolo on           Enable YOLO mode (auto-approve all tool calls)',
+      '  /yolo on           Enable YOLO mode (auto-approve normal project work)',
       '  /yolo off          Disable YOLO mode (restore permission prompts)',
-      '  /yolo destructive  Toggle destructive confirmation gate (YOLO mode only)',
+      '  /yolo destructive  Show destructive confirmation gate status',
       '',
-      'YOLO mode auto-approves everything, including destructive calls.',
-      'Use /yolo destructive to re-enable confirmation for risky operations.',
+      'YOLO mode auto-approves normal project work, including shell/build/test/write flows.',
+      'Clearly destructive operations still require explicit confirmation.',
     ].join('\n'),
     async run(args) {
       const arg = args.trim().toLowerCase();
@@ -46,15 +46,13 @@ export function buildYoloCommand(opts: SlashCommandContext): SlashCommand {
       } else if (arg === 'toggle') {
         newState = !opts.onYolo();
       } else if (arg === 'destructive') {
-        // Toggle destructive-gate: when enabled, YOLO still prompts for
-        // destructive operations. Mirrors the help text promise.
         const currentMode = opts.onYolo();
         if (!currentMode) {
-          const msg = `${color.amber('YOLO is OFF.')} Enable YOLO first with /yolo on, then /yolo destructive will control the confirmation gate.`;
+          const msg = `${color.amber('YOLO is OFF.')} Destructive operations still require confirmation when YOLO is enabled.`;
           opts.renderer.writeWarning(msg);
           return { message: msg };
         }
-        const msg = `${color.amber('Destructive gate:')} ${color.dim('YOLO is ON — destructive operations require confirmation. Use /yolo destructive to toggle this gate.')}`;
+        const msg = `${color.amber('Destructive gate:')} ${color.dim('ON — YOLO is enabled, but clearly destructive operations still require confirmation.')}`;
         opts.renderer.writeWarning(msg);
         return { message: msg };
       } else {

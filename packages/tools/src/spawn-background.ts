@@ -27,7 +27,10 @@
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
 import * as os from 'node:os';
-import { assertSafeWin32ShellArgs, resolveWin32Command } from './_win32-resolve.js';
+import {
+  buildWin32CmdShimInvocation,
+  resolveWin32Command,
+} from './_win32-resolve.js';
 
 const isWin = os.platform() === 'win32';
 
@@ -130,9 +133,9 @@ function releaseStdio(child: ReturnType<typeof spawn>): void {
  * This is more secure than {@link spawnBackground} since there are no shell
  * injection risks — args are passed as an argv array, never through a shell.
  *
- * On Windows, `.cmd`/`.bat` wrappers still require `shell: true` (Node cannot
- * spawn them directly). When that path is taken, {@link assertSafeWin32ShellArgs}
- * rejects any argument containing a cmd.exe injection metacharacter
+ * On Windows, `.cmd`/`.bat` wrappers are launched through `cmd.exe` directly
+ * because CreateProcess cannot run them natively. The shim helper rejects any
+ * argument containing a cmd.exe injection metacharacter
  * (`& | < >` or newline) — the same guard used by exec.ts, _spawn-stream.ts,
  * and outdated.ts. Safe args pass through unchanged.
  *
@@ -147,18 +150,13 @@ export function spawnBackgroundExec(
   pid: number | null;
   child: ReturnType<typeof spawn>;
 } {
-  // Resolve .cmd/.bat on Windows — these require shell: true.  The resolver
-  // also finds the full path for .exe binaries so spawn doesn't need PATHEXT.
+  // Resolve .cmd/.bat on Windows. The resolver also finds the full path for
+  // .exe binaries so spawn doesn't need PATHEXT.
   const resolved = resolveWin32Command(command);
   const needsShell = isWin && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
-  // When using shell: true, the shell resolves the command through PATH —
-  // passing the full resolved path (which may contain spaces, e.g.
-  // "C:\Program Files\nodejs\npx.cmd") breaks because cmd.exe splits on
-  // the space. Use the original command name so the shell finds it.
-  const cmd = needsShell ? command : resolved;
-  // verbatim args reach cmd.exe unquoted — reject injection metacharacters
-  // before spawning.  This is the same guard used by _spawn-stream.ts / exec.ts.
-  if (needsShell) assertSafeWin32ShellArgs(args);
+  const shim = needsShell ? buildWin32CmdShimInvocation(resolved, args) : null;
+  const cmd = shim?.command ?? resolved;
+  const spawnArgs = shim?.args ?? args;
 
   // Same win32 rule as spawnBackground: detached + windowsHide conflict, and
   // the hidden console from CREATE_NO_WINDOW is what keeps any children of
@@ -169,10 +167,10 @@ export function spawnBackgroundExec(
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: !isWin,
     windowsHide: true,
-    ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}),
+    ...(shim ? { windowsVerbatimArguments: shim.windowsVerbatimArguments } : {}),
   };
 
-  const child = spawn(cmd, args, spawnOpts);
+  const child = spawn(cmd, spawnArgs, spawnOpts);
 
   // Fire-and-forget: an unhandled 'error' event (e.g. ENOENT) would crash the
   // host process. Callers can still attach their own listener on `child`.

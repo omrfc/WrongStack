@@ -57,8 +57,8 @@ describe('createMcpControlTool', () => {
     expect(tool.category).toBe('mcp');
   });
 
-  it('has permission "auto"', () => {
-    expect(tool.permission).toBe('auto');
+  it('has permission "confirm"', () => {
+    expect(tool.permission).toBe('confirm');
   });
 
   it('is mutating (writes config + spawns MCP servers)', () => {
@@ -71,11 +71,11 @@ describe('createMcpControlTool', () => {
     expect(tool.capabilities).toContain(ToolCapabilities.CONFIG_MUTATE);
   });
 
-  it('has riskTier "destructive" so YOLO confirmDestructive still gates enable/restart', () => {
+  it('has riskTier "destructive" so YOLO still gates enable/restart', () => {
     // enable/restart spawn a server that, for stdio presets, runs `npx -y <pkg>`
     // (fetch+execute an npm package). Outside YOLO the CONFIG_MUTATE
     // dangerous-capability net already forces a confirm; marking it destructive
-    // keeps the YOLO confirmDestructive safety net prompting too.
+    // keeps the YOLO destructive safety net prompting too.
     expect(tool.riskTier).toBe('destructive');
   });
 

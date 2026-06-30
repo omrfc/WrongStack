@@ -70,7 +70,7 @@ describe('searchTool', () => {
 
   it('has correct metadata', () => {
     expect(searchTool.name).toBe('search');
-    expect(searchTool.permission).toBe('confirm');
+    expect(searchTool.permission).toBe('auto');
     expect(searchTool.inputSchema.required).toContain('query');
   });
 
@@ -104,15 +104,15 @@ describe('searchTool', () => {
     expect(result.results).toBeDefined();
   });
 
-  it('uses google source', async () => {
+  it('falls back from google source when static results are unavailable', async () => {
     const ctx = {} as any;
     const result = await searchTool.execute({ query: 'test', source: 'google' }, ctx, makeOpts());
-    expect(result.source).toBe('google');
+    expect(result.source).toBe('duckduckgo');
   });
 
   it('uses bing source', async () => {
     const ctx = {} as any;
-    const result = await searchTool.execute({ query: 'test', source: 'bing' }, ctx, makeOpts());
+    const result = await searchTool.execute({ query: 'bing', source: 'bing' }, ctx, makeOpts());
     expect(result.source).toBe('bing');
   });
 
@@ -195,22 +195,65 @@ describe('search engine parsers (realistic fixtures)', () => {
     expect(result.results[0]?.url).toBe('https://example.com/b');
   });
 
-  it('returns empty results when Google fetch fails', async () => {
+  it('decodes Bing tracking URLs when present', async () => {
+    const target = Buffer.from('https://github.com/WrongStack/WrongStack', 'utf8').toString('base64');
+    const html = `
+      <li class="b_algo">
+        <h2><a href="https://www.bing.com/ck/a?u=a1${target}&amp;ntb=1">WrongStack on GitHub</a></h2>
+        <div class="b_caption"><p class="b_lineclamp2">WrongStack repository</p></div>
+      </li>
+    `;
+    globalThis.fetch = mockFetch(() => html) as never as typeof globalThis.fetch;
+    const result = await searchTool.execute(
+      { query: 'wrongstack github', source: 'bing' },
+      {} as any,
+      makeOpts(),
+    );
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]?.url).toBe('https://github.com/WrongStack/WrongStack');
+    expect(result.results[0]?.snippet).toBe('WrongStack repository');
+  });
+
+  it('parses current DuckDuckGo lite markup with single-quoted classes and table snippets', async () => {
+    const html = `
+      <tr>
+        <td><a rel="nofollow" href="https://github.com/WrongStack/WrongStack" class='result-link'>GitHub - WrongStack/WrongStack</a></td>
+      </tr>
+      <tr>
+        <td>&nbsp;&nbsp;&nbsp;</td>
+        <td class='result-snippet'>
+          A CLI AI coding agent that runs in your terminal. Contribute to <b>WrongStack</b>/<b>WrongStack</b> development.
+        </td>
+      </tr>
+    `;
+    globalThis.fetch = mockFetch(() => html) as never as typeof globalThis.fetch;
+    const result = await searchTool.execute(
+      { query: 'wrongstack github', source: 'duckduckgo' },
+      {} as any,
+      makeOpts(),
+    );
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]?.title).toBe('GitHub - WrongStack/WrongStack');
+    expect(result.results[0]?.url).toBe('https://github.com/WrongStack/WrongStack');
+    expect(result.results[0]?.snippet).toContain('WrongStack/WrongStack development');
+  });
+
+  it('falls back to DuckDuckGo unavailable sentinel when Google and fallback fetch both fail', async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error('net down');
     }) as never as typeof globalThis.fetch;
     const result = await searchTool.execute({ query: 'q', source: 'google' }, {} as any, makeOpts());
-    expect(result.source).toBe('google');
-    expect(result.results).toEqual([]);
+    expect(result.source).toBe('duckduckgo');
+    expect(result.results[0]?.title).toBe('Search unavailable');
   });
 
-  it('returns empty results when Bing fetch fails', async () => {
+  it('falls back to DuckDuckGo unavailable sentinel when Bing and fallback fetch both fail', async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error('net down');
     }) as never as typeof globalThis.fetch;
     const result = await searchTool.execute({ query: 'q', source: 'bing' }, {} as any, makeOpts());
-    expect(result.source).toBe('bing');
-    expect(result.results).toEqual([]);
+    expect(result.source).toBe('duckduckgo');
+    expect(result.results[0]?.title).toBe('Search unavailable');
   });
 });
 
@@ -324,12 +367,15 @@ describe('search cache, dedup, and ranking', () => {
 
     const ctx = {} as any;
     globalThis.fetch = countAll();
-    await searchTool.execute({ query: 'q', source: 'google' }, ctx, makeOpts());
-    await searchTool.execute({ query: 'q', source: 'google' }, ctx, makeOpts());
+    const firstGoogle = await searchTool.execute({ query: 'q', source: 'google' }, ctx, makeOpts());
+    const secondGoogle = await searchTool.execute({ query: 'q', source: 'google' }, ctx, makeOpts());
+    expect(firstGoogle.source).toBe('duckduckgo');
+    expect(secondGoogle.source).toBe('duckduckgo');
+    expect(secondGoogle.cached).toBe(true);
     // Same query but duckduckgo should be a separate fetch
     globalThis.fetch = countAll();
     await searchTool.execute({ query: 'q', source: 'duckduckgo' }, ctx, makeOpts());
-    expect(totalCalls).toBe(2); // 1 google (cached on 2nd) + 1 ddg
+    expect(totalCalls).toBe(3); // 1 google + 1 google fallback ddg + 1 explicit ddg
   });
 
   it('deduplicates results by normalized URL (strips query + fragment)', async () => {

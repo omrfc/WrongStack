@@ -155,7 +155,10 @@ export function createContextManagerTool(
       required: ['action'],
     },
     permission: 'auto',
-    mutating: true,
+    // Mutates only the in-memory conversation context, like the todo tool.
+    // It must stay auto-runnable so the model can inspect/repair/compact its
+    // own context without hitting a permission prompt loop.
+    mutating: false,
 
     async execute(input: ContextManagerInput, ctx: Context): Promise<ContextManagerResult> {
       const messages = ctx.messages;

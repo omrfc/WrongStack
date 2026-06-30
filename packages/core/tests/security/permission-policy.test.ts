@@ -12,6 +12,7 @@ import {
   hasDangerousCapabilityForSubagents,
   getDangerousCapabilities,
   ToolCapabilities,
+  WIDE_SUBAGENT_CAPABILITIES,
 } from '../../src/security/capabilities.js';
 import { subjectForToolInput } from '../../src/utils/tool-subject.js';
 
@@ -70,15 +71,30 @@ describe('DefaultPermissionPolicy', () => {
     expect(decision.permission).toBe('confirm');
   });
 
-  it('deny is absolute even when allowed', async () => {
-    await fs.writeFile(
-      trustFile,
-      JSON.stringify({ edit: { allow: ['**/*'], deny: ['**/.env*'] } }),
+    it('deny is absolute even when allowed', async () => {
+      await fs.writeFile(
+        trustFile,
+        JSON.stringify({ edit: { allow: ['**/*'], deny: ['**/.env*'] } }),
     );
     const p = new DefaultPermissionPolicy({ trustFile });
     const d = await p.evaluate(tool('edit'), { path: '.env.production' }, {} as Context);
-    expect(d.permission).toBe('deny');
-  });
+      expect(d.permission).toBe('deny');
+    });
+
+    it('yolo destructive gate runs before trust-file allow rules', async () => {
+      await fs.writeFile(
+        trustFile,
+        JSON.stringify({ bash: { allow: ['rm -rf /'] } }),
+      );
+      const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
+      const d = await p.evaluate(
+        tool('bash', 'confirm', 'destructive', true, ['shell.arbitrary']),
+        { command: 'rm -rf /' },
+        { projectRoot: process.cwd() } as Context,
+      );
+      expect(d.permission).toBe('confirm');
+      expect(d.source).toBe('yolo_destructive');
+    });
 
   it('allow matches glob', async () => {
     await fs.writeFile(trustFile, JSON.stringify({ edit: { allow: ['src/**'] } }));
@@ -213,37 +229,37 @@ describe('DefaultPermissionPolicy', () => {
       expect(d.source).toBe('yolo');
     });
 
-    it('yolo auto-approves clearly destructive bash commands (no longer gated)', async () => {
+    it('yolo gates clearly destructive bash commands', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf /' },
         { projectRoot: process.cwd() } as Context,
       );
-      expect(d.permission).toBe('auto');
-      expect(d.source).toBe('yolo');
+      expect(d.permission).toBe('confirm');
+      expect(d.source).toBe('yolo_destructive');
     });
 
-    it('yolo auto-approves bash commands that escape the project', async () => {
+    it('yolo gates bash commands that escape the project', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf ../other-project' },
         { projectRoot: process.cwd() } as Context,
       );
-      expect(d.permission).toBe('auto');
-      expect(d.source).toBe('yolo');
+      expect(d.permission).toBe('confirm');
+      expect(d.source).toBe('yolo_destructive');
     });
 
-    it('yolo + yoloDestructive is a no-op (YOLO already auto-approves everything)', async () => {
+    it('yolo + yoloDestructive still gates destructive operations', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true, yoloDestructive: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf /' },
         { projectRoot: process.cwd() } as Context,
       );
-      expect(d.permission).toBe('auto');
-      expect(d.source).toBe('yolo');
+      expect(d.permission).toBe('confirm');
+      expect(d.source).toBe('yolo_destructive');
     });
 
     it('yolo + confirmDestructive gates destructive operations', async () => {
@@ -257,9 +273,9 @@ describe('DefaultPermissionPolicy', () => {
       expect(d.source).toBe('yolo_destructive');
     });
 
-    it('setConfirmDestructive / getConfirmDestructive toggle at runtime', async () => {
+    it('setConfirmDestructive(false) is a compatibility no-op; destructive gate stays on', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
-      expect(p.getConfirmDestructive()).toBe(false);
+      expect(p.getConfirmDestructive()).toBe(true);
       p.setConfirmDestructive(true);
       expect(p.getConfirmDestructive()).toBe(true);
       const d = await p.evaluate(
@@ -269,12 +285,13 @@ describe('DefaultPermissionPolicy', () => {
       );
       expect(d.permission).toBe('confirm');
       p.setConfirmDestructive(false);
+      expect(p.getConfirmDestructive()).toBe(true);
       const d2 = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf /' },
         {} as Context,
       );
-      expect(d2.permission).toBe('auto');
+      expect(d2.permission).toBe('confirm');
     });
 
     it('confirmDestructive + promptDelegate intercepts with always/deny/yes/no', async () => {
@@ -359,7 +376,7 @@ describe('DefaultPermissionPolicy', () => {
       expect(d.source).toBe('yolo');
     });
 
-    it('yolo without confirmDestructive auto-approves capability-based destructive tools', async () => {
+    it('yolo can still auto-approve non-destructive shell tools with dangerous capabilities', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive', true, ['shell.arbitrary']),
@@ -368,6 +385,17 @@ describe('DefaultPermissionPolicy', () => {
       );
       expect(d.permission).toBe('auto');
       expect(d.source).toBe('yolo');
+    });
+
+    it('yolo gates destructive exec commands by command plus args', async () => {
+      const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
+      const d = await p.evaluate(
+        tool('exec', 'confirm', 'standard', true, ['shell.restricted']),
+        { command: 'git', args: ['reset', '--hard'] },
+        { projectRoot: process.cwd() } as Context,
+      );
+      expect(d.permission).toBe('confirm');
+      expect(d.source).toBe('yolo_destructive');
     });
   });
 });
@@ -553,6 +581,24 @@ describe('AutoApprovePermissionPolicy', () => {
     expect(d.reason).toContain('shell.restricted');
   });
 
+  it('denies formatter-style shell execution when only fs.write is granted', async () => {
+    const p = new AutoApprovePermissionPolicy(['fs.write']);
+    const d = await p.evaluate(
+      tool('format', 'confirm', undefined, true, ['fs.write', ToolCapabilities.SHELL_EXEC]),
+    );
+    expect(d.permission).toBe('deny');
+    expect(d.reason).toContain('shell.exec');
+  });
+
+  it('denies meta tool dispatch unless tool.mutate.any is explicitly granted', async () => {
+    const p = new AutoApprovePermissionPolicy(['fs.read', 'net.outbound']);
+    const d = await p.evaluate(
+      tool('tool_use', 'confirm', undefined, true, [ToolCapabilities.TOOL_MUTATE_ANY]),
+    );
+    expect(d.permission).toBe('deny');
+    expect(d.reason).toContain('tool.mutate.any');
+  });
+
   it('allows a multi-capability tool when every dangerous cap is granted', async () => {
     const p = new AutoApprovePermissionPolicy(['package.install', 'shell.restricted']);
     const d = await p.evaluate(
@@ -584,6 +630,27 @@ describe('AutoApprovePermissionPolicy', () => {
     expect(bash.permission).toBe('deny');
   });
 
+  it('wide subagent capabilities include low-risk session, metadata, and shell exec tools', async () => {
+    const p = new AutoApprovePermissionPolicy(WIDE_SUBAGENT_CAPABILITIES);
+    const todo = await p.evaluate(
+      tool('todo', 'auto', undefined, false, [ToolCapabilities.SESSION_TODO]),
+    );
+    const help = await p.evaluate(
+      tool('tool_help', 'auto', undefined, false, [ToolCapabilities.TOOL_META]),
+    );
+    const memoryRead = await p.evaluate(
+      tool('search_memory', 'auto', undefined, false, [ToolCapabilities.MEMORY_READ]),
+    );
+    const shellExec = await p.evaluate(
+      tool('custom_formatter', 'confirm', undefined, true, [ToolCapabilities.SHELL_EXEC]),
+    );
+
+    expect(todo.permission).toBe('auto');
+    expect(help.permission).toBe('auto');
+    expect(memoryRead.permission).toBe('auto');
+    expect(shellExec.permission).toBe('auto');
+  });
+
   it('MCP tools are denied unless mcp.proxy is explicitly granted', async () => {
     const p = new AutoApprovePermissionPolicy();
     const d = await p.evaluate(
@@ -606,6 +673,8 @@ describe('AutoApprovePermissionPolicy', () => {
 describe('Capability helpers', () => {
   it('hasDangerousCapabilityForSubagents detects dangerous caps', () => {
     expect(hasDangerousCapabilityForSubagents(['shell.arbitrary'])).toBe(true);
+    expect(hasDangerousCapabilityForSubagents(['shell.exec'])).toBe(true);
+    expect(hasDangerousCapabilityForSubagents(['tool.mutate.any'])).toBe(true);
     expect(hasDangerousCapabilityForSubagents(['fs.read'])).toBe(false);
     expect(hasDangerousCapabilityForSubagents({ capabilities: ['fs.write.outside-project'] })).toBe(true);
   });
@@ -616,8 +685,14 @@ describe('Capability helpers', () => {
   });
 
   it('getDangerousCapabilities extracts correctly', () => {
-    const result = getDangerousCapabilities(['fs.read', 'shell.arbitrary', 'mcp.proxy']);
+    const result = getDangerousCapabilities([
+      'fs.read',
+      'shell.arbitrary',
+      'tool.mutate.any',
+      'mcp.proxy',
+    ]);
     expect(result).toContain(ToolCapabilities.SHELL_ARBITRARY);
+    expect(result).toContain(ToolCapabilities.TOOL_MUTATE_ANY);
     expect(result).toContain(ToolCapabilities.MCP_PROXY);
     expect(result).not.toContain(ToolCapabilities.FS_READ);
   });

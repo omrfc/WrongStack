@@ -241,7 +241,7 @@ interface Tool<I, O> {
 }
 ```
 
-`riskTier` feeds the permission policy: YOLO auto-approves normal project work, while clearly destructive calls can still prompt unless `--yolo-destructive` is active.
+`riskTier` feeds the permission policy: YOLO auto-approves normal project work, while clearly destructive calls still prompt.
 
 When defined, `executeStream` is preferred: yields `log`, `partial_output`,
 `metric`, `file_changed`, or `warning` events, then a terminal

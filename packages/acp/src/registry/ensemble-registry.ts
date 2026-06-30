@@ -16,6 +16,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { AGENTS_CATALOG } from './agents.catalog.js';
+import { buildWin32CmdShimInvocation } from '../win32-cmd.js';
 
 /** Vendor classification — used to filter the catalog by family. */
 export type ACPAgentVendor =
@@ -171,16 +172,14 @@ async function defaultProbe(
 
     let child: ChildProcess;
     try {
-      child = spawn(desc.probe.command, [...(desc.probe.args ?? [])], {
+      const probeArgs = [...(desc.probe.args ?? [])];
+      const shim = process.platform === 'win32'
+        ? buildWin32CmdShimInvocation(desc.probe.command, probeArgs)
+        : null;
+      child = spawn(shim?.command ?? desc.probe.command, shim?.args ?? probeArgs, {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
-        // On Windows, `claude`, `gemini`, `npx`, etc. are typically
-        // installed as `.cmd` shims under AppData\Roaming\npm\. Node's
-        // spawn() will not find them without shell-mode unless the
-        // extension is present. `shell: true` resolves this for the
-        // common case. The probe argv is always from our static
-        // catalog, never user input, so shell-expansion is bounded.
-        shell: process.platform === 'win32',
+        ...(shim ? { windowsVerbatimArguments: shim.windowsVerbatimArguments } : {}),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -215,9 +214,9 @@ async function defaultProbe(
       const durationMs = Date.now() - start;
       const out = (stdout + stderr).trim();
 
-      // With `shell: true` on Windows, spawn() never ENOENTs — the
-      // cmd shell launches, prints "<command> is not recognized", and
-      // exits non-zero. Detect that specific shape and treat the binary
+      // With the Windows cmd shim, spawn() never ENOENTs for missing tools:
+      // cmd.exe launches, prints "<command> is not recognized", and exits
+      // non-zero. Detect that specific shape and treat the binary
       // as not-installed. The literal string is locale-stable for
       // Windows cmd.exe English (the only locale we ship in CI).
       const isWindowsShellMiss =

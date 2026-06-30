@@ -34,6 +34,13 @@ afterEach(() => {
 });
 
 describe('fetchTool', () => {
+  it('has read-only network metadata', () => {
+    expect(fetchTool.name).toBe('fetch');
+    expect(fetchTool.permission).toBe('auto');
+    expect(fetchTool.mutating).toBe(false);
+    expect(fetchTool.capabilities).toEqual(['net.outbound']);
+  });
+
   it('rejects non-http(s) protocols', async () => {
     const sb = await mkSandbox();
     try {

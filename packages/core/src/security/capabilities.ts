@@ -16,6 +16,9 @@ export const ToolCapabilities = {
   /** Can execute a restricted set of commands (the `exec` tool). */
   SHELL_RESTRICTED: 'shell.restricted',
 
+  /** Can run a restricted project formatter/linter-style command. */
+  SHELL_EXEC: 'shell.exec',
+
   /** Can read files inside the project (and possibly outside via symlinks if not guarded). */
   FS_READ: 'fs.read',
 
@@ -27,6 +30,27 @@ export const ToolCapabilities = {
 
   /** Can perform outbound network requests. */
   NET_OUTBOUND: 'net.outbound',
+
+  /** Can mutate in-memory session todos only. */
+  SESSION_TODO: 'session.todo',
+
+  /** Can mutate in-memory session mode only. */
+  SESSION_MODE: 'session.mode',
+
+  /** Can inspect registered tool metadata. */
+  TOOL_META: 'tool.meta',
+
+  /** Can invoke arbitrary registered tools through a meta-tool. */
+  TOOL_MUTATE_ANY: 'tool.mutate.any',
+
+  /** Can read persistent memory. */
+  MEMORY_READ: 'memory.read',
+
+  /** Can write persistent memory. */
+  MEMORY_WRITE: 'memory.write',
+
+  /** Can delete persistent memory. */
+  MEMORY_DELETE: 'memory.delete',
 
   /** Proxies tools from external MCP servers (unknown capability). */
   MCP_PROXY: 'mcp.proxy',
@@ -60,8 +84,12 @@ export type ToolCapability = (typeof ToolCapabilities)[keyof typeof ToolCapabili
 export const DANGEROUS_FOR_SUBAGENTS: readonly ToolCapability[] = [
   ToolCapabilities.SHELL_ARBITRARY,
   ToolCapabilities.SHELL_RESTRICTED,
+  ToolCapabilities.SHELL_EXEC,
   ToolCapabilities.FS_WRITE,
   ToolCapabilities.FS_WRITE_OUTSIDE_PROJECT,
+  ToolCapabilities.TOOL_MUTATE_ANY,
+  ToolCapabilities.MEMORY_WRITE,
+  ToolCapabilities.MEMORY_DELETE,
   ToolCapabilities.MCP_PROXY,
   ToolCapabilities.SUBAGENT_SPAWN,
   ToolCapabilities.CONFIG_MUTATE,
@@ -73,13 +101,15 @@ export const DANGEROUS_FOR_SUBAGENTS: readonly ToolCapability[] = [
  * with full developer power (the CLI fleet host applies this to any subagent
  * that isn't given an explicit, narrower grant). It covers everything needed to
  * do real work end-to-end — read, write/edit inside the project, outbound
- * network, and shell/build/install — so a delegated coding or build agent runs
- * the same toolchain the leader would, without per-tool confirmation it cannot
- * answer.
+ * network, all shell/build/install capabilities, session todos, tool metadata, and read-only
+ * memory lookup — so a delegated coding or build agent runs the same toolchain
+ * the leader would, without per-tool confirmation it cannot answer.
  *
  * Deliberately EXCLUDED (require an explicit per-spawn `allowedCapabilities`
  * grant, because they escape the task's blast radius rather than perform it):
  *   - `fs.write.outside-project` — writing outside the repo (e.g. ~/.ssh).
+ *   - `tool.mutate.any` — arbitrary meta-tool dispatch.
+ *   - `memory.write` / `memory.delete` — persistent memory mutation.
  *   - `mcp.proxy` — third-party MCP tools (also hard-blocked by name).
  *   - `subagent.spawn` — recursive delegation (the baseline prompt forbids it).
  *   - `config.mutate` — rewriting trust/config is privilege escalation, not work.
@@ -88,8 +118,12 @@ export const WIDE_SUBAGENT_CAPABILITIES: readonly ToolCapability[] = [
   ToolCapabilities.FS_READ,
   ToolCapabilities.FS_WRITE,
   ToolCapabilities.NET_OUTBOUND,
+  ToolCapabilities.SESSION_TODO,
+  ToolCapabilities.TOOL_META,
+  ToolCapabilities.MEMORY_READ,
   ToolCapabilities.SHELL_ARBITRARY,
   ToolCapabilities.SHELL_RESTRICTED,
+  ToolCapabilities.SHELL_EXEC,
   ToolCapabilities.PACKAGE_INSTALL,
 ];
 

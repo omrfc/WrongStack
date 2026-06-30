@@ -89,8 +89,7 @@ export async function launchEternalFromFlag(deps: EternalFlagDeps): Promise<bool
     : emptyGoal(eternalFlag);
   await saveGoal(goalPath, next);
   // Force regular YOLO on, matching the /autonomy eternal path. Clearly
-  // destructive calls still use the normal destructive gate unless the
-  // session was launched with --yolo-destructive.
+  // destructive calls still use the normal destructive gate.
   const policy = deps.container.resolve(TOKENS.PermissionPolicy);
   policy.setYolo?.(true);
   deps.configRef.current = patchConfig(deps.configRef.current, { yolo: true });

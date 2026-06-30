@@ -2,7 +2,10 @@ import { spawn } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 import { detectPackageManager, safeResolve } from './_util.js';
-import { assertSafeWin32ShellArgs, resolveWin32Command } from './_win32-resolve.js';
+import {
+  buildWin32CmdShimInvocation,
+  resolveWin32Command,
+} from './_win32-resolve.js';
 
 interface OutdatedInput {
   cwd?: string | undefined;
@@ -104,12 +107,10 @@ function runOutdated(
 
     const resolved = resolveWin32Command(manager);
     const needsShell = process.platform === 'win32' && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
-    // When using shell: true, the shell resolves through PATH — passing
-    // the full resolved path (which may contain spaces) breaks cmd.exe.
-    const spawnCmd = needsShell ? manager : resolved;
-    // verbatim args reach cmd.exe unquoted — reject injection metacharacters.
-    if (needsShell) assertSafeWin32ShellArgs(args);
-    const child = spawn(spawnCmd, args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}) });
+    const shim = needsShell ? buildWin32CmdShimInvocation(resolved, args) : null;
+    const spawnCmd = shim?.command ?? resolved;
+    const spawnArgs = shim?.args ?? args;
+    const child = spawn(spawnCmd, spawnArgs, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...(shim ? { windowsVerbatimArguments: shim.windowsVerbatimArguments } : {}) });
     child.stdout?.on('data', (c) => {
       if (stdout.length < MAX) stdout += c.toString();
     });

@@ -46,6 +46,7 @@ describe('formatTool', () => {
     expect(formatTool.name).toBe('format');
     expect(formatTool.permission).toBe('confirm');
     expect(formatTool.mutating).toBe(true);
+    expect(formatTool.capabilities).toEqual(['fs.write', 'shell.restricted']);
   });
 
   it('uses biome when neither biome.json nor .prettierrc exists (fallback)', async () => {

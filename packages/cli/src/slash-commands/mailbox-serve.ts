@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { resolveProjectDir, wstackGlobalRoot } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+import { buildWin32CmdShimInvocation } from '../utils/win32-cmd.js';
 
 /**
  * `/mailbox-serve` — start the mailbox HTTP bridge from inside the REPL.
@@ -79,21 +80,21 @@ export function buildMailboxServeCommand(opts: SlashCommandContext): SlashComman
       const isWin = process.platform === 'win32';
       // Re-launch our own JS entry under the SAME node binary —
       // `spawn(scriptPath)` cannot execute a `.js` directly on Windows
-      // (it throws EFTYPE). Fall back to `wstack` on PATH (a `.cmd` shim
-      // on Windows, hence `shell:true`) for installed copies.
+      // (it throws EFTYPE). Fall back to `wstack` on PATH for installed
+      // copies; on Windows the cmd shim helper handles `.cmd` wrappers.
       let wstackCmd: string;
       let spawnArgs: string[];
-      let useShell = false;
+      let shim: ReturnType<typeof buildWin32CmdShimInvocation> | null = null;
       if (cliEntry && /wstack|wrongstack|index\.(js|ts|mjs|cjs)$/.test(cliEntry)) {
         wstackCmd = process.execPath;
         spawnArgs = [cliEntry, 'mailbox', 'serve', ...flags];
       } else {
         wstackCmd = 'wstack';
         spawnArgs = ['mailbox', 'serve', ...flags];
-        useShell = isWin;
+        if (isWin) shim = buildWin32CmdShimInvocation(wstackCmd, spawnArgs);
       }
 
-      const child = spawn(wstackCmd, spawnArgs, {
+      const child = spawn(shim?.command ?? wstackCmd, shim?.args ?? spawnArgs, {
         cwd,
         // POSIX-only: own process group so the bridge outlives the REPL.
         // On win32 `detached` opens a visible console window (project
@@ -101,7 +102,7 @@ export function buildMailboxServeCommand(opts: SlashCommandContext): SlashComman
         detached: !isWin,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
-        shell: useShell,
+        ...(shim ? { windowsVerbatimArguments: shim.windowsVerbatimArguments } : {}),
         env: process.env,
       });
       child.unref();

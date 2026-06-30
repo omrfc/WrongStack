@@ -32,8 +32,9 @@ export interface PermissionPolicy {
    */
   denyOnce(rule: { tool: string; pattern: string }): void;
   /**
-   * Auto-approve this tool+pattern for the remainder of the session (no persistence).
-   * Used when user presses 'y' — prevents LLM retry from re-triggering confirm.
+   * Auto-approve this tool+pattern once (no persistence). Used when user
+   * presses 'y' so the immediate confirmed re-run can proceed without making
+   * future destructive calls silent.
    */
   allowOnce(rule: { tool: string; pattern: string }): void;
   reload(): Promise<void>;
@@ -41,13 +42,13 @@ export interface PermissionPolicy {
   getYolo?(): boolean;
   /** Optional runtime setter for policies that support leader YOLO toggling. */
   setYolo?(enabled: boolean): void;
-  /** Optional runtime query for the destructive YOLO override. */
+  /** Optional runtime query for the deprecated destructive YOLO override. */
   getYoloDestructive?(): boolean;
-  /** Optional runtime setter for the destructive YOLO override. */
+  /** Optional runtime setter for the deprecated destructive YOLO override. */
   setYoloDestructive?(enabled: boolean): void;
   /** Query whether destructive-operation confirmation gate is active. */
   getConfirmDestructive?(): boolean;
-  /** Enable/disable destructive-operation confirmation (only meaningful in yolo mode). */
+  /** Compatibility setter; current default policy keeps the gate enabled in YOLO mode. */
   setConfirmDestructive?(enabled: boolean): void;
   /** Set the prompt delegate (optional). */
   setPromptDelegate?(delegate: ((tool: Tool, input: unknown, suggestedPattern: string) => Promise<'yes' | 'no' | 'always' | 'deny'>) | undefined): void;

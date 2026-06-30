@@ -5,7 +5,10 @@ import { buildChildEnv } from './_env.js';
 import { createOutputSpool, spoolNote } from './_output-spool.js';
 import { COMMAND_OUTPUT_MAX_BYTES, normalizeCommandOutput, safeResolveReal } from './_util.js';
 import { getProcessRegistry, redactCommand } from './process-registry.js';
-import { assertSafeWin32ShellArgs, resolveWin32Command } from './_win32-resolve.js';
+import {
+  buildWin32CmdShimInvocation,
+  resolveWin32Command,
+} from './_win32-resolve.js';
 
 const isWin = process.platform === 'win32';
 
@@ -464,19 +467,14 @@ function runCommand(
     // captures everything on disk and the result points at the file.
     const spool = createOutputSpool({ tool: `exec-${cmd}`, thresholdBytes: MAX_OUTPUT });
 
-    // On Windows, .cmd/.bat resolution requires shell: true — same rationale
-    // as _spawn-stream.ts. resolveWin32Command() finds the full path to the
-    // .cmd file so spawn can locate it; shell: true is still needed because
-    // .cmd/.bat files are not natively executable by CreateProcess.
+    // On Windows, .cmd/.bat files are not natively executable by CreateProcess.
+    // resolveWin32Command() finds the full path, then the shim helper launches
+    // it through cmd.exe without Node's deprecated shell+args path.
     const resolved = resolveWin32Command(cmd);
     const needsShell = isWin && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
-    // When using shell: true, the shell resolves the command through PATH —
-    // passing the full resolved path (which may contain spaces, e.g.
-    // "C:\Program Files\nodejs\pnpm.cmd") breaks because cmd.exe splits on
-    // the space. Use the original command name so the shell finds it.
-    const spawnCmd = needsShell ? cmd : resolved;
-    // verbatim args reach cmd.exe unquoted — reject injection metacharacters.
-    if (needsShell) assertSafeWin32ShellArgs(args);
+    const shim = needsShell ? buildWin32CmdShimInvocation(resolved, args) : null;
+    const spawnCmd = shim?.command ?? resolved;
+    const spawnArgs = shim?.args ?? args;
 
     // Wrap the entire spawn lifecycle in try/catch so a synchronous throw
     // (bad argv, ENOENT for missing binary, ERR_INVALID_ARG_TYPE for bad
@@ -490,13 +488,13 @@ function runCommand(
       // handling kills only the direct child, orphaning grandchildren (vitest
       // forks, dev servers, anything under a .cmd shim) that keep the inherited
       // stdio pipes open. registry.kill() tree-kills via taskkill instead.
-      child = spawn(spawnCmd, args, {
+      child = spawn(spawnCmd, spawnArgs, {
         cwd,
         env: buildChildEnv(sessionId),
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         ...(isWin ? {} : { signal }),
-        ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}),
+        ...(shim ? { windowsVerbatimArguments: shim.windowsVerbatimArguments } : {}),
       });
     } catch (err) {
       // spawn() can throw synchronously — e.g. ERR_INVALID_ARG_TYPE for a

@@ -13,8 +13,8 @@ In the TUI, `/autonomy` (no args) opens an interactive picker. In the CLI REPL, 
 | `off` | OFF | green | Normal interactive mode. Agent stops after each turn. |
 | `suggest` | SUGGEST | cyan | After each turn, agent shows next-step suggestions. You pick. |
 | `auto` | AUTO | yellow | After each turn, agent picks the best next step and continues. Runs until Esc or Ctrl+C. |
-| `eternal` | ETERNITY | red | Goal-driven sense/decide/execute/reflect loop. Requires `/goal`. Forces YOLO on for normal project work; clearly destructive calls can still prompt unless `--yolo-destructive` is active. Runs until `/autonomy stop`, Ctrl+C twice, or `/goal pause`. |
-| `eternal-parallel` | PARALLEL | magenta | Fan-out 4–8 subagents per tick. Each tick: decompose → spawn → await → aggregate → loop. Requires `/goal`. Forces YOLO on for normal project work; clearly destructive calls can still prompt unless `--yolo-destructive` is active. |
+| `eternal` | ETERNITY | red | Goal-driven sense/decide/execute/reflect loop. Requires `/goal`. Forces YOLO on for normal project work; clearly destructive calls still prompt. Runs until `/autonomy stop`, Ctrl+C twice, or `/goal pause`. |
+| `eternal-parallel` | PARALLEL | magenta | Fan-out 4–8 subagents per tick. Each tick: decompose → spawn → await → aggregate → loop. Requires `/goal`. Forces YOLO on for normal project work; clearly destructive calls still prompt. |
 
 ## Usage
 

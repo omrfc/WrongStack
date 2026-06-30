@@ -23,7 +23,7 @@ describe('createContextManagerTool', () => {
     const tool = createContextManagerTool();
     expect(tool.name).toBe('context_manager');
     expect(tool.permission).toBe('auto');
-    expect(tool.mutating).toBe(true);
+    expect(tool.mutating).toBe(false);
   });
 
   it('check action returns budget info', async () => {

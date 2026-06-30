@@ -53,7 +53,7 @@ export function createMcpUseTool(opts: CreateMcpUseToolOptions): Tool {
     description:
       'Call an MCP tool on a lazy-loaded server. Activates the server temporarily, calls the tool, returns the result, and deactivates. Use this instead of the manual activate→use→deactivate cycle. First call mcp_control list/search to find the right server and tool name.',
     category: 'mcp',
-    permission: 'auto',
+    permission: 'confirm',
     mutating: true,
     riskTier: 'standard',
     capabilities: [ToolCapabilities.MCP_PROXY],

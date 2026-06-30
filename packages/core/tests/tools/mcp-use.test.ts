@@ -35,6 +35,7 @@ describe('createMcpUseTool', () => {
   it('exposes mcp_use metadata', () => {
     const tool = createMcpUseTool({ registry: fakeRegistry(), toolRegistry: fakeToolRegistry() });
     expect(tool.name).toBe('mcp_use');
+    expect(tool.permission).toBe('confirm');
     expect(tool.mutating).toBe(true);
     expect(tool.capabilities).toContain(ToolCapabilities.MCP_PROXY);
     expect(tool.inputSchema.required).toEqual(['server', 'tool', 'input']);

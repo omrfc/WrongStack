@@ -3,9 +3,8 @@ import type { Context } from '../core/context.js';
 export type Permission = 'auto' | 'confirm' | 'deny';
 
 /**
- * Risk tier for tools in YOLO mode. YOLO auto-approves everything by default,
- * including destructive calls. Use `--confirm-destructive` to re-enable
- * confirmation prompts for destructive operations.
+ * Risk tier for tools in YOLO mode. YOLO auto-approves normal project work,
+ * while clearly destructive calls still require confirmation.
  *
  * - `safe`       — read-only, no side effects (read, glob, grep, etc.)
  * - `standard`   — non-destructive writes and mutations (write, edit, safe shell commands)
@@ -104,9 +103,9 @@ export interface Tool<I = unknown, O = unknown> {
   mutating: boolean;
   /**
    * Risk tier for selective YOLO gating. When YOLO is active, clearly
-   * destructive calls still emit `confirm` unless the destructive override is
-   * set. Defaults to `standard` when omitted — callers should always check
-   * `riskTier` after the basic permission decision.
+   * destructive calls still emit `confirm`. Defaults to `standard` when
+   * omitted — callers should always check `riskTier` after the basic
+   * permission decision.
    */
   riskTier?: RiskTier | undefined;
   /**

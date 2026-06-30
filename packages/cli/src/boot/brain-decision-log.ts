@@ -111,10 +111,14 @@ export function subscribeBrainDecisionLog(
   });
 
   const dispose = (): void => {
-    // biome-ignore lint/suspicious/noExplicitAny: dynamic off() cast mirrors the wrapper's existing convention.
-    const off = (events as any).off as (e: string, h: (payload: unknown) => void) => void;
     for (const [name, handler] of listeners) {
-      off(name, handler);
+      // Call through the EventBus receiver. Detaching `events.off` loses
+      // `this` and crashes on shutdown with "reading 'listeners'".
+      (events.off as (e: string, h: (payload: unknown) => void) => void).call(
+        events,
+        name,
+        handler,
+      );
     }
   };
 

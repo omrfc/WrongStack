@@ -205,8 +205,15 @@ describe('ClientTransport', () => {
     const { child } = await startedTransport();
     expect(spawnMock.fn).toHaveBeenCalledTimes(1);
     const [cmd, args, opts] = spawnMock.fn.mock.calls[0] as [string, string[], Record<string, unknown>];
-    expect(cmd).toBe('agent');
-    expect(args).toEqual(['--x']);
+    if (process.platform === 'win32') {
+      expect(cmd.toLowerCase()).toMatch(/cmd\.exe$/);
+      expect(args).toEqual(['/d', '/c', 'call "agent" "--x"']);
+      expect(opts.windowsVerbatimArguments).toBe(true);
+    } else {
+      expect(cmd).toBe('agent');
+      expect(args).toEqual(['--x']);
+      expect(opts.windowsVerbatimArguments).toBeUndefined();
+    }
     expect(opts.cwd).toBe('/w');
     expect(opts.windowsHide).toBe(true);
     expect((opts.env as Record<string, string>).K).toBe('v');

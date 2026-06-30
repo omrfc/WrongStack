@@ -454,7 +454,7 @@ Tool permission decisions come from these sources:
 type RiskTier = 'safe' | 'standard' | 'destructive';
 ```
 
-- **YOLO mode** auto-approves everything by default, but with `--confirm-destructive`, destructive-tier tools still require confirmation.
+- **YOLO mode** auto-approves normal project work by default, while destructive-tier tools still require confirmation.
 - `denyOnce()` / `allowOnce()` — Session-scoped temporary rules that prevent the LLM from re-triggering the same tool call or auto-approving it.
 
 ---

@@ -9,6 +9,7 @@ import type { ToolResultBlock, ToolUseBlock } from '../../src/types/blocks.js';
 import type { Logger } from '../../src/types/logger.js';
 import type { PermissionDecision } from '../../src/types/permission.js';
 import type { Tool } from '../../src/types/tool.js';
+import { DefaultPermissionPolicy } from '../../src/security/permission-policy.js';
 
 // --- Test helpers ---
 
@@ -213,9 +214,9 @@ describe('ToolExecutor', () => {
       expect(tool.execute).toHaveBeenCalledTimes(1);
     });
 
-    it('skips the confirm net under --yolo-destructive', async () => {
+    it('does not skip the confirm net for deprecated --yolo-destructive alone', async () => {
       const { result } = await runWith({ getYoloDestructive: () => true });
-      expect(result.type).toBe('tool_result');
+      expect(result.type).toBe('tool_confirm_pending');
     });
 
     it('still forces confirm when the policy exposes no yolo getters (safe default)', async () => {
@@ -377,6 +378,66 @@ describe('ToolExecutor', () => {
   });
 
   describe('executeBatch — confirm without awaiter (TUI path)', () => {
+    it('auto-runs read-only net.outbound tools without a confirm awaiter', async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-net-tool-'));
+      try {
+        const fetchLike = makeTool({
+          name: 'fetch',
+          permission: 'auto',
+          mutating: false,
+          capabilities: ['net.outbound'],
+          execute: vi.fn().mockResolvedValue({ ok: true }),
+        });
+        const executor = makeExecutor([fetchLike], {
+          permissionPolicy: new DefaultPermissionPolicy({
+            trustFile: path.join(dir, 'trust.json'),
+          }) as never,
+          confirmAwaiter: undefined,
+        });
+
+        const result = await executor.executeBatch(
+          [makeUse('fetch', { url: 'https://example.com/' })],
+          makeCtx(),
+          'sequential',
+        );
+
+        expect(result.outputs[0]!.result.type).toBe('tool_result');
+        expect(fetchLike.execute).toHaveBeenCalledTimes(1);
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('still returns pending confirmation for mutating net.outbound tools', async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-net-tool-'));
+      try {
+        const outdatedLike = makeTool({
+          name: 'outdated',
+          permission: 'confirm',
+          mutating: true,
+          capabilities: ['net.outbound'],
+          execute: vi.fn().mockResolvedValue({ ok: true }),
+        });
+        const executor = makeExecutor([outdatedLike], {
+          permissionPolicy: new DefaultPermissionPolicy({
+            trustFile: path.join(dir, 'trust.json'),
+          }) as never,
+          confirmAwaiter: undefined,
+        });
+
+        const result = await executor.executeBatch(
+          [makeUse('outdated', { cwd: '.' })],
+          makeCtx(),
+          'sequential',
+        );
+
+        expect(result.outputs[0]!.result.type).toBe('tool_confirm_pending');
+        expect(outdatedLike.execute).not.toHaveBeenCalled();
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
     it('returns tool_confirm_pending when no awaiter', async () => {
       policy.evaluate.mockResolvedValue(confirmDecision());
       const tool = makeTool({ name: 'edit' });

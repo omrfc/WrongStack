@@ -163,7 +163,7 @@ export function wireTaskCompletedListener(d: DirectorInternals): (payload: { tas
     // Flush immediately on task completion — the result should be
     // visible in the manifest without waiting for the debounce window.
     if (d.fleetManager) {
-      d.fleetManager.flushManifest();
+      void d.fleetManager.flushManifest();
     } else {
       d.scheduleManifest();
     }

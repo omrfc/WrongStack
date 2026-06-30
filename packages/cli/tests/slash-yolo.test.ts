@@ -23,7 +23,7 @@ describe('/yolo slash command', () => {
       expect(cmd.help).toContain('/yolo on');
       expect(cmd.help).toContain('/yolo off');
       expect(cmd.help).toContain('/yolo destructive');
-      expect(cmd.help).toContain('auto-approves everything');
+      expect(cmd.help).toContain('auto-approves normal project work');
     });
   });
 

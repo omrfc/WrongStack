@@ -49,7 +49,7 @@ beforeEach(() => {
 });
 
 describe('helpCmd', () => {
-  it('documents YOLO and the destructive override flag', async () => {
+  it('documents YOLO and the destructive compatibility flags', async () => {
     const deps = fakeDeps();
     const code = await helpCmd([], deps);
     expect(code).toBe(0);
@@ -58,7 +58,7 @@ describe('helpCmd', () => {
       .join('');
     expect(output).toContain('--yolo');
     expect(output).toContain('--confirm-destructive');
-    expect(output).toContain('Deprecated — YOLO now auto-approves everything');
+    expect(output).toContain('destructive calls still prompt');
   });
 });
 

@@ -8,7 +8,7 @@ import {
   isPrivateIPv4,
   isPrivateIPv6,
 } from '@wrongstack/core';
-import { Agent } from 'undici';
+import { Agent, fetch as undiciFetch } from 'undici';
 import TurndownService from 'turndown';
 import { truncateMiddle } from './_util.js';
 
@@ -47,6 +47,7 @@ interface FetchOutput {
 
 const MAX_BYTES = 131_072;
 const TIMEOUT_MS = 20_000;
+const nativeGlobalFetch = globalThis.fetch;
 
 const ALLOW_PRIVATE = process.env['WRONGSTACK_FETCH_ALLOW_PRIVATE'] === '1';
 /* v8 ignore next 8 -- module-load-time opt-in warning; gated on an env var not set during tests. */
@@ -133,6 +134,18 @@ function getPinnedDispatcher(): Agent {
   }
   return pinnedAgent;
 }
+
+function dispatcherFetch(): typeof globalThis.fetch {
+  // Node's built-in global fetch is backed by its own bundled undici version.
+  // Passing an Agent from the workspace's `undici` package to that different
+  // dispatcher ABI fails on recent Node with:
+  //   UND_ERR_INVALID_ARG: invalid onRequestStart method
+  // Use the matching package fetch+Agent pair in real runs, but keep honoring
+  // test/user fetch shims that replace globalThis.fetch after this module loads.
+  return globalThis.fetch === nativeGlobalFetch
+    ? (undiciFetch as unknown as typeof globalThis.fetch)
+    : globalThis.fetch;
+}
 // Clean up the global dispatcher on exit — undici Agents maintain connection
 // pools and DNS caches that should be torn down in long-running processes.
 // Guard against duplicate registration (module reload/HMR would otherwise
@@ -196,7 +209,7 @@ export async function guardedFetch(
       headers,
       dispatcher: getPinnedDispatcher(),
     };
-    const res = await fetch(currentUrl, init as never as RequestInit);
+    const res = await dispatcherFetch()(currentUrl, init as never as RequestInit);
     if (res.status < 300 || res.status > 399) {
       return res;
     }
@@ -234,7 +247,7 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
     '- Redirects are followed but re-validated at each hop.\n' +
     '- Output is capped (128KB by default) to avoid flooding context.\n' +
     'Prefer this over raw `bash curl` or `bash wget`.',
-  permission: 'confirm',
+  permission: 'auto',
   mutating: false,
   capabilities: ['net.outbound'],
   icon: 'web',

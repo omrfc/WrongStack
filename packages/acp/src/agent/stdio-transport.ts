@@ -10,6 +10,7 @@
  */
 import { expectDefined, writeErr } from '@wrongstack/core';
 import type { ACPMessage } from '../types/acp-messages.js';
+import { buildWin32CmdShimInvocation } from '../win32-cmd.js';
 export interface AgentServerTransport {
   send(msg: ACPMessage): Promise<void>;
   sendRaw(chunk: string): void;
@@ -200,19 +201,16 @@ export class ClientTransport implements ACPClientTransport {
       const spawnCwd = isPkgLauncher ? os.homedir() : this.opts.cwd;
 
       try {
-        this.child = spawn(this.opts.command, this.opts.args ?? [], {
+        const childArgs = this.opts.args ?? [];
+        const shim = process.platform === 'win32'
+          ? buildWin32CmdShimInvocation(this.opts.command, childArgs)
+          : null;
+        this.child = spawn(shim?.command ?? this.opts.command, shim?.args ?? childArgs, {
           env: { ...buildChildEnv(), ...this.opts.env },
           cwd: spawnCwd,
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
-          // On Windows, most ACP-supporting tools (claude, gemini, codex,
-          // qwen, copilot) are installed as `.cmd` shims under
-          // AppData\Roaming\npm\. Node's spawn won't find them via
-          // `shell: false` because the .cmd extension is not in the
-          // default PATHEXT lookup. The argv here is always from our
-          // own static catalog or from a hardcoded spec, never from
-          // user input, so shell-expansion is bounded.
-          shell: process.platform === 'win32',
+          ...(shim ? { windowsVerbatimArguments: shim.windowsVerbatimArguments } : {}),
         }) as never as ACPChildProcess;
         /* v8 ignore start -- spawn() throwing synchronously is a defensive guard (e.g. argv0 type errors); the realistic async failure path is the child 'error' event, covered by tests. */
       } catch (err) {

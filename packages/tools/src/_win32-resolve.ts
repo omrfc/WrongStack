@@ -85,36 +85,56 @@ export function resolvePowerShell(cmd: string): string {
 
 /**
  * cmd.exe metacharacters that chain a new command or redirect I/O. When a
- * `.cmd`/`.bat` wrapper is spawned with `shell: true` + `windowsVerbatimArguments:
- * true`, Node passes argv through to `cmd.exe /c` UNQUOTED — so an argument
- * carrying one of these can break out of the intended command line and run an
+ * `.cmd`/`.bat` wrapper is launched through `cmd.exe`, any argument carrying
+ * one of these can break out of the intended command line and run an
  * attacker-chosen command (the CVE-2024-27980 / "BatBadBut" argument-injection
- * class). We deliberately opt out of Node's auto-quoting (verbatim) for correct
- * path handling, so this guard restores the protection.
+ * class). We use a single vetted command line for cmd shims, so this guard is
+ * mandatory before spawning.
  *
  * The set is limited to the unambiguous command-separator / redirection chars
  * plus newlines and NUL. Legitimate package-manager / test-runner flags and
  * Windows file paths (which use `:` `\` `/` `.` `-` `_` space `(` `)`) never
- * contain these, so the guard is false-positive-free. `^ % !` are intentionally
- * excluded: alone they only escape or expand — they cannot start a new command
- * without one of the separators below, all of which are rejected.
+ * contain these, so the guard is false-positive-free. Double quotes are also
+ * rejected because cmd.exe quote toggling can break argument grouping.
  */
-const WIN32_SHELL_META = /[&|<>\r\n\0]/;
+const WIN32_SHELL_META = /[&|<>"\r\n\0]/;
+
+export interface Win32CmdShimInvocation {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments: true;
+}
 
 /**
  * Throw if any argument contains a cmd.exe command-injection metacharacter.
- * Call this ONLY on the Windows `.cmd`/`.bat` + verbatim spawn path (where the
- * args reach the shell unquoted). A no-op for safe args.
+ * Call this ONLY on the Windows `.cmd`/`.bat` shim path. A no-op for safe args.
  */
 export function assertSafeWin32ShellArgs(args: readonly unknown[]): void {
-  for (const a of args) {
-    if (typeof a === 'string' && WIN32_SHELL_META.test(a)) {
+  for (const arg of args) {
+    if (typeof arg === 'string' && WIN32_SHELL_META.test(arg)) {
       throw new Error(
-        'win32 shell spawn: argument contains a shell metacharacter ' +
-          '(one of & | < > or a newline) that could enable command injection ' +
-          'through the .cmd/.bat wrapper — refusing to run. Offending argument: ' +
-          JSON.stringify(a),
+        'win32 cmd shim spawn: argument contains a shell metacharacter ' +
+          '(one of & | < > ", or a newline) that could enable command injection ' +
+          'through the .cmd/.bat wrapper - refusing to run. Offending argument: ' +
+          JSON.stringify(arg),
       );
     }
   }
+}
+
+export function buildWin32CmdShimInvocation(
+  command: string,
+  args: readonly string[] = [],
+): Win32CmdShimInvocation {
+  assertSafeWin32ShellArgs([command, ...args]);
+  const line = ['call', quoteWin32CmdArg(command), ...args.map(quoteWin32CmdArg)].join(' ');
+  return {
+    command: process.env['COMSPEC'] ?? 'cmd.exe',
+    args: ['/d', '/c', line],
+    windowsVerbatimArguments: true,
+  };
+}
+
+function quoteWin32CmdArg(arg: string): string {
+  return `"${arg}"`;
 }

@@ -50,7 +50,7 @@ WrongStack uses a layered configuration system. Settings are merged from multipl
 | `model` | `string` | *(required)* | Active model id (e.g. `claude-opus-4-7`, `gpt-4.1`). |
 | `apiKey` | `string` | — | API key for the active provider. Auto-encrypted on first contact. |
 | `baseUrl` | `string` | — | Custom API base URL. Overrides the provider's default endpoint. |
-| `yolo` | `boolean` | `false` | Auto-approve normal project work. Clearly destructive calls may still prompt unless `--yolo-destructive` is used. Overridden by `--yolo` CLI flag. |
+| `yolo` | `boolean` | `false` | Auto-approve normal project work. Clearly destructive calls still prompt. Overridden by `--yolo` CLI flag. |
 | `fallbackModels` | `string[]` | — | Ordered fallback chain tried when the primary model is overloaded (429/529/5xx) and its own retries are exhausted. Each entry is `model`, `provider/model`, or `provider model`. Cross-provider. The primary is re-tried first each turn. Overridden by `--fallback-model a,b,c`. |
 | `hooks` | `object` | — | Lifecycle shell hooks keyed by event. See [`hooks`](#hooks--lifecycle-hooks) below and [hooks.md](./hooks.md). |
 | `cwd` | `string` | `process.cwd()` | Working directory. Overridden by `--cwd` CLI flag. |

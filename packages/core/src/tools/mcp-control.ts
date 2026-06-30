@@ -94,15 +94,14 @@ export function createMcpControlTool(opts: CreateMcpControlToolOptions): Tool {
     description:
       'Manage MCP server lifecycle: list available servers, search by name or capability, enable or disable servers at runtime, restart running servers. Use activate/deactivate to ephemerally toggle tool registration without disconnecting — ideal for token-saving mode where MCP tools are lazy-loaded on demand. NOTE: `enable`/`restart` start a server process, which for the built-in stdio presets runs `npx -y <package>` — i.e. it fetches and executes an npm package from the network. Treat it as code execution.',
     category: 'mcp',
-    permission: 'auto',
+    permission: 'confirm',
     mutating: true,
     // `enable`/`restart` spawn a server process that, for the stdio presets,
     // fetches and runs an npm package (`npx -y <pkg>`) — effectively remote
-    // code execution. Marking the tool destructive means the YOLO
-    // `confirmDestructive` safety net still prompts before it runs (plain
-    // non-YOLO already confirms via the CONFIG_MUTATE dangerous-capability
-    // net in the executor). Read-only actions (list/search) ride the same
-    // tool but are cheap to confirm/trust once.
+    // code execution. Marking the tool destructive means YOLO still prompts
+    // before it runs (plain non-YOLO already confirms via the CONFIG_MUTATE
+    // dangerous-capability net in the executor). Read-only actions
+    // (list/search) ride the same tool but are cheap to confirm/trust once.
     riskTier: 'destructive',
     capabilities: [ToolCapabilities.CONFIG_MUTATE],
     inputSchema,

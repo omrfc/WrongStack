@@ -81,6 +81,8 @@ export class FleetManager implements IFleetManager {
   private readonly stateCheckpoint: DirectorStateCheckpoint | null;
   private readonly sessionWriter: SessionWriter | null;
   private manifestTimer: NodeJS.Timeout | null = null;
+  private manifestWriteChain: Promise<unknown> = Promise.resolve();
+  private disposed = false;
   private readonly manifestDebounceMs: number;
   /** Fleet-wide cost cap. Infinity = no cap. Distinct from SubagentBudget limits,
    *  which track per-subagent spend — this field caps the entire fleet total. */
@@ -302,6 +304,16 @@ export class FleetManager implements IFleetManager {
 
   async writeManifest(): Promise<string | null> {
     if (!this.manifestPath) return null;
+    this.clearManifestTimer();
+    const write = this.manifestWriteChain
+      .catch(() => undefined)
+      .then(() => this.writeManifestNow());
+    this.manifestWriteChain = write.catch(() => undefined);
+    return write;
+  }
+
+  private async writeManifestNow(): Promise<string | null> {
+    if (!this.manifestPath) return null;
     const manifest = {
       version: 1,
       directorRunId: this.directorRunId,
@@ -336,6 +348,7 @@ export class FleetManager implements IFleetManager {
    * When `manifestDebounceMs` is 0, writes are synchronous (no debounce).
    */
   scheduleManifest(): void {
+    if (this.disposed) return;
     if (!this.manifestPath) return;
     if (this.manifestDebounceMs === 0) {
       // 0 means instant flush — write synchronously, no timer.
@@ -372,10 +385,7 @@ export class FleetManager implements IFleetManager {
    */
   async flushManifest(): Promise<void> {
     if (!this.manifestPath) return;
-    if (this.manifestTimer) {
-      clearTimeout(this.manifestTimer);
-      this.manifestTimer = null;
-    }
+    this.clearManifestTimer();
     await this.writeManifest().catch((err) => {
       const detail = toErrorMessage(err);
       process.emitWarning(
@@ -383,6 +393,12 @@ export class FleetManager implements IFleetManager {
         'FleetManagerWarning',
       );
     });
+  }
+
+  private clearManifestTimer(): void {
+    if (!this.manifestTimer) return;
+    clearTimeout(this.manifestTimer);
+    this.manifestTimer = null;
   }
 
   /** Best-effort session event writer. Swallows failures. */
@@ -473,10 +489,8 @@ export class FleetManager implements IFleetManager {
 
   /** Release all resources: clear the manifest debounce timer and dispose the usage aggregator. */
   dispose(): void {
-    if (this.manifestTimer) {
-      clearTimeout(this.manifestTimer);
-      this.manifestTimer = null;
-    }
+    this.disposed = true;
+    this.clearManifestTimer();
     this.usage.dispose();
   }
 }

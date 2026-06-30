@@ -12,6 +12,7 @@ interface SearchResult {
 
 interface CacheEntry {
   results: SearchResult[];
+  source: string;
   timestamp: number;
 }
 
@@ -53,7 +54,7 @@ export const searchTool: Tool<SearchInput, SearchOutput> = {
     '- Supports duckduckgo (default), google, and bing sources.\n' +
     '- Set `skip_cache: true` to force a fresh search.\n' +
     '- This is often better than the model trying to recall outdated knowledge.',
-  permission: 'confirm',
+  permission: 'auto',
   mutating: false,
   capabilities: ['net.outbound'],
   icon: 'search',
@@ -119,15 +120,15 @@ export const searchTool: Tool<SearchInput, SearchOutput> = {
         };
         yield {
           type: 'partial_output',
-          text: `${results.length} cached results from ${source}`,
-          data: { count: results.length, cached: true },
+          text: `${results.length} cached results from ${entry.source}`,
+          data: { count: results.length, cached: true, source: entry.source },
         };
         yield {
           type: 'final',
           output: {
             query: input.query,
             results: results.slice(0, num),
-            source,
+            source: entry.source,
             truncated: results.length >= num,
             cached: true,
           },
@@ -143,6 +144,7 @@ export const searchTool: Tool<SearchInput, SearchOutput> = {
     };
 
     let rawResults: SearchResult[];
+    let effectiveSource: SearchOutput['source'] = source;
     switch (source) {
       case 'duckduckgo':
         rawResults = await duckduckgoSearch(input.query, num, opts.signal);
@@ -160,30 +162,28 @@ export const searchTool: Tool<SearchInput, SearchOutput> = {
         });
     }
 
-    // --- Deduplicate by normalized URL, drop non-http ---
-    const seenUrls = new Set<string>();
-    const deduped: SearchResult[] = [];
-    for (const r of rawResults) {
-      const noQuery = r.url.split('?')[0] ?? r.url;
-      const normalized = noQuery.split('#')[0] ?? r.url;
-      if (!seenUrls.has(normalized) && r.url.startsWith('http')) {
-        seenUrls.add(normalized);
-        deduped.push(r);
-      }
+    let ranked = rankSearchResults(rawResults, input.query);
+    if (source !== 'duckduckgo' && shouldFallbackToDuckDuckGo(ranked, input.query)) {
+      yield {
+        type: 'log',
+        text: `${source} returned no relevant static results; falling back to duckduckgo`,
+        data: { source, fallback: 'duckduckgo', query: input.query },
+      };
+      rawResults = await duckduckgoSearch(input.query, num, opts.signal);
+      ranked = rankSearchResults(rawResults, input.query);
+      effectiveSource = 'duckduckgo';
     }
 
-    // --- Rank by query-term overlap (title > snippet) ---
-    const ranked = scoreResults(deduped, input.query);
     const finalResults = ranked.slice(0, num);
 
     // --- Store in cache ---
-    cache.set(cacheKey, { results: ranked, timestamp: Date.now() });
+    cache.set(cacheKey, { results: ranked, source: effectiveSource, timestamp: Date.now() });
     pruneStaleCacheEntries();
 
     yield {
       type: 'partial_output',
-      text: `${finalResults.length} results from ${source}`,
-      data: { count: finalResults.length, cached: false },
+      text: `${finalResults.length} results from ${effectiveSource}`,
+      data: { count: finalResults.length, cached: false, source: effectiveSource },
     };
     yield {
       type: 'final',
@@ -194,7 +194,7 @@ export const searchTool: Tool<SearchInput, SearchOutput> = {
           url: r.url,
           snippet: r.snippet,
         })),
-        source,
+        source: effectiveSource,
         truncated: finalResults.length >= num,
         cached: false,
       },
@@ -223,6 +223,20 @@ export function __clearSearchCache(): void {
 // Ranking
 // ---------------------------------------------------------------------------
 
+function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
+  const seenUrls = new Set<string>();
+  const deduped: SearchResult[] = [];
+  for (const r of results) {
+    const noQuery = r.url.split('?')[0] ?? r.url;
+    const normalized = noQuery.split('#')[0] ?? r.url;
+    if (!seenUrls.has(normalized) && r.url.startsWith('http')) {
+      seenUrls.add(normalized);
+      deduped.push(r);
+    }
+  }
+  return scoreResults(deduped, query);
+}
+
 function scoreResults(results: SearchResult[], query: string): SearchResult[] {
   const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
   return results
@@ -237,6 +251,16 @@ function scoreResults(results: SearchResult[], query: string): SearchResult[] {
       return { ...r, score };
     })
     .sort((a, b) => b.score - a.score);
+}
+
+function shouldFallbackToDuckDuckGo(results: SearchResult[], query: string): boolean {
+  if (results.length === 0) return true;
+  const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length >= 3);
+  if (terms.length === 0) return false;
+  return !results.some((r) => {
+    const haystack = `${r.title} ${r.url} ${r.snippet}`.toLowerCase();
+    return terms.some((term) => haystack.includes(term));
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -277,18 +301,26 @@ function takeFrom<T>(iter: Iterable<T>, max: number): T[] {
 
 function parseDuckDuckGo(html: string, num: number): SearchResult[] {
   const results: SearchResult[] = [];
-  const snippetRegex = /<a class="result-link"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
-  const snippet2Regex = /<a class="result-snippet"[^>]*>([^<]+)<\/a>/gi;
+  const linkRegex = /<a\b([^>]*\bclass=(["'])[^"']*\bresult-link\b[^"']*\2[^>]*)>([\s\S]*?)<\/a>/gi;
+  const snippetRegex =
+    /<([a-z0-9]+)\b([^>]*\bclass=(["'])[^"']*\bresult-snippet\b[^"']*\3[^>]*)>([\s\S]*?)<\/\1>/gi;
 
   const linkMatches = takeFrom(
-    [...html.matchAll(snippetRegex)]
-      .filter((m) => m[1] && m[2])
-      .map((m) => ({ url: expectDefined(m[1]), title: stripTags(expectDefined(m[2])) })),
+    [...html.matchAll(linkRegex)]
+      .map((m) => {
+        const attrs = expectDefined(m[1]);
+        const href = getHtmlAttr(attrs, 'href');
+        const title = stripTags(expectDefined(m[3]));
+        return href && title ? { url: normalizeDuckDuckGoUrl(href), title } : undefined;
+      })
+      .filter((m): m is { url: string; title: string } => m !== undefined),
     num,
   );
 
   const snippetMatches = takeFrom(
-    [...html.matchAll(snippet2Regex)].filter((m) => m[1]).map((m) => stripTags(expectDefined(m[1]))),
+    [...html.matchAll(snippetRegex)]
+      .filter((m) => m[4])
+      .map((m) => stripTags(expectDefined(m[4]))),
     num,
   );
 
@@ -305,6 +337,26 @@ function parseDuckDuckGo(html: string, num: number): SearchResult[] {
   }
 
   return results;
+}
+
+function getHtmlAttr(attrs: string, name: string): string | undefined {
+  const quoted = new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, 'i').exec(attrs);
+  if (quoted?.[2]) return decodeHtmlEntities(quoted[2]);
+  const unquoted = new RegExp(`\\b${name}\\s*=\\s*([^\\s>]+)`, 'i').exec(attrs);
+  return unquoted?.[1] ? decodeHtmlEntities(unquoted[1]) : undefined;
+}
+
+function normalizeDuckDuckGoUrl(raw: string): string {
+  if (raw.startsWith('//')) return `https:${raw}`;
+  if (!raw.startsWith('/')) return raw;
+  if (!raw.startsWith('/l/')) return raw;
+  try {
+    const url = new URL(raw, 'https://duckduckgo.com');
+    const uddg = url.searchParams.get('uddg');
+    return uddg?.startsWith('http') ? uddg : url.toString();
+  } catch {
+    return raw;
+  }
 }
 
 async function googleSearch(query: string, num: number, signal: AbortSignal): Promise<SearchResult[]> {
@@ -367,20 +419,21 @@ async function bingSearch(query: string, num: number, signal: AbortSignal): Prom
 
 function parseBingResults(html: string, num: number): SearchResult[] {
   const results: SearchResult[] = [];
-  const titleRegex = /<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>\s*<\/h2>/gi;
-  const snippetRegex = /<p[^>]*class="[^"]*b_paractl[^"]*"[^>]*>([^<]+)<\/p>/gi;
+  const blocks = [...html.matchAll(/<li\b[^>]*class=(["'])[^"']*\bb_algo\b[^"']*\1[^>]*>([\s\S]*?)(?=<li\b[^>]*class=(["'])[^"']*\bb_algo\b[^"']*\3|<\/ol>)/gi)]
+    .map((m) => expectDefined(m[2]));
+  const candidates = blocks.length > 0 ? blocks : [html];
 
-  const entries = takeFrom(
-    [...html.matchAll(titleRegex)]
-      .filter((m) => m[1] && m[2])
-      .map((m) => ({ url: expectDefined(m[1]), title: stripTags(expectDefined(m[2])) })),
-    num,
-  );
-
-  const snippets = takeFrom(
-    [...html.matchAll(snippetRegex)].filter((m) => m[1]).map((m) => stripTags(expectDefined(m[1]))),
-    num,
-  );
+  const entries = takeFrom(candidates.flatMap((block) => {
+    const titleMatch = /<h2[^>]*>\s*<a\b([^>]*)>([\s\S]*?)<\/a>\s*<\/h2>/i.exec(block);
+    if (!titleMatch) return [];
+    const href = getHtmlAttr(expectDefined(titleMatch[1]), 'href');
+    const title = stripTags(expectDefined(titleMatch[2]));
+    if (!href || !title) return [];
+    const snippetMatch = /<p\b[^>]*class=(["'])[^"']*\b(?:b_paractl|b_lineclamp\d*)\b[^"']*\1[^>]*>([\s\S]*?)<\/p>/i.exec(block)
+      ?? /<p\b[^>]*>([\s\S]*?)<\/p>/i.exec(block);
+    const snippet = snippetMatch ? stripTags(expectDefined(snippetMatch.at(-1))) : '';
+    return [{ url: normalizeBingUrl(href), title, snippet, score: 1 }];
+  }), num);
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
@@ -388,13 +441,38 @@ function parseBingResults(html: string, num: number): SearchResult[] {
       results.push({
         title: entry.title ?? '',
         url: entry.url ?? '',
-        snippet: snippets[i] ?? '',
+        snippet: entry.snippet ?? '',
         score: 1,
       });
     }
   }
 
   return results;
+}
+
+function normalizeBingUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (url.hostname.endsWith('bing.com') && url.pathname.startsWith('/ck/')) {
+      const encoded = url.searchParams.get('u');
+      const decoded = decodeBingTarget(encoded);
+      if (decoded?.startsWith('http')) return decoded;
+    }
+  } catch {
+    // Fall through to the raw URL.
+  }
+  return raw;
+}
+
+function decodeBingTarget(encoded: string | null): string | undefined {
+  if (!encoded) return undefined;
+  const payload = encoded.startsWith('a1') ? encoded.slice(2) : encoded;
+  try {
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=');
+    return Buffer.from(padded, 'base64').toString('utf8');
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -445,12 +523,14 @@ function anySignal(...signals: AbortSignal[]): AbortSignal {
 }
 
 function stripTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, '')
+  return decodeHtmlEntities(html.replace(/<[^>]+>/g, '')).trim();
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
+    .replace(/&#39;/g, "'");
 }

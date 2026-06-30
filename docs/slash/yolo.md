@@ -6,12 +6,8 @@
 permission policy, YOLO auto-approves tool calls that were not blocked earlier
 by a session soft-deny, trust-file deny rule, or `tool.permission === 'deny'`.
 
-Start the CLI with `--confirm-destructive` if you want YOLO for most work but
-still want clearly destructive operations to ask first.
-
 `--yolo-destructive` and `--force-all-yolo` are accepted for compatibility, but
-broad YOLO approval is already the default unless `--confirm-destructive` is
-active.
+they do not bypass destructive-operation confirmation.
 
 ## Usage
 
@@ -21,15 +17,16 @@ active.
 | `/yolo on` | Enable YOLO mode |
 | `/yolo off` | Disable YOLO mode and restore permission prompts |
 | `/yolo toggle` | Toggle current state |
-| `/yolo destructive` | Toggle destructive gate (YOLO must be ON first) |
+| `/yolo destructive` | Show destructive gate status |
 
 The command also accepts `enable`, `true`, `1`, `disable`, `false`, and `0`.
 
 ### /yolo destructive
 
 When YOLO is enabled, `/yolo destructive` controls whether destructive
-operations (file deletion, shell commands with side effects) still prompt
-for confirmation. This is equivalent to the `--confirm-destructive` CLI flag.
+operations (file deletion, shell commands with destructive side effects) still
+prompt for confirmation. The gate is always on; this command reports that
+status.
 
 ## Security Model Interaction
 
@@ -40,16 +37,13 @@ YOLO approval:
 2. Trust-file deny patterns.
 3. Tool-level `permission: 'deny'`.
 
-When `--confirm-destructive` is active, the policy also checks whether the
-input is clearly destructive. In that mode, risky calls return
+YOLO also checks whether the input is clearly destructive. In that mode, risky
+calls return
 `source: 'yolo_destructive'` and prompt.
 
 ```typescript
 // In YOLO mode:
 bash({ command: 'echo hello' }) // auto, source: 'yolo'
-bash({ command: 'rm -rf /' })   // auto, source: 'yolo'
-
-// In YOLO mode with --confirm-destructive:
 bash({ command: 'rm -rf /' })   // confirm, source: 'yolo_destructive'
 ```
 
@@ -58,7 +52,7 @@ bash({ command: 'rm -rf /' })   // confirm, source: 'yolo_destructive'
 | Flag | Effect |
 |---|---|
 | `--yolo` | Enable YOLO mode at startup |
-| `--confirm-destructive` | In YOLO mode, still prompt for clearly destructive calls |
+| `--confirm-destructive` | Deprecated; clearly destructive calls already prompt |
 | `--yolo-destructive` | Deprecated compatibility flag |
 | `--force-all-yolo` | Deprecated compatibility flag |
 

@@ -55,12 +55,14 @@ describe('session soft deny / allow', () => {
     expect(d).toMatchObject({ permission: 'deny', source: 'deny' });
   });
 
-  it('allowOnce auto-approves a tool+subject for the session', async () => {
+  it('allowOnce auto-approves a tool+subject once', async () => {
     const p = new DefaultPermissionPolicy({ trustFile });
     await p.reload();
     p.allowOnce({ tool: 'edit', pattern: 'src/a.ts' });
     const d = await p.evaluate(tool('edit'), { path: 'src/a.ts' }, ctx());
     expect(d).toMatchObject({ permission: 'auto', source: 'trust' });
+    const second = await p.evaluate(tool('edit'), { path: 'src/a.ts' }, ctx());
+    expect(second.permission).toBe('confirm');
   });
 });
 
@@ -82,7 +84,7 @@ describe('yolo + confirmDestructive', () => {
     p.setConfirmDestructive(true);
 
     delegate.mockResolvedValueOnce('always');
-    expect(await p.evaluate(destructiveBash(), { command: 'rm -rf /opt/a' }, ctx())).toMatchObject({ permission: 'auto', reason: expect.stringContaining('always') });
+    expect(await p.evaluate(destructiveBash(), { command: 'rm -rf /opt/a' }, ctx())).toMatchObject({ permission: 'auto', reason: expect.stringContaining('approved for this call') });
     delegate.mockResolvedValueOnce('deny');
     expect(await p.evaluate(destructiveBash(), { command: 'rm -rf /opt/b' }, ctx())).toMatchObject({ permission: 'deny' });
     delegate.mockResolvedValueOnce('yes');

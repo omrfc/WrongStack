@@ -227,8 +227,8 @@ describe('Agent', () => {
       description: 'a destructive op that must be confirmed',
       inputSchema: { type: 'object' },
       permission: 'confirm',
-      // Destructive → still confirms under regular --yolo (not --yolo-destructive),
-      // which is exactly the path that produces a pending result.
+      // Destructive → still confirms under regular --yolo, which is exactly
+      // the path that produces a pending result.
       riskTier: 'destructive',
       mutating: true,
       async execute() {

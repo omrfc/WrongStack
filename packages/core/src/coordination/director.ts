@@ -427,6 +427,7 @@ export class Director implements ICoordinator {
   private readonly sessionIdSource: string | (() => string | undefined) | undefined;
   /** Debounce timer for periodic manifest writes. */
   private manifestTimer: NodeJS.Timeout | null = null;
+  private manifestWriteChain: Promise<unknown> = Promise.resolve();
   private readonly manifestDebounceMs: number;
   /** Fleet-wide cost cap (entire fleet total, distinct from SubagentBudget limits). Infinity means no cap. */
   private readonly maxFleetCostUsd: number;
@@ -646,7 +647,7 @@ export class Director implements ICoordinator {
       // visible in the manifest without waiting for the debounce window.
       // Use flushManifest() so any pending debounce timer is also cleared.
       if (this.fleetManager) {
-        this.fleetManager.flushManifest();
+        void this.fleetManager.flushManifest();
       } else {
         this.scheduleManifest();
       }
@@ -1013,12 +1014,19 @@ export class Director implements ICoordinator {
       return;
     }
     if (this.manifestDebounceMs < 0) return;
+    if (this.manifestTimer) return;
     this.manifestTimer = setTimeout(() => {
       this.manifestTimer = null;
       void this.writeManifest().catch((err) =>
         this.logShutdownError('manifest_write_debounced', err),
       );
     }, this.manifestDebounceMs);
+  }
+
+  private clearManifestTimer(): void {
+    if (!this.manifestTimer) return;
+    clearTimeout(this.manifestTimer);
+    this.manifestTimer = null;
   }
 
   /**
@@ -1292,6 +1300,16 @@ export class Director implements ICoordinator {
    */
   async writeManifest(): Promise<string | null> {
     if (!this.manifestPath) return null;
+    this.clearManifestTimer();
+    const write = this.manifestWriteChain
+      .catch(() => undefined)
+      .then(() => this.writeManifestNow());
+    this.manifestWriteChain = write.catch(() => undefined);
+    return write;
+  }
+
+  private async writeManifestNow(): Promise<string | null> {
+    if (!this.manifestPath) return null;
     const manifest = {
       directorRunId: this.id,
       writtenAt: new Date().toISOString(),
@@ -1326,10 +1344,7 @@ export class Director implements ICoordinator {
    * — calling shutdown twice is a no-op on the second invocation.
    */
   async shutdown(): Promise<void> {
-    if (this.manifestTimer) {
-      clearTimeout(this.manifestTimer);
-      this.manifestTimer = null;
-    }
+    this.clearManifestTimer();
     // Detach the coordinator-side task.completed listener so a Director
     // that lives shorter than its coordinator (rare but possible in
     // tests + delegate auto-promotion) doesn't leak the closure on
@@ -1357,8 +1372,11 @@ export class Director implements ICoordinator {
     }
     this.subagentBridges.clear();
     await this.bridge.stop().catch((err) => this.logShutdownError('director_bridge_stop', err));
-    if (this.manifestPath)
+    if (this.fleetManager) {
+      await this.fleetManager.flushManifest().catch((err) => this.logShutdownError('fleet_manifest_flush', err));
+    } else if (this.manifestPath) {
       await this.writeManifest().catch((err) => this.logShutdownError('manifest_write', err));
+    }
     if (this.stateCheckpoint) {
       this.stateCheckpoint.setUsage(this.usage.snapshot());
       await this.stateCheckpoint

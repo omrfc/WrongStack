@@ -74,9 +74,9 @@ export const designTool: Tool<DesignInput, DesignOutput> = {
     'Flow: `design {action:"use", kit:"minimal-clarity", stack:"web"}` → optionally ' +
     '`design {action:"set", set:{primary:"oklch(62% 0.2 25)"}}` → `design {action:"materialize"}` ' +
     'to write tokens to disk → implement against them → `design {action:"verify"}`.',
-  permission: 'auto',
-  mutating: false,
-  capabilities: [],
+  permission: 'confirm',
+  mutating: true,
+  capabilities: ['fs.write'],
   timeoutMs: 15_000,
   inputSchema: {
     type: 'object',

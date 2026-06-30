@@ -47,7 +47,7 @@ export function rememberTool(memory: MemoryStore): Tool<RememberInput, RememberO
       '- Information already obvious from the codebase\n\n' +
       'Always include `type` and `priority`. Use 1-3 `tags` for grouping.\n' +
       'Better to remember a fact now than rediscover it next session.',
-    permission: 'auto',
+    permission: 'confirm',
     mutating: true,
     timeoutMs: 2_000,
     capabilities: ['memory.write'],

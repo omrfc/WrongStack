@@ -44,7 +44,7 @@ Not every research task needs the same approach. Match the workflow to the need:
 **Pattern**:
 ```
 search("React latest stable version 2025")  →  discover version
-fetch("https://react.dev/versions")          →  confirm from authoritative source
+fetch("https://react.dev/versions")          →  verify against authoritative source
 context_manager add_note("## Research: React version\n- 19.2.0 (March 2025)\n- Source: react.dev")
 ```
 **Budget**: 1 search + 1 fetch = ~2000 tokens. Done in one turn.

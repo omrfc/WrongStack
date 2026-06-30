@@ -368,7 +368,7 @@ command). Use this instead of caching `api.config` values at `setup` time.
 api.tools.wrap('bash', (original) => ({
   ...original,
   permission: 'confirm',          // tighter permission
-  riskTier: 'destructive',        // raw shell is powerful; policy gates clearly destructive commands unless --yolo-destructive
+  riskTier: 'destructive',        // raw shell is powerful; policy gates clearly destructive commands even in YOLO
   async execute(input, ctx, opts) {
     api.log.info('bash called with', input);
     return original.execute(input, ctx, opts);

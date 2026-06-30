@@ -3,7 +3,10 @@ import { buildChildEnv } from '@wrongstack/core';
 import type { ToolProgressEvent } from '@wrongstack/core';
 import { createOutputSpool, spoolNote } from './_output-spool.js';
 import { getProcessRegistry, redactCommand } from './process-registry.js';
-import { assertSafeWin32ShellArgs, resolveWin32Command } from './_win32-resolve.js';
+import {
+  buildWin32CmdShimInvocation,
+  resolveWin32Command,
+} from './_win32-resolve.js';
 
 const isWin = process.platform === 'win32';
 export interface SpawnStreamResult {
@@ -55,13 +58,9 @@ export async function* spawnStream(
 
   const resolved = resolveWin32Command(opts.cmd);
   const needsShell = isWin && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
-  // When using shell: true, the shell resolves the command through PATH —
-  // passing the full resolved path (which may contain spaces, e.g.
-  // "C:\Program Files\nodejs\npx.cmd") breaks because cmd.exe splits on
-  // the space. Use the original command name so the shell finds it.
-  const cmd = needsShell ? opts.cmd : resolved;
-  // verbatim args reach cmd.exe unquoted — reject injection metacharacters.
-  if (needsShell) assertSafeWin32ShellArgs(opts.args);
+  const shim = needsShell ? buildWin32CmdShimInvocation(resolved, opts.args) : null;
+  const cmd = shim?.command ?? resolved;
+  const args = shim?.args ?? opts.args;
 
   // On Windows the abort signal is handled manually below instead of being
   // passed to spawn(): Node's built-in handling kills only the direct child.
@@ -70,13 +69,13 @@ export async function* spawnStream(
   // keeps the inherited stdio pipes open (so 'close' never fires) and
   // streams into this process for the rest of the session. registry.kill()
   // tree-kills via taskkill /T instead — same rationale as bash.ts/exec.ts.
-  const child = spawn(cmd, opts.args, {
+  const child = spawn(cmd, args, {
     cwd: opts.cwd,
     env: buildChildEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     ...(isWin ? {} : { signal: opts.signal }),
-    ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}),
+    ...(shim ? { windowsVerbatimArguments: shim.windowsVerbatimArguments } : {}),
   });
 
   // Register with the global registry so Ctrl+C / /kill can find and

@@ -1185,11 +1185,13 @@ export class MultiAgentHost {
    *      and `shell.*` are not in the read-only default), silently crippling
    *      every code-writing / build role in the catalog.
    *   3. No tool restriction (full registry) → the WIDE working set
-   *      (`WIDE_SUBAGENT_CAPABILITIES`: read, write, net, shell, install). The
-   *      user authorized full developer work when they invoked the leader, so a
-   *      delegated agent runs the same toolchain end-to-end. The genuinely
-   *      blast-radius-escaping capabilities (fs.write.outside-project, mcp.proxy,
-   *      subagent.spawn, config.mutate) stay off and need an explicit (1) grant.
+   *      (`WIDE_SUBAGENT_CAPABILITIES`: read, write, net, shell, install,
+   *      session todo, tool metadata, read-only memory). The user authorized full
+   *      developer work when they invoked the leader, so a delegated agent runs
+   *      the same toolchain end-to-end. The genuinely blast-radius-escaping
+   *      capabilities (fs.write.outside-project, tool.mutate.any, memory writes,
+   *      mcp.proxy, subagent.spawn, config.mutate) stay off and need an explicit
+   *      (1) grant.
    */
   private resolveSubagentCapabilities(subCfg: SubagentConfig): readonly string[] | undefined {
     if (subCfg.allowedCapabilities) return subCfg.allowedCapabilities;
@@ -1587,6 +1589,7 @@ export class MultiAgentHost {
     if (this.director) {
       await this.getCoordinator().stopAll();
     }
+    await this.fleetManager?.flushManifest();
   }
 
   /**
@@ -1654,6 +1657,9 @@ export class MultiAgentHost {
     if (this.director) {
       await this.director.shutdown();
     }
+    await this.fleetManager?.flushManifest();
+    this.fleetManager?.dispose();
+    this.fleetManager = undefined;
     // Stop the AgentMonitorService
     const monitor = this.opts.agentMonitor;
     if (monitor) {

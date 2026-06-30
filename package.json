@@ -1,7 +1,7 @@
 {
   "name": "wrongstack-monorepo",
   "private": true,
-  "version": "0.276.4",
+  "version": "0.277.0",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.5.3+sha512.7ac1c919341c213a34dc0d02afb7143c5c26ac26ee8c4782deea821b8ac64d2134a081fd8941dae6e29bbb48f58dfc2b7fbceeccc07cb2f09d219d342a4969ed",
@@ -20,7 +20,7 @@
     "lint:distributive": "node scripts/lint-distributive-types.mjs",
     "lint:console": "node scripts/lint-console-logging.mjs --all",
     "format": "biome format --write .",
-    "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=4096 pnpm -r --parallel typecheck",
+    "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=4096 pnpm -r typecheck",
     "clean": "pnpm -r --parallel clean && node -e \"require('node:fs').rmSync('node_modules',{recursive:true,force:true})\"",
     "version:patch": "node scripts/bump-version.mjs patch",
     "version:minor": "node scripts/bump-version.mjs minor",

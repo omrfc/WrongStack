@@ -25,7 +25,7 @@ import type { TerminalRenderer } from '../src/renderer.js';
  */
 
 async function mkTempDir(prefix = 'wstack-prelaunch-'): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix + 'XXXXXX'));
+  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
 function makeRenderer(): TerminalRenderer {

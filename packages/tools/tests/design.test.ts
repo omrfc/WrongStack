@@ -16,6 +16,12 @@ const makeCtx = () => ({ cwd: root, tools: [], projectRoot: root, meta: {} }) as
 const opts = { signal: new AbortController().signal };
 
 describe('designTool', () => {
+  it('is confirmation-gated because some actions persist project design state', () => {
+    expect(designTool.permission).toBe('confirm');
+    expect(designTool.mutating).toBe(true);
+    expect(designTool.capabilities).toEqual(['fs.write']);
+  });
+
   it('lists the bundled kit menu by default', async () => {
     const ctx = makeCtx();
     const res = await designTool.execute({}, ctx, opts);
@@ -64,13 +70,13 @@ describe('designTool', () => {
 
     // A caller-supplied out path that climbs out of the project root must be
     // refused before any file is written.
-    const escape = path.join('..', '..', '..', '..', 'ws-design-escape.css');
+    const escapePath = path.join('..', '..', '..', '..', 'ws-design-escape.css');
     await expect(
-      designTool.execute({ action: 'materialize', out: escape }, ctx, opts),
+      designTool.execute({ action: 'materialize', out: escapePath }, ctx, opts),
     ).rejects.toThrow(/escape the project root/i);
 
     // And nothing was written outside the root.
-    const outside = path.resolve(root, escape);
+    const outside = path.resolve(root, escapePath);
     let wrote = true;
     try {
       await fs.access(outside);

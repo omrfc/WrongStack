@@ -309,7 +309,7 @@ export class ToolExecutor {
       // Detected via optional methods so policies without them (AutoApprove,
       // test mocks) keep the stricter default.
       const policy = this.opts.permissionPolicy;
-      const yolo = policy.getYolo?.() === true || policy.getYoloDestructive?.() === true;
+      const yolo = policy.getYolo?.() === true;
 
       // An `auto` decision sourced from `'yolo'` is authoritative: it comes
       // either from the leader's explicit YOLO mode or from a subagent's
