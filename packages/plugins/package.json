@@ -1,7 +1,7 @@
 {
   "name": "@wrongstack/plugins",
   "version": "0.277.2",
-  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump, secret-scanner, todo-tracker",
+  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump, secret-scanner, todo-tracker, token-budget",
   "license": "MIT",
   "author": "ECOSTACK TECHNOLOGY OÜ",
   "type": "module",
@@ -51,6 +51,10 @@
     "./todo-tracker": {
       "types": "./dist/todo-tracker.d.ts",
       "import": "./dist/todo-tracker.js"
+    },
+    "./token-budget": {
+      "types": "./dist/token-budget.d.ts",
+      "import": "./dist/token-budget.js"
     }
   },
   "files": [

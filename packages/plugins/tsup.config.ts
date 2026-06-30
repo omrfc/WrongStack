@@ -13,6 +13,7 @@ export default defineConfig({
     'semver-bump': 'src/semver-bump/index.ts',
     'secret-scanner': 'src/secret-scanner/index.ts',
     'todo-tracker': 'src/todo-tracker/index.ts',
+    'token-budget': 'src/token-budget/index.ts',
   },
   format: ['esm'],
   dts: true,
