@@ -567,3 +567,137 @@ describe('PostToolUse hook', () => {
     expect(health.lastLeak).toBeNull();
   });
 });
+
+// ── Custom patterns ─────────────────────────────────────────────────────
+//
+// Users can supply their own credential patterns via config.
+
+describe('custom patterns', () => {
+  it('appends custom patterns to the base set at setup()', async () => {
+    const api = makeApi({
+      extensions: {
+        'secret-scanner': {
+          customPatterns: [
+            { type: 'custom_api_key', regex: 'CUSTOMKEY-[A-Za-z0-9]{32}' },
+          ],
+        },
+      },
+    });
+    secretScannerPlugin.setup(api as any);
+    // teardown first to clear any state from previous tests
+    secretScannerPlugin.teardown!(api as any);
+    secretScannerPlugin.setup(api as any);
+    const statusTool = getRegisteredTool(api, 'secret_scanner_status');
+    const status = await statusTool.execute({});
+    // 21 base patterns + 1 custom
+    expect(status.patternCount).toBe(22);
+    expect(status.patternTypes).toContain('custom_api_key');
+  });
+
+  it('custom pattern blocks a tool call that base patterns miss', () => {
+    const api = makeApi({
+      extensions: {
+        'secret-scanner': {
+          customPatterns: [
+            { type: 'internal_token', regex: 'INT-[A-F0-9]{40}' },
+          ],
+        },
+      },
+    });
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+
+    // 'INT-ABCD...' doesn't match any of the 20 base patterns.
+    const token = 'INT-' + 'AB'.repeat(20); // 40 hex chars
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: 'export TOKEN=' + token },
+      cwd: '/tmp',
+    });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toContain('internal_token');
+  });
+
+  it('custom pattern is detected by secret_scanner_test tool', async () => {
+    const api = makeApi({
+      extensions: {
+        'secret-scanner': {
+          customPatterns: [
+            { type: 'custom_uuid', regex: 'uuid-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' },
+          ],
+        },
+      },
+    });
+    secretScannerPlugin.setup(api as any);
+    const testTool = getRegisteredTool(api, 'secret_scanner_test');
+    const result = await testTool.execute({ text: 'see uuid-deadbeef-1234-5678-abcd-ef0123456789 here' });
+    expect(result.matched).toContain('custom_uuid');
+  });
+
+  it('teardown resets patterns to base-only', async () => {
+    const api = makeApi({
+      extensions: {
+        'secret-scanner': {
+          customPatterns: [{ type: 'temp_pattern', regex: 'TEMP\\d+' }],
+        },
+      },
+    });
+    secretScannerPlugin.setup(api as any);
+
+    // Verify custom pattern is active
+    const statusBefore = await getRegisteredTool(api, 'secret_scanner_status').execute({});
+    expect(statusBefore.patternCount).toBe(22);
+
+    secretScannerPlugin.teardown!(api as any);
+
+    // After teardown, re-setup with a clean API (no custom patterns)
+    const cleanApi = makeApi();
+    secretScannerPlugin.setup(cleanApi as any);
+    const statusAfter = await getRegisteredTool(cleanApi, 'secret_scanner_status').execute({});
+    expect(statusAfter.patternCount).toBe(21); // base only
+    expect(statusAfter.patternTypes).not.toContain('temp_pattern');
+  });
+
+  it('ignores custom patterns with invalid regex', async () => {
+    const api = makeApi({
+      extensions: {
+        'secret-scanner': {
+          customPatterns: [
+            { type: 'valid_pattern', regex: 'VALID-[A-Za-z0-9]{10}' },
+            { type: 'invalid_pattern', regex: '[invalid(' }, // unbalanced
+            { type: 'another_valid', regex: 'OTHER-\\d{5}' },
+          ],
+        },
+      },
+    });
+    secretScannerPlugin.setup(api as any);
+    const status = await getRegisteredTool(api, 'secret_scanner_status').execute({});
+    // 21 base + 2 valid custom (invalid one skipped)
+    expect(status.patternCount).toBe(23);
+    expect(status.patternTypes).toContain('valid_pattern');
+    expect(status.patternTypes).toContain('another_valid');
+    expect(status.patternTypes).not.toContain('invalid_pattern');
+  });
+
+  it('custom patterns survive a reload cycle (idempotent re-init)', async () => {
+    const api = makeApi({
+      extensions: {
+        'secret-scanner': {
+          customPatterns: [{ type: 'reload_test', regex: 'RELOAD-[A-Z]{8}' }],
+        },
+      },
+    });
+    // First setup
+    secretScannerPlugin.setup(api as any);
+    const status1 = await getRegisteredTool(api, 'secret_scanner_status').execute({});
+    expect(status1.patternCount).toBe(22);
+
+    // Teardown + re-setup with the same config
+    secretScannerPlugin.teardown!(api as any);
+    secretScannerPlugin.setup(api as any);
+    const status2 = await getRegisteredTool(api, 'secret_scanner_status').execute({});
+    // Still 22 — not 23 (duplicate avoided by the reset-then-append pattern)
+    expect(status2.patternCount).toBe(22);
+  });
+});

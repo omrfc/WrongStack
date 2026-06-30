@@ -44,7 +44,9 @@ interface Pattern {
   regex: RegExp;
 }
 
-const PATTERNS: Pattern[] = [
+// Base patterns — always present, never removed by custom config.
+// Custom patterns from config are APPENDED at setup() time.
+const BASE_PATTERNS: Pattern[] = [
   // LLM provider keys
   { type: 'anthropic_key', regex: /(?<![A-Za-z0-9])sk-ant-api\d+-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9])/g },
   { type: 'openai_key', regex: /(?<![A-Za-z0-9])sk-(?:proj-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9])/g },
@@ -94,16 +96,36 @@ const PATTERNS: Pattern[] = [
 ];
 
 /**
+ * Active pattern set. Starts as a clone of BASE_PATTERNS; setup()
+ * appends user-supplied custom patterns from config and rebuilds
+ * COMBINED_REGEX. Teardown resets back to BASE_PATTERNS only.
+ *
+ * @internal
+ */
+let PATTERNS: Pattern[] = [...BASE_PATTERNS];
+
+/**
  * Combined single-pass regex. Each alternative is a capturing group so
  * the matcher callback can identify which pattern fired (only one group
- * is non-undefined at match time). The leading delimiter of `bearer_token`
- * is also captured but the replacement is grouped on the inner value —
- * see `redactMatches` for the consumer.
+ * is non-undefined at match time). Rebuilt whenever PATTERNS changes.
+ *
+ * @internal
  */
-const COMBINED_REGEX = new RegExp(
-  PATTERNS.map((p) => `(${p.regex.source})`).join('|'),
-  'g',
-);
+let COMBINED_REGEX = buildCombinedRegex(PATTERNS);
+
+/**
+ * Rebuild the combined regex from a pattern array. Each pattern's
+ * source is wrapped in a capturing group so findMatches/redactInput
+ * can identify which one fired.
+ *
+ * @internal
+ */
+function buildCombinedRegex(patterns: Pattern[]): RegExp {
+  return new RegExp(
+    patterns.map((p) => `(${p.regex.source})`).join('|'),
+    'g',
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Module-scope state (H1 pattern: shared between setup, teardown, health)
@@ -232,6 +254,15 @@ function redactInput(input: unknown): unknown {
 
 type Mode = 'block' | 'redact' | 'allow';
 
+interface CustomPattern {
+  /** Unique identifier for this pattern (used in block reason + redaction label). */
+  type: string;
+  /** Regex source string (without `/…/g` delimiters). Must be a valid JS regex. */
+  regex: string;
+  /** Optional human-readable description. */
+  description?: string | undefined;
+}
+
 interface SecretScannerConfig {
   /** PreToolUse: Tool-name matcher — pipe-delimited case-insensitive list, or '*'. */
   matcher: string;
@@ -241,6 +272,8 @@ interface SecretScannerConfig {
   mode: Mode;
   /** Set to false to short-circuit both hooks entirely (no scanning). */
   enabled: boolean;
+  /** User-supplied custom patterns — appended to the 20 built-in patterns at setup() time. */
+  customPatterns: CustomPattern[];
 }
 
 const DEFAULTS: SecretScannerConfig = {
@@ -248,17 +281,36 @@ const DEFAULTS: SecretScannerConfig = {
   postToolUseMatcher: '*',
   mode: 'block',
   enabled: true,
+  customPatterns: [],
 };
 
 function readConfig(raw: unknown): SecretScannerConfig {
   if (!raw || typeof raw !== 'object') return { ...DEFAULTS };
   const r = raw as Record<string, unknown>;
   const mode: Mode = r['mode'] === 'redact' || r['mode'] === 'allow' ? r['mode'] : 'block';
+  const customPatterns: CustomPattern[] = [];
+  if (Array.isArray(r['customPatterns'])) {
+    for (const entry of r['customPatterns']) {
+      if (!entry || typeof entry !== 'object') continue;
+      const e = entry as Record<string, unknown>;
+      const type = e['type'];
+      const regex = e['regex'];
+      if (typeof type !== 'string' || typeof regex !== 'string') continue;
+      // Validate the regex compiles — skip entries that throw.
+      try {
+        new RegExp(regex, 'g');
+      } catch {
+        continue;
+      }
+      customPatterns.push({ type, regex, description: typeof e['description'] === 'string' ? e['description'] : undefined });
+    }
+  }
   return {
     matcher: typeof r['matcher'] === 'string' ? r['matcher'] : DEFAULTS.matcher,
     postToolUseMatcher: typeof r['postToolUseMatcher'] === 'string' ? r['postToolUseMatcher'] : DEFAULTS.postToolUseMatcher,
     mode,
     enabled: r['enabled'] === false ? false : true,
+    customPatterns,
   };
 }
 
@@ -406,6 +458,20 @@ const plugin: Plugin = {
           'PreToolUse action on a match: "block" refuses the tool call, "redact" rewrites the input with [REDACTED:type], "allow" only logs',
       },
       enabled: { type: 'boolean', default: true },
+      customPatterns: {
+        type: 'array',
+        description: 'User-supplied custom credential patterns. Each entry is { type: string, regex: string, description?: string }. Appended to the 20 built-in patterns at setup() time.',
+        items: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', description: 'Unique identifier (used in block reason + [REDACTED:type] label)' },
+            regex: { type: 'string', description: 'Regex source string (without /…/g delimiters). Must be a valid JS regex.' },
+            description: { type: 'string', description: 'Optional human-readable description' },
+          },
+          required: ['type', 'regex'],
+        },
+        default: [],
+      },
     },
   },
 
@@ -421,6 +487,21 @@ const plugin: Plugin = {
     state.postHookUnregister = null;
 
     const cfg = readConfig(api.config.extensions?.['secret-scanner']);
+
+    // Rebuild the active pattern set: start from BASE_PATTERNS, then
+    // append user-supplied custom patterns. This is idempotent —
+    // every setup() call resets to base first, so a reload never
+    // accumulates duplicate custom entries.
+    PATTERNS = [...BASE_PATTERNS];
+    for (const cp of cfg.customPatterns) {
+      try {
+        PATTERNS.push({ type: cp.type, regex: new RegExp(cp.regex, 'g') });
+      } catch {
+        // readConfig already validated; this catch is defensive.
+      }
+    }
+    COMBINED_REGEX = buildCombinedRegex(PATTERNS);
+
     const log = {
       warn: (msg: string, ...rest: unknown[]) => api.log.warn(msg, ...rest),
       info: (msg: string, ...rest: unknown[]) => api.log.info(msg, ...rest),
@@ -528,6 +609,10 @@ const plugin: Plugin = {
     state.leakCount = 0;
     state.lastBlock = null;
     state.lastLeak = null;
+    // Reset patterns to base-only (remove any custom patterns from
+    // the previous setup cycle).
+    PATTERNS = [...BASE_PATTERNS];
+    COMBINED_REGEX = buildCombinedRegex(PATTERNS);
     api.log.info('secret-scanner: teardown complete', { counters: finalCounters });
   },
 
