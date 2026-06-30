@@ -14,7 +14,10 @@ const log: Logger = {
   },
 };
 
-function makeBot() {
+function makeBot(overrides?: {
+  allowedUsers?: string[];
+  allowedChats?: string[];
+}) {
   return new TelegramBot({
     token: 'test:token',
     // pollIntervalSec is irrelevant — these tests never call bot.start().
@@ -22,8 +25,8 @@ function makeBot() {
     // polling loop. This keeps the test worker from leaking a polling
     // timer into the vitest exit handshake.
     pollIntervalSec: 60,
-    allowedUsers: new Set<string>(),
-    allowedChats: new Set<string>(),
+    allowedUsers: new Set(overrides?.allowedUsers ?? []),
+    allowedChats: new Set(overrides?.allowedChats ?? []),
     bufferSize: 10,
     log,
     onMessage: vi.fn(),
@@ -165,5 +168,113 @@ describe('TelegramBot awaitCallback', () => {
     const result = await promise;
     expect(result.approved).toBe(true);
     expect(result.fromUser).toBe('net');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Allowlist — callback bypass protection
+// ---------------------------------------------------------------------------
+
+describe('TelegramBot allowlist on callback_query', () => {
+  let bot: TelegramBot;
+  let _originalFetch: typeof globalThis.fetch;
+  let fetched: Array<{ url: string; body: string }>;
+
+  beforeEach(() => {
+    // Configure the bot with allowlists that explicitly EXCLUDE the
+    // from.user / chat.id values used in these tests, so the dispatch
+    // path takes the deny branch.
+    bot = makeBot({ allowedUsers: ['999'], allowedChats: ['999'] });
+    _originalFetch = globalThis.fetch;
+    fetched = [];
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      fetched.push({ url: String(_url), body: String(init?.body ?? '') });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, result: true }),
+      });
+    }) as never as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = _originalFetch;
+    bot.stop();
+  });
+
+  function dispatchDirectly(cq: {
+    id: string;
+    from?: { id: number; username?: string; first_name?: string };
+    message?: { message_id: number; chat: { id: number; type: string } };
+    data?: string;
+  }) {
+    return (bot as unknown as {
+      dispatchCallback(cq: typeof cq): Promise<void>;
+    }).dispatchCallback(cq);
+  }
+
+  it('blocks a callback from a user not on the allowedUsers list and resolves the waiter with from=blocked', async () => {
+    const key = 'approve:abc:yes';
+    const promise = bot.awaitCallback(key, 5_000);
+    await dispatchDirectly({
+      id: 'cb-block-user',
+      from: { id: 42, username: 'mallory' },
+      message: { message_id: 1, chat: { id: 999, type: 'private' } },
+      data: key,
+    });
+    // The hijack-rejection path must resolve the waiter immediately
+    // with the `blocked` sentinel rather than letting it fall through
+    // to its 5 s timeout — agents need to distinguish a security
+    // rejection from a passive user timeout.
+    const result = await promise;
+    expect(result.approved).toBe(false);
+    expect(result.fromUser).toBe('blocked');
+    const ack = fetched.find((c) => c.url.endsWith('/answerCallbackQuery'));
+    expect(ack).toBeDefined();
+    // Allowlist rejection must use a visible toast (show_alert=true) so the
+    // blocked user understands why their tap did nothing.
+    expect(ack!.body).toContain('"show_alert":true');
+    bot.stop();
+  });
+
+  it('blocks a callback from a chat not on the allowedChats list', async () => {
+    const key = 'approve:def:yes';
+    const promise = bot.awaitCallback(key, 5_000);
+    await dispatchDirectly({
+      id: 'cb-block-chat',
+      from: { id: 999, username: 'alice' }, // allowed user…
+      message: { message_id: 1, chat: { id: 7, type: 'private' } }, // …in a non-allowlisted chat
+      data: key,
+    });
+    const result = await promise;
+    expect(result.approved).toBe(false);
+    expect(result.fromUser).toBe('blocked');
+    bot.stop();
+  });
+
+  it('lets a callback through when both user and chat are allowlisted', async () => {
+    // Rebuild with allowlists that DO include user 42 and chat 7.
+    bot.stop();
+    bot = makeBot({ allowedUsers: ['42'], allowedChats: ['7'] });
+    _originalFetch = globalThis.fetch;
+    fetched = [];
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      fetched.push({ url: String(_url), body: String(init?.body ?? '') });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, result: true }),
+      });
+    }) as never as typeof fetch;
+
+    const key = 'approve:ghi:yes';
+    const promise = bot.awaitCallback(key, 5_000);
+    await dispatchDirectly({
+      id: 'cb-allow',
+      from: { id: 42, username: 'bob' },
+      message: { message_id: 1, chat: { id: 7, type: 'private' } },
+      data: key,
+    });
+    const result = await promise;
+    expect(result.approved).toBe(true);
+    expect(result.fromUser).toBe('bob');
   });
 });

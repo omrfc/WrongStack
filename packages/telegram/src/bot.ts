@@ -510,33 +510,89 @@ export class TelegramBot {
    * waiter (if any), and acknowledge it via `answerCallbackQuery` so the
    * client stops spinning. Telegram requires the answer within 10 s.
    */
+  /**
+   * Resolve any pending waiter for `key` with a `{ approved: false, fromUser }`
+   * value, regardless of why the callback was rejected (allowlist, shutdown,
+   * etc.). Returns true if a waiter was found and resolved, false otherwise.
+   * The caller is responsible for clearing its own Map entry — this helper
+   * centralizes the race-safe `delete → resolve` pattern in one place so
+   * the deny paths don't drift out of sync.
+   */
+  private rejectWaiter(key: string, fromUser: string): boolean {
+    if (key === '') return false;
+    const waiter = this.callbackWaiters.get(key);
+    if (!waiter) return false;
+    clearTimeout(waiter.timer);
+    this.callbackWaiters.delete(key);
+    waiter.resolve({ approved: false, fromUser });
+    return true;
+  }
+
   private async dispatchCallback(cq: TgCallbackQuery): Promise<void> {
     const key = cq.data ?? '';
+    // Allowlist — mirror `processMessage` semantics so a user blocked from
+    // sending messages cannot drive approval buttons either. Without this,
+    // `telegram_approve` could be hijacked: an attacker who knows or guesses
+    // the 16-hex token (the timeout window is generous — up to 10 minutes)
+    // could press a button on a prompt the agent sent to a different user.
+    if (cq.from) {
+      const userId = String(cq.from.id);
+      if (this.allowedUsers.size > 0 && !this.allowedUsers.has(userId)) {
+        this.log.warn(
+          `Ignoring callback_query from non-allowlisted user ${userId} (data="${key}") — possible hijack attempt.`,
+        );
+        await this.answerCallback(cq.id, '⛔ Not authorized', true);
+        this.rejectWaiter(key, 'blocked');
+        return;
+      }
+    }
+    const chatId =
+      cq.message?.chat.id !== undefined ? String(cq.message.chat.id) : undefined;
+    if (chatId !== undefined && this.allowedChats.size > 0 && !this.allowedChats.has(chatId)) {
+      this.log.warn(
+        `Ignoring callback_query from non-allowlisted chat ${chatId} (data="${key}") — possible hijack attempt.`,
+      );
+      await this.answerCallback(cq.id, '⛔ Not authorized', true);
+      this.rejectWaiter(key, 'blocked');
+      return;
+    }
     const waiter = key !== '' ? this.callbackWaiters.get(key) : undefined;
     const approved = key.endsWith(':yes');
     const fromUser = cq.from?.username ?? cq.from?.first_name ?? 'unknown';
-
-    try {
-      await fetch(`${this.baseUrl}/answerCallbackQuery`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callback_query_id: cq.id,
-          text: approved ? 'Approved ✓' : 'Denied ✗',
-          show_alert: false,
-        }),
-        signal: AbortSignal.timeout(5_000),
-      });
-    } catch (err) {
-      this.log.debug(`answerCallbackQuery failed: ${(err as Error).message}`);
-    }
-
+    await this.answerCallback(cq.id, approved ? 'Approved ✓' : 'Denied ✗', false);
     if (waiter) {
       clearTimeout(waiter.timer);
       this.callbackWaiters.delete(key);
       waiter.resolve({ approved, fromUser });
     } else {
       this.log.debug(`Unmatched callback_query data="${key}" (no pending waiter)`);
+    }
+  }
+
+  /**
+   * POST /answerCallbackQuery for a callback. Best-effort: failures are
+   * logged at debug and swallowed — the caller's resolve() must not depend
+   * on the ack reaching Telegram (the user may get a "loading" spinner if
+   * it fails, but the agent's approval flow continues normally).
+   */
+  private async answerCallback(
+    callbackQueryId: string,
+    text: string,
+    showAlert: boolean,
+  ): Promise<void> {
+    try {
+      await fetch(`${this.baseUrl}/answerCallbackQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callback_query_id: callbackQueryId,
+          text,
+          show_alert: showAlert,
+        }),
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (err) {
+      this.log.debug(`answerCallbackQuery failed: ${(err as Error).message}`);
     }
   }
 
