@@ -1,0 +1,454 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import secretScannerPlugin from '../src/secret-scanner';
+
+interface MockApi {
+  tools: { register: ReturnType<typeof vi.fn> };
+  config: { extensions: Record<string, unknown> };
+  log: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  metrics: { counter: ReturnType<typeof vi.fn>; histogram: ReturnType<typeof vi.fn>; gauge: ReturnType<typeof vi.fn> };
+  registerSystemPromptContributor: ReturnType<typeof vi.fn>;
+  registerHook: ReturnType<typeof vi.fn>;
+  onEvent: ReturnType<typeof vi.fn>;
+  session: { append: ReturnType<typeof vi.fn> };
+}
+
+function makeApi(overrides: { extensions?: Record<string, unknown> } = {}): MockApi {
+  return {
+    tools: { register: vi.fn() },
+    config: { extensions: overrides.extensions ?? {} },
+    log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    metrics: { counter: vi.fn(), histogram: vi.fn(), gauge: vi.fn() },
+    registerSystemPromptContributor: vi.fn(() => () => {}),
+    registerHook: vi.fn(() => vi.fn()),
+    onEvent: vi.fn(),
+    session: { append: vi.fn().mockResolvedValue(undefined) },
+  };
+}
+
+function getRegisteredTool(api: MockApi, name: string): {
+  execute: (input: unknown) => Promise<unknown>;
+} {
+  const call = api.tools.register.mock.calls.find(
+    ([t]: unknown[]) => (t as { name: string }).name === name,
+  );
+  if (!call) throw new Error(`tool ${name} not registered`);
+  return (call[0] as { execute: (input: unknown) => Promise<unknown> });
+}
+
+function getRegisteredHook(api: MockApi): (input: {
+  event: string;
+  toolName?: string;
+  toolInput?: unknown;
+  cwd: string;
+}) => { decision?: 'block' | 'allow' | undefined; reason?: string | undefined; modifiedInput?: Record<string, unknown>; additionalContext?: string | undefined } | void {
+  const call = api.registerHook.mock.calls[0];
+  if (!call) throw new Error('PreToolUse hook not registered');
+  return (call as unknown[])[2] as ReturnType<typeof getRegisteredHook>;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+// ── Synthetic credentials ──────────────────────────────────────────────
+//
+// This file's content gets run through a file-level secret redactor
+// before commit, so any literal `sk-proj-…` / `ghp_…` / `AKIA…`
+// string in source gets replaced with `[REDACTED:type]` placeholders
+// that no longer match the scanner's regex. We build the credentials
+// from parts at test time so the test fixture can't be mistaken for
+// a leaked secret, and the assembled string DOES match the regex.
+
+function makeOpenAiKey(): string {
+  return 'sk-proj-' + 'a'.repeat(36);
+}
+function makeAnthropicKey(): string {
+  return 'sk-ant-api03-' + 'a'.repeat(40);
+}
+function makeGithubPat(): string {
+  return 'ghp_' + 'a'.repeat(36);
+}
+function makeGithubPatV2(): string {
+  return 'github_pat_' + 'a'.repeat(50);
+}
+function makeAwsAccessKey(): string {
+  return 'AKIA' + 'IOSFODNN7EXAMPLE';
+}
+function makeJwt(): string {
+  return 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+}
+function makePrivateKey(): string {
+  return '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAK\n-----END RSA PRIVATE KEY-----';
+}
+
+// ── Plugin registration ───────────────────────────────────────────────
+
+describe('secret-scanner plugin', () => {
+  it('registers secret_scanner_status and secret_scanner_test', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const names = api.tools.register.mock.calls.map(([t]: unknown[]) => (t as { name: string }).name);
+    expect(names).toContain('secret_scanner_status');
+    expect(names).toContain('secret_scanner_test');
+  });
+
+  it('registers a PreToolUse hook with the default matcher', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    expect(api.registerHook).toHaveBeenCalledWith(
+      'PreToolUse',
+      'bash|write|edit',
+      expect.any(Function),
+    );
+  });
+
+  it('respects a custom matcher from config', () => {
+    const api = makeApi({ extensions: { 'secret-scanner': { matcher: 'bash' } } });
+    secretScannerPlugin.setup(api as any);
+    expect(api.registerHook).toHaveBeenCalledWith(
+      'PreToolUse',
+      'bash',
+      expect.any(Function),
+    );
+  });
+});
+
+// ── Hook behavior: block mode (default) ───────────────────────────────
+
+describe('PreToolUse hook — block mode (default)', () => {
+  it('blocks a bash call whose command contains an OpenAI key', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+    const openAiKey = makeOpenAiKey();
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: 'export OPENAI_API_KEY=' + openAiKey },
+      cwd: '/tmp',
+    });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toContain('openai_key');
+  });
+
+  it('blocks a write call whose content embeds a GitHub PAT', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+    const githubPat = makeGithubPat();
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'write',
+      toolInput: { path: 'config.yml', content: 'token: ' + githubPat + '\n' },
+      cwd: '/tmp',
+    });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toContain('github_pat');
+  });
+
+  it('blocks when a tool input array contains a credential', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+    const awsKey = makeAwsAccessKey();
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: ['echo hello', 'echo ' + awsKey] },
+      cwd: '/tmp',
+    });
+    expect(result?.decision).toBe('block');
+  });
+
+  it('blocks on a private key in any nested field', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+    const pk = makePrivateKey();
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'write',
+      toolInput: { path: 'id_rsa', content: pk },
+      cwd: '/tmp',
+    });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toContain('private_key');
+  });
+
+  it('blocks on a JWT in tool arguments', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+    const jwt = makeJwt();
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'write',
+      toolInput: { path: 'session.txt', content: 'token: ' + jwt },
+      cwd: '/tmp',
+    });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toContain('jwt');
+  });
+
+  it('lets through inputs that do not match any pattern', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: 'echo "this string contains no credentials"' },
+      cwd: '/tmp',
+    });
+    expect(result).toBeUndefined();
+  });
+});
+
+// ── Hook behavior: redact mode ────────────────────────────────────────
+
+describe('PreToolUse hook — redact mode', () => {
+  it('rewrites a credential field and reports allow + modifiedInput', () => {
+    const api = makeApi({ extensions: { 'secret-scanner': { mode: 'redact' } } });
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+    const openAiKey = makeOpenAiKey();
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'write',
+      toolInput: { path: 'out.txt', content: 'export OPENAI_API_KEY=' + openAiKey },
+      cwd: '/tmp',
+    });
+    expect(result?.decision).toBe('allow');
+    // modifiedInput has the credential redacted
+    const modified = result?.modifiedInput as { content: string };
+    expect(modified.content).toContain('[REDACTED:openai_key]');
+    expect(modified.content).not.toContain(openAiKey);
+    expect(result?.additionalContext).toContain('redacted');
+  });
+});
+
+// ── Hook behavior: allow mode ─────────────────────────────────────────
+
+describe('PreToolUse hook — allow mode', () => {
+  it('logs a warning but lets the call through (no decision)', () => {
+    const api = makeApi({ extensions: { 'secret-scanner': { mode: 'allow' } } });
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+    const githubPat = makeGithubPat();
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: 'echo ' + githubPat },
+      cwd: '/tmp',
+    });
+    expect(result).toBeUndefined();
+    expect(api.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('allow-mode'),
+    );
+  });
+});
+
+// ── Hook behavior: disabled ───────────────────────────────────────────
+
+describe('PreToolUse hook — disabled', () => {
+  it('skips the scan entirely when enabled=false', () => {
+    const api = makeApi({ extensions: { 'secret-scanner': { enabled: false } } });
+    secretScannerPlugin.setup(api as any);
+    const hook = getRegisteredHook(api);
+    const githubPat = makeGithubPat();
+
+    const result = hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: 'echo ' + githubPat },
+      cwd: '/tmp',
+    });
+    expect(result).toBeUndefined();
+  });
+});
+
+// ── secret_scanner_test tool ───────────────────────────────────────────
+
+describe('secret_scanner_test tool', () => {
+  it('returns the matched pattern types for a sample string', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const tool = getRegisteredTool(api, 'secret_scanner_test');
+    const awsKey = makeAwsAccessKey();
+    const ghPat = makeGithubPatV2();
+
+    const result = (await tool.execute({
+      text: 'AWS key ' + awsKey + ' plus ' + ghPat,
+    })) as { ok: boolean; matched: string[]; count: number };
+    expect(result.ok).toBe(true);
+    expect(result.matched).toEqual(expect.arrayContaining(['aws_access_key']));
+    expect(result.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('returns an empty match list for a clean string', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const tool = getRegisteredTool(api, 'secret_scanner_test');
+
+    const result = (await tool.execute({
+      text: 'just a normal sentence with nothing sensitive in it',
+    })) as { matched: string[]; count: number };
+    expect(result.matched).toEqual([]);
+    expect(result.count).toBe(0);
+  });
+
+  it('detects an OpenAI key', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const tool = getRegisteredTool(api, 'secret_scanner_test');
+
+    const result = (await tool.execute({
+      text: makeOpenAiKey(),
+    })) as { matched: string[] };
+    expect(result.matched).toContain('openai_key');
+  });
+
+  it('detects a JWT', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const tool = getRegisteredTool(api, 'secret_scanner_test');
+
+    const result = (await tool.execute({
+      text: makeJwt(),
+    })) as { matched: string[] };
+    expect(result.matched).toContain('jwt');
+  });
+
+  it('detects a GitHub PAT v1', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const tool = getRegisteredTool(api, 'secret_scanner_test');
+
+    const result = (await tool.execute({
+      text: makeGithubPat(),
+    })) as { matched: string[] };
+    expect(result.matched).toContain('github_pat');
+  });
+
+  it('detects a private key block', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const tool = getRegisteredTool(api, 'secret_scanner_test');
+
+    const result = (await tool.execute({
+      text: makePrivateKey(),
+    })) as { matched: string[] };
+    expect(result.matched).toContain('private_key');
+  });
+});
+
+// ── secret_scanner_status tool ────────────────────────────────────────
+
+describe('secret_scanner_status tool', () => {
+  it('reports config + counters + last block', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+
+    // Drive a block first so lastBlock is non-null
+    const hook = getRegisteredHook(api);
+    hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: 'echo ' + makeGithubPat() },
+      cwd: '/tmp',
+    });
+
+    const tool = getRegisteredTool(api, 'secret_scanner_status');
+    const result = (await tool.execute({})) as {
+      ok: boolean;
+      mode: string;
+      matcher: string;
+      patternCount: number;
+      counters: { block: number; redact: number; allow: number };
+      lastBlock: { toolName: string; matchedTypes: string[] } | null;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.mode).toBe('block');
+    expect(result.matcher).toBe('bash|write|edit');
+    expect(result.patternCount).toBeGreaterThanOrEqual(15);
+    expect(result.counters.block).toBe(1);
+    expect(result.lastBlock).not.toBeNull();
+    expect(result.lastBlock?.toolName).toBe('bash');
+  });
+});
+
+// ── Teardown / H1 pattern ─────────────────────────────────────────────
+
+describe('teardown + H1 pattern', () => {
+  it('unregisters the hook on teardown and logs the completion line', () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    const unregister = api.registerHook.mock.results[0]?.value;
+    expect(typeof unregister).toBe('function');
+
+    expect(() => secretScannerPlugin.teardown!(api as any)).not.toThrow();
+    expect(unregister).toHaveBeenCalled();
+    expect(api.log.info).toHaveBeenCalledWith(
+      'secret-scanner: teardown complete',
+      expect.objectContaining({ counters: expect.any(Object) }),
+    );
+  });
+
+  it('zeroes counters on teardown — health() shows clean state', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    // Drive a block
+    const hook = getRegisteredHook(api);
+    hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: 'echo ' + makeGithubPat() },
+      cwd: '/tmp',
+    });
+    const before = await secretScannerPlugin.health!();
+    expect(before.counters.block).toBe(1);
+
+    secretScannerPlugin.teardown!(api as any);
+    const after = await secretScannerPlugin.health!();
+    expect(after.counters.block).toBe(0);
+    expect(after.counters.redact).toBe(0);
+    expect(after.counters.allow).toBe(0);
+    expect(after.lastBlock).toBeNull();
+  });
+
+  it('reload cycle: setup -> teardown -> setup reads fresh counters', async () => {
+    const api = makeApi();
+    secretScannerPlugin.setup(api as any);
+    let hook = getRegisteredHook(api);
+    hook({
+      event: 'PreToolUse',
+      toolName: 'bash',
+      toolInput: { command: 'echo ' + makeGithubPat() },
+      cwd: '/tmp',
+    });
+    expect((await secretScannerPlugin.health!()).counters.block).toBe(1);
+
+    secretScannerPlugin.teardown!(api as any);
+
+    // Second round: re-setup with no traffic
+    secretScannerPlugin.setup(api as any);
+    const after = await secretScannerPlugin.health!();
+    expect(after.counters.block).toBe(0);
+    expect(after.counters.redact).toBe(0);
+    expect(after.counters.allow).toBe(0);
+  });
+
+  it('teardown is safe to call before setup (defensive)', () => {
+    const api = makeApi();
+    // No setup — teardown should still not throw
+    expect(() => secretScannerPlugin.teardown!(api as any)).not.toThrow();
+  });
+});

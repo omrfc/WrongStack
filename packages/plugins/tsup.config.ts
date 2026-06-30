@@ -11,6 +11,7 @@ export default defineConfig({
     'cron': 'src/cron/index.ts',
     'template-engine': 'src/template-engine/index.ts',
     'semver-bump': 'src/semver-bump/index.ts',
+    'secret-scanner': 'src/secret-scanner/index.ts',
   },
   format: ['esm'],
   dts: true,

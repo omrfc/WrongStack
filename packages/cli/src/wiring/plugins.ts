@@ -184,6 +184,7 @@ export const BUILTIN_PLUGIN_FACTORIES: (() => Promise<Plugin>)[] = [
   async () => (await import('@wrongstack/plugins/cron')).default,
   async () => (await import('@wrongstack/plugins/template-engine')).default,
   async () => (await import('@wrongstack/plugins/semver-bump')).default,
+  async () => (await import('@wrongstack/plugins/secret-scanner')).default,
   // ── LSP plugin ──────────────────────────────────────────────────────
   async () => (await import('@wrongstack/plug-lsp')).default,
   // ── Telegram plugin ─────────────────────────────────────────────────
