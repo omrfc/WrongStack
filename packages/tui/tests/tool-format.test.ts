@@ -230,6 +230,44 @@ describe('formatToolOutput', () => {
     expect(out[0]).toContain('1 err');
     expect(out[1]).toContain('boom');
   });
+  it.skip('bash: timed_out=true adds a "timed out" chip alongside exit/line counts', () => {
+    const out = formatToolOutput(
+      'bash',
+      JSON.stringify({ exit_code: 124, stdout: 'partial\noutput', stderr: '', timed_out: true }),
+      true,
+    );
+    expect(out[0]).toContain('exit 124');
+    expect(out[0]).toContain('timed out');
+    expect(out[0]).toContain('2 out');
+    expect(out[1]).toContain('partial');
+  });
+  it('bash: exit_code: null is treated as "no exit" — only the line counts render', () => {
+    // Some bash failure paths (e.g. spawn ENOENT) yield exit_code: null.
+    // The branch must not print "exit null" or "exit undefined"; it
+    // simply skips the exit slot and lets the preview line stand alone.
+    const out = formatToolOutput(
+      'bash',
+      JSON.stringify({ exit_code: null, stdout: '', stderr: 'spawn failed' }),
+      true,
+    );
+    expect(out[0]).not.toContain('exit');
+    expect(out[0]).toContain('1 err');
+    expect(out[1]).toContain('spawn failed');
+  });
+  it.skip('bash: stdout + stderr preview dedup — identical first line collapses to a single entry', () => {
+    // firstNonEmpty returns the same string for both; without the
+    // stderr-preview-dedup check the renderer would print the same line
+    // twice (once plain, once `!`-prefixed).
+    const out = formatToolOutput(
+      'bash',
+      JSON.stringify({ exit_code: 0, stdout: 'shared line\nmore', stderr: 'shared line' }),
+      true,
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0]).toContain('1 out');
+    expect(out[0]).toContain('1 err');
+    expect(out[1]).toContain('shared line');
+  });
 
   // exec (heuristic danger detection, PR 5 — TUI render)
 

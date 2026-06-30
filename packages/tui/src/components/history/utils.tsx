@@ -604,13 +604,13 @@ export function formatToolOutput(
   // bash
   //
   // Same compact `exit N · X out · Y err` shape as git / safe-exec above.
-  // BashOutput is snake_case (`exit_code`, `output` / `error` — not stdout/stderr),
-  // so we map the field names explicitly.
+  // BashOutput is snake_case (`exit_code`, `output` / `error`); some
+  // callers and fixtures send camelCase variants, so we accept either.
   if (toolName === 'bash' && json && typeof json === 'object') {
     const o = json as Record<string, unknown>;
     const exit = numOf(o['exit_code']) ?? numOf(o['exitCode']);
-    const output = stringOf(o['output']) ?? '';
-    const error = stringOf(o['error']) ?? '';
+    const output = stringOf(o['output']) ?? stringOf(o['stdout']) ?? '';
+    const error = stringOf(o['error']) ?? stringOf(o['stderr']) ?? '';
     const timedOut = o['timed_out'] === true;
     const head: string[] = [];
     if (exit !== undefined) head.push(`exit ${exit}`);
