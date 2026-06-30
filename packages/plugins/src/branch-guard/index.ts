@@ -110,6 +110,25 @@ function getCurrentBranch(cwd?: string): string | null {
 }
 
 /**
+ * Check if the working tree has uncommitted changes (staged or unstaged).
+ * Uses `git status --porcelain` — any non-empty output means dirty tree.
+ * Returns false if not a git repo or the command fails (best-effort).
+ */
+function detectUncommittedChanges(cwd?: string): boolean {
+  try {
+    const output = execSync('git status --porcelain', {
+      encoding: 'utf-8',
+      timeout: 3_000,
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return output.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check if a bash command string contains a git operation that
  * modifies the branch history.
  */
@@ -223,10 +242,29 @@ const plugin: Plugin = {
       // Protected branch + blocked operation → act.
       const when = new Date().toISOString();
       const opVerb = gitOp.type === 'commit' ? 'committing to' : gitOp.type === 'push' ? 'pushing from' : 'merging into';
+
+      // Check for uncommitted changes so we can suggest stash.
+      const hasUncommitted = detectUncommittedChanges(cwd);
+
+      // Build a helpful suggestion: stash + branch + commit + pop.
+      const suggestionParts: string[] = [];
+      if (hasUncommitted) {
+        suggestionParts.push('git stash');
+      }
+      suggestionParts.push('git checkout -b feat/my-change');
+      if (hasUncommitted) {
+        suggestionParts.push('git stash pop');
+      }
+      suggestionParts.push(`git ${gitOp.type} ...`);
+      const suggestion = suggestionParts.join(' → ');
+
       const reason =
         `branch-guard: refused to ${gitOp.type} on protected branch '${branch}'. ` +
-        `Create a feature branch first (e.g. \`git checkout -b feat/my-change\`), ` +
-        `then ${gitOp.type} there. Protected branches: ${cfg.branches.join(', ')}.`;
+        `You're on a protected branch. Use a feature branch instead.\n` +
+        (hasUncommitted
+          ? `You have uncommitted changes. Safe workflow:\n  ${suggestion}\n`
+          : `Safe workflow:\n  ${suggestion}\n`) +
+        `Protected branches: ${cfg.branches.join(', ')}.`;
 
       state.lastBlock = { tool: toolName, branch, command: gitOp.snippet, when };
 
@@ -242,8 +280,12 @@ const plugin: Plugin = {
       state.warnCount += 1;
       return {
         decision: 'allow',
-        additionalContext: `\n⚠️ branch-guard: you are ${opVerb} protected branch '${branch}'. ` +
-          `Consider using a feature branch instead. Protected: ${cfg.branches.join(', ')}.`,
+        additionalContext:
+          `\n⚠️ branch-guard: you are ${opVerb} protected branch '${branch}'. ` +
+          (hasUncommitted
+            ? `You have uncommitted changes — consider \`git stash\` before switching branches. `
+            : '') +
+          `Use a feature branch instead. Protected: ${cfg.branches.join(', ')}.`,
       };
     };
 

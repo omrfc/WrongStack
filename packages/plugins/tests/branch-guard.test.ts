@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 // of node:child_process is replaced at module-load time.
 const mockExecSync = vi.fn((cmd: string): string => {
   if (cmd.includes('branch --show-current')) return 'main\n';
+  if (cmd.includes('status --porcelain')) return ''; // clean by default
   return '';
 });
 
@@ -54,6 +55,21 @@ function getStatusTool(api: MockApi): { execute: (input: unknown) => Promise<unk
 function setBranch(branch: string): void {
   mockExecSync.mockImplementation((cmd: string): string => {
     if (cmd.includes('branch --show-current')) return branch + '\n';
+    if (cmd.includes('status --porcelain')) return '';
+    return '';
+  });
+}
+
+/** Set the mock to simulate a dirty working tree (uncommitted changes). */
+function setDirty(dirty: boolean): void {
+  const currentImpl = mockExecSync.getMockImplementation();
+  mockExecSync.mockImplementation((cmd: string): string => {
+    if (cmd.includes('branch --show-current')) {
+      return currentImpl ? (currentImpl as (c: string) => string)(cmd) : 'main\n';
+    }
+    if (cmd.includes('status --porcelain')) {
+      return dirty ? ' M packages/plugins/src/test.ts\n' : '';
+    }
     return '';
   });
 }
@@ -215,5 +231,52 @@ describe('teardown + H1 pattern', () => {
   it('teardown is safe before setup (defensive)', () => {
     const api = makeApi();
     expect(() => branchGuardPlugin.teardown!(api as never)).not.toThrow();
+  });
+});
+
+// ── Stash suggestion ────────────────────────────────────────────────────
+
+describe('stash suggestion', () => {
+  it('suggests stash when working tree is dirty', () => {
+    setDirty(true);
+    const api = makeApi();
+    branchGuardPlugin.setup(api as never);
+    const hook = getHook(api);
+    const result = hook({ toolName: 'bash', toolInput: { command: 'git commit -m "test"' } });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toContain('git stash');
+    expect(result?.reason).toContain('git checkout -b');
+    expect(result?.reason).toContain('git stash pop');
+  });
+
+  it('does not suggest stash when working tree is clean', () => {
+    setDirty(false);
+    const api = makeApi();
+    branchGuardPlugin.setup(api as never);
+    const hook = getHook(api);
+    const result = hook({ toolName: 'bash', toolInput: { command: 'git commit -m "test"' } });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).not.toContain('git stash');
+    expect(result?.reason).toContain('git checkout -b');
+  });
+
+  it('warn mode mentions stash when dirty', () => {
+    setDirty(true);
+    const api = makeApi({ extensions: { 'branch-guard': { mode: 'warn' } } });
+    branchGuardPlugin.setup(api as never);
+    const hook = getHook(api);
+    const result = hook({ toolName: 'bash', toolInput: { command: 'git commit -m "test"' } });
+    expect(result?.decision).toBe('allow');
+    expect(result?.additionalContext).toContain('git stash');
+  });
+
+  it('warn mode does not mention stash when clean', () => {
+    setDirty(false);
+    const api = makeApi({ extensions: { 'branch-guard': { mode: 'warn' } } });
+    branchGuardPlugin.setup(api as never);
+    const hook = getHook(api);
+    const result = hook({ toolName: 'bash', toolInput: { command: 'git commit -m "test"' } });
+    expect(result?.decision).toBe('allow');
+    expect(result?.additionalContext).not.toContain('git stash');
   });
 });
