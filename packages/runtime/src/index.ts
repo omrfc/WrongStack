@@ -13,21 +13,22 @@
  * target while later moves can happen behind this facade.
  */
 
+export {
+  DefaultSystemPromptBuilder,
+  type DefaultSystemPromptBuilderOptions,
+} from '@wrongstack/core';
 export * from '@wrongstack/core/defaults';
 export {
   DefaultPathResolver,
   DefaultTokenCounter,
 } from '@wrongstack/core/infrastructure';
-export {
-  DefaultSystemPromptBuilder,
-  type DefaultSystemPromptBuilderOptions,
-} from '@wrongstack/core';
-export * from './pack.js';
-export * from './host.js';
-export * from './container.js';
-export * from './vision.js';
 export * from './clipboard.js';
+export * from './container.js';
 export {
-  makeLightSubagentFactory,
   type LightSubagentFactoryDeps,
+  makeLightSubagentFactory,
 } from './fleet/light-subagent-factory.js';
+export * from './host.js';
+export { type ProbeOptions, type ProbeResult, probeLocalLlm } from './local-llm-probe.js';
+export * from './pack.js';
+export * from './vision.js';

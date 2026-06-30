@@ -1,14 +1,14 @@
 import {
+  type Config,
   Container,
   DefaultConfigStore,
   DefaultSecretScrubber,
-  ProviderRegistry,
-  TOKENS,
-  ToolRegistry,
-  type Config,
   type Provider,
+  ProviderRegistry,
   type SessionWriter,
+  TOKENS,
   type Tool,
+  ToolRegistry,
 } from '@wrongstack/core';
 import { describe, expect, it } from 'vitest';
 import { makeLightSubagentFactory } from '../src/index.js';
@@ -71,6 +71,7 @@ function sessionShim(): SessionWriter {
   return {
     id: 'parent',
     transcriptPath: '/tmp/parent.jsonl',
+    traceId: 'parent-trace',
     get pendingToolUses() {
       return [];
     },
@@ -79,6 +80,7 @@ function sessionShim(): SessionWriter {
     flush: () => {},
     close: async () => {},
     recordFileChange: () => {},
+    recordSideEffect: () => {},
     writeCheckpoint: async () => {},
     writeFileSnapshot: async () => {},
     truncateToCheckpoint: async () => 0,
@@ -101,17 +103,25 @@ function makeDeps(providerRegistered = true) {
   container.bind(TOKENS.Logger, () => stubLogger() as never);
   container.bind(TOKENS.ConfigStore, () => new DefaultConfigStore(config));
   container.bind(TOKENS.SecretScrubber, () => new DefaultSecretScrubber());
-  container.bind(TOKENS.TokenCounter, () => ({
-    count: () => 0,
-    countMessages: () => 0,
-    add: () => {},
-    total: () => ({ input: 0, output: 0 }),
-    estimateCost: () => ({ total: 0 }),
-    reset: () => {},
-  }) as never);
-  container.bind(TOKENS.SystemPromptBuilder, () => ({
-    build: async () => [{ type: 'text', text: 'system' }],
-  }) as never);
+  container.bind(
+    TOKENS.TokenCounter,
+    () =>
+      ({
+        count: () => 0,
+        countMessages: () => 0,
+        add: () => {},
+        total: () => ({ input: 0, output: 0 }),
+        estimateCost: () => ({ total: 0 }),
+        reset: () => {},
+      }) as never,
+  );
+  container.bind(
+    TOKENS.SystemPromptBuilder,
+    () =>
+      ({
+        build: async () => [{ type: 'text', text: 'system' }],
+      }) as never,
+  );
 
   const providerRegistry = new ProviderRegistry();
   if (providerRegistered) providerRegistry.register({ type: 'noop', create: () => noopProvider });
@@ -120,7 +130,13 @@ function makeDeps(providerRegistered = true) {
   toolRegistry.register(readTool);
   toolRegistry.register(writeTool);
 
-  return { container, providerRegistry, toolRegistry, session: sessionShim(), projectRoot: '/proj' };
+  return {
+    container,
+    providerRegistry,
+    toolRegistry,
+    session: sessionShim(),
+    projectRoot: '/proj',
+  };
 }
 
 describe('makeLightSubagentFactory', () => {
@@ -154,11 +170,25 @@ describe('makeLightSubagentFactory', () => {
     const names = r.agent.tools.list().map((t) => t.name);
     expect(names).toEqual(['read']);
     // The shared parent registry is untouched.
-    expect(deps.toolRegistry.list().map((t) => t.name).sort()).toEqual(['read', 'write']);
+    expect(
+      deps.toolRegistry
+        .list()
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(['read', 'write']);
   });
 
   it('throws a clear error when the provider is not registered', async () => {
     const factory = makeLightSubagentFactory(makeDeps(false));
     await expect(factory({ id: 's1' })).rejects.toThrow(/No provider factory registered/);
+  });
+
+  it('forwards traceId between the subagent session shim and the parent writer', async () => {
+    const deps = makeDeps();
+    const factory = makeLightSubagentFactory(deps);
+    const r = await factory({ id: 's1' });
+    expect(r.agent.ctx.session.traceId).toBe('parent-trace');
+    r.agent.ctx.session.traceId = 'child-trace';
+    expect(deps.session.traceId).toBe('child-trace');
   });
 });

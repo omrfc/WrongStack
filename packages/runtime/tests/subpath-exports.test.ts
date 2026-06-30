@@ -37,4 +37,9 @@ describe('@wrongstack/runtime subpath exports', () => {
     const clipboard = await import('@wrongstack/runtime/clipboard');
     expect(typeof clipboard.readClipboardImage).toBe('function');
   });
+
+  it('exposes probeLocalLlm from the main barrel', async () => {
+    const runtime = await import('@wrongstack/runtime');
+    expect(typeof runtime.probeLocalLlm).toBe('function');
+  });
 });

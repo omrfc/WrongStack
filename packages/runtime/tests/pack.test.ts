@@ -1,5 +1,11 @@
+import type {
+  AgentExtension,
+  PluginAPI,
+  ProviderFactory,
+  SlashCommand,
+  Tool,
+} from '@wrongstack/core';
 import { describe, expect, it } from 'vitest';
-import type { AgentExtension, PluginAPI, ProviderFactory, SlashCommand, Tool } from '@wrongstack/core';
 import type { WrongStackPack } from '../src/pack.js';
 
 /**
@@ -19,38 +25,57 @@ describe('WrongStackPack interface', () => {
     });
 
     it('allows optional tools array', () => {
-      const mockTool = { id: 'tool-1', name: 'TestTool', description: 'A test tool', execute: async () => ({ result: 'ok' }) } as never as Tool;
+      const mockTool = {
+        id: 'tool-1',
+        name: 'TestTool',
+        description: 'A test tool',
+        execute: async () => ({ result: 'ok' }),
+      } as never as Tool;
       const pack: WrongStackPack = { name: 'test-pack', tools: [mockTool] };
       expect(pack.tools).toHaveLength(1);
       expect(pack.tools?.[0].name).toBe('TestTool');
     });
 
     it('allows optional providers array', () => {
-      const mockProvider = { providerId: 'test-provider', create: async () => ({}) } as never as ProviderFactory;
+      const mockProvider = {
+        providerId: 'test-provider',
+        create: async () => ({}),
+      } as never as ProviderFactory;
       const pack: WrongStackPack = { name: 'test-pack', providers: [mockProvider] };
       expect(pack.providers).toHaveLength(1);
     });
 
     it('allows optional slashCommands array', () => {
-      const mockCommand = { name: 'test-cmd', description: 'A test command', execute: async () => {} } as never as SlashCommand;
+      const mockCommand = {
+        name: 'test-cmd',
+        description: 'A test command',
+        execute: async () => {},
+      } as never as SlashCommand;
       const pack: WrongStackPack = { name: 'test-pack', slashCommands: [mockCommand] };
       expect(pack.slashCommands).toHaveLength(1);
     });
 
     it('allows optional extensions array', () => {
-      const mockExtension = { name: 'test-ext', onAgentStart: async () => {} } as never as AgentExtension;
+      const mockExtension = {
+        name: 'test-ext',
+        onAgentStart: async () => {},
+      } as never as AgentExtension;
       const pack: WrongStackPack = { name: 'test-pack', extensions: [mockExtension] };
       expect(pack.extensions).toHaveLength(1);
     });
 
     it('allows optional setup function', () => {
-      const setupFn = async (_api: PluginAPI) => { /* noop */ };
+      const setupFn = async (_api: PluginAPI) => {
+        /* noop */
+      };
       const pack: WrongStackPack = { name: 'test-pack', setup: setupFn };
       expect(typeof pack.setup).toBe('function');
     });
 
     it('allows optional teardown function', () => {
-      const teardownFn = async (_api: PluginAPI) => { /* noop */ };
+      const teardownFn = async (_api: PluginAPI) => {
+        /* noop */
+      };
       const pack: WrongStackPack = { name: 'test-pack', teardown: teardownFn };
       expect(typeof pack.teardown).toBe('function');
     });
@@ -58,13 +83,32 @@ describe('WrongStackPack interface', () => {
 
   describe('full valid pack construction', () => {
     it('constructs a complete pack with all optional fields', () => {
-      const mockTool = { id: 'tool-1', name: 'TestTool', description: 'A test tool', execute: async () => ({ result: 'ok' }) } as never as Tool;
-      const mockProvider = { providerId: 'test-provider', create: async () => ({}) } as never as ProviderFactory;
-      const mockCommand = { name: 'test-cmd', description: 'A test command', execute: async () => {} } as never as SlashCommand;
-      const mockExtension = { name: 'test-ext', onAgentStart: async () => {} } as never as AgentExtension;
+      const mockTool = {
+        id: 'tool-1',
+        name: 'TestTool',
+        description: 'A test tool',
+        execute: async () => ({ result: 'ok' }),
+      } as never as Tool;
+      const mockProvider = {
+        providerId: 'test-provider',
+        create: async () => ({}),
+      } as never as ProviderFactory;
+      const mockCommand = {
+        name: 'test-cmd',
+        description: 'A test command',
+        execute: async () => {},
+      } as never as SlashCommand;
+      const mockExtension = {
+        name: 'test-ext',
+        onAgentStart: async () => {},
+      } as never as AgentExtension;
 
-      const setupFn = async (_api: PluginAPI) => { /* noop */ };
-      const teardownFn = async (_api: PluginAPI) => { /* noop */ };
+      const setupFn = async (_api: PluginAPI) => {
+        /* noop */
+      };
+      const teardownFn = async (_api: PluginAPI) => {
+        /* noop */
+      };
 
       const pack: WrongStackPack = {
         name: 'complete-pack',
@@ -102,14 +146,22 @@ describe('WrongStackPack interface', () => {
 
   describe('readonly array fields', () => {
     it('tools field is readonly', () => {
-      const mockTool = { id: 'tool-1', name: 'TestTool', description: 'A test tool', execute: async () => ({ result: 'ok' }) } as never as Tool;
+      const mockTool = {
+        id: 'tool-1',
+        name: 'TestTool',
+        description: 'A test tool',
+        execute: async () => ({ result: 'ok' }),
+      } as never as Tool;
       const pack: WrongStackPack = { name: 'test-pack', tools: Object.freeze([mockTool]) };
       expect(Array.isArray(pack.tools)).toBe(true);
       expect(Object.isFrozen(pack.tools)).toBe(true);
     });
 
     it('providers field is readonly', () => {
-      const mockProvider = { providerId: 'test-provider', create: async () => ({}) } as never as ProviderFactory;
+      const mockProvider = {
+        providerId: 'test-provider',
+        create: async () => ({}),
+      } as never as ProviderFactory;
       const pack: WrongStackPack = { name: 'test-pack', providers: Object.freeze([mockProvider]) };
       expect(Array.isArray(pack.providers)).toBe(true);
       expect(Object.isFrozen(pack.providers)).toBe(true);

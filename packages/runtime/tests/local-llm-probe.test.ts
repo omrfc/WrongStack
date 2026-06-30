@@ -89,7 +89,9 @@ describe('probeLocalLlm', () => {
   it('returns http_error with a redacted body slice for non-2xx responses', async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(textResponse(`failure for secret-key ${'x'.repeat(300)}`, { status: 401 }));
+      .mockResolvedValue(
+        textResponse(`failure for secret-key ${'x'.repeat(300)}`, { status: 401 }),
+      );
 
     const result = await probeLocalLlm({
       baseUrl: 'http://localhost:11434/v1',
@@ -127,7 +129,9 @@ describe('probeLocalLlm', () => {
   });
 
   it('returns invalid_response when neither data nor models is an array', async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ data: null, models: 'bad' }));
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ data: null, models: 'bad' }));
 
     const result = await probeLocalLlm({
       baseUrl: 'http://localhost:11434/v1',
@@ -167,7 +171,9 @@ describe('probeLocalLlm', () => {
   });
 
   it('classifies abort-like fetch failures as timeouts', async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new DOMException('timed out', 'AbortError'));
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new DOMException('timed out', 'AbortError'));
 
     const result = await probeLocalLlm({
       baseUrl: 'http://localhost:11434/v1',

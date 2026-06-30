@@ -16,27 +16,28 @@
 // `AutoApprovePermissionPolicy` granted the wide work capabilities (fs.write,
 // shell, …) — the user authorised the work when they pressed "Start Run".
 
+import { randomUUID } from 'node:crypto';
 import {
   Agent,
-  AutoApprovePermissionPolicy,
   type AgentFactory,
   type AgentFactoryResult,
+  AutoApprovePermissionPolicy,
   type Config,
   type Container,
   Context,
   createDefaultPipelines,
   createFallbackModelExtension,
   EventBus,
+  type ProviderRegistry,
   resolveModelMatrix,
   resolveModelTargetFromEntry,
-  type ProviderRegistry,
   type SessionWriter,
   type SubagentConfig,
   type TextBlock,
+  TOKENS,
   type Tool,
   ToolExecutor,
   ToolRegistry,
-  TOKENS,
   WIDE_SUBAGENT_CAPABILITIES,
 } from '@wrongstack/core';
 
@@ -137,6 +138,7 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
       tools: allowed,
       agentId: agentName,
       agentName,
+      traceId: deps.session.traceId,
     });
     if (subCfg.role) ctx.meta['agentRole'] = subCfg.role;
     // Store the AbortController so abortLightSubagent() can retrieve it.
@@ -181,11 +183,12 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
       createFallbackModelExtension({
         getConfig: () => {
           const live = configStore.get();
-          if (subFallbacks && subFallbacks.length) return { ...live, fallbackModels: subFallbacks };
-          if (matrixFallbacks && matrixFallbacks.length) return { ...live, fallbackModels: matrixFallbacks };
+          if (subFallbacks?.length) return { ...live, fallbackModels: subFallbacks };
+          if (matrixFallbacks?.length) return { ...live, fallbackModels: matrixFallbacks };
           return live;
         },
-        buildProvider: (id) => buildProvider(deps.providerRegistry, configStore.get(), id, effModel),
+        buildProvider: (id) =>
+          buildProvider(deps.providerRegistry, configStore.get(), id, effModel),
         events,
       }),
     );
@@ -232,6 +235,12 @@ function makeSubagentSessionShim(parent: SessionWriter): SessionWriter {
   return {
     id: parent.id,
     transcriptPath: parent.transcriptPath,
+    get traceId(): string | undefined {
+      return parent.traceId;
+    },
+    set traceId(value: string | undefined) {
+      parent.traceId = value;
+    },
     get pendingToolUses(): string[] {
       return [];
     },
@@ -251,5 +260,5 @@ function makeSubagentSessionShim(parent: SessionWriter): SessionWriter {
 }
 
 function cryptoId(): string {
-  return crypto.randomUUID().slice(0, 8);
+  return randomUUID().slice(0, 8);
 }

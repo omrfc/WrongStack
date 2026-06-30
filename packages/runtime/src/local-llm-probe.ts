@@ -155,11 +155,7 @@ export async function probeLocalLlm(opts: ProbeOptions): Promise<ProbeResult> {
       if (!entry || typeof entry !== 'object') continue;
       const e = entry as Record<string, unknown>;
       const raw =
-        typeof e['id'] === 'string'
-          ? e['id']
-          : typeof e['name'] === 'string'
-            ? e['name']
-            : null;
+        typeof e['id'] === 'string' ? e['id'] : typeof e['name'] === 'string' ? e['name'] : null;
       if (raw === null) continue;
       const id = scrubber.scrub(raw).trim();
       if (id.length === 0) continue;

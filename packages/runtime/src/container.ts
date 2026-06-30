@@ -1,28 +1,28 @@
 import {
+  buildRecoveryStrategies,
   type Config,
   Container,
+  createStrategyCompactor,
   DefaultConfigStore,
   DefaultErrorHandler,
   DefaultMemoryStore,
   DefaultModeStore,
   DefaultPermissionPolicy,
-  DefaultRetryPolicy,
   DefaultPromptLoader,
+  DefaultRetryPolicy,
   DefaultSecretScrubber,
   DefaultSessionStore,
   DefaultSkillLoader,
   DefaultSystemPromptBuilder,
+  type DefaultSystemPromptBuilderOptions,
   DefaultTokenCounter,
   type EventBus,
-  createStrategyCompactor,
-  buildRecoveryStrategies,
   type Logger,
   type ModelsRegistry,
   TOKENS,
   type Tool,
   type WstackPaths,
 } from '@wrongstack/core';
-import type { DefaultSystemPromptBuilderOptions } from '@wrongstack/core';
 
 export interface CreateContainerOptions {
   config: Config;
@@ -86,7 +86,12 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
   container.bind(TOKENS.ModelsRegistry, () => modelsRegistry);
   container.bind(
     TOKENS.TokenCounter,
-    () => new DefaultTokenCounter({ registry: modelsRegistry, providerId: config.provider, events: opts.events }),
+    () =>
+      new DefaultTokenCounter({
+        registry: modelsRegistry,
+        providerId: config.provider,
+        events: opts.events,
+      }),
   );
 
   const modeStore = new DefaultModeStore({ directory: wpaths.configDir });
@@ -108,7 +113,10 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
   const skillLoader = new DefaultSkillLoader({ paths: wpaths, bundledDir: opts.bundledSkillsDir });
   container.bind(TOKENS.SkillLoader, () => skillLoader);
 
-  const promptLoader = new DefaultPromptLoader({ paths: wpaths, bundledDir: opts.bundledPromptsDir });
+  const promptLoader = new DefaultPromptLoader({
+    paths: wpaths,
+    bundledDir: opts.bundledPromptsDir,
+  });
   container.bind(TOKENS.PromptLoader, () => promptLoader);
 
   if (opts.systemPrompt) {
@@ -120,46 +128,41 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
             globalDir: wpaths.globalInstructions,
             projectDir: wpaths.inProjectInstructions,
           },
-          ...(opts.systemPrompt as DefaultSystemPromptBuilderOptions),
+          ...opts.systemPrompt,
         }),
     );
   }
 
-  container.bind(
-    TOKENS.PermissionPolicy,
-    () => {
-      const policyOptions: ConstructorParameters<typeof DefaultPermissionPolicy>[0] = {
-        trustFile: wpaths.projectTrust,
-        yolo: opts.permission?.yolo ?? false,
-        yoloDestructive: opts.permission?.yoloDestructive ?? opts.permission?.forceAllYolo ?? false,
-        confirmDestructive: opts.permission?.confirmDestructive ?? false,
-      };
-      if (opts.permission?.promptDelegate !== undefined) {
-        policyOptions.promptDelegate = opts.permission.promptDelegate;
-      }
-      return new DefaultPermissionPolicy(policyOptions);
-    },
-  );
+  container.bind(TOKENS.PermissionPolicy, () => {
+    const policyOptions: ConstructorParameters<typeof DefaultPermissionPolicy>[0] = {
+      trustFile: wpaths.projectTrust,
+      yolo: opts.permission?.yolo ?? false,
+      yoloDestructive: opts.permission?.yoloDestructive ?? opts.permission?.forceAllYolo ?? false,
+      confirmDestructive: opts.permission?.confirmDestructive ?? false,
+    };
+    if (opts.permission?.promptDelegate !== undefined) {
+      policyOptions.promptDelegate = opts.permission.promptDelegate;
+    }
+    return new DefaultPermissionPolicy(policyOptions);
+  });
 
-  container.bind(
-    TOKENS.Compactor,
-    () =>
-      // Strategy comes from config.context.strategy: 'hybrid' (default, lossless
-      // rules, no LLM), 'intelligent' (LLM summarization), or 'selective'
-      // (LLM-driven selection). The LLM strategies resolve their provider from
-      // ctx at compact()-time, so binding here (before context.provider exists)
-      // is safe. preserveK / eliseThreshold are class-level fallbacks; the active
-      // ContextWindowPolicy in ctx.meta normally overrides both at runtime.
-      // eliseThreshold is a TOKEN COUNT — a previous value of 0.7 elided
-      // essentially every tool_result (anything > 1 token).
-      createStrategyCompactor({
-        strategy: config.context?.strategy,
-        preserveK: opts.compactor?.preserveK ?? 10,
-        eliseThreshold: opts.compactor?.eliseThreshold ?? 2000,
-        smart: true,
-        summarizerModel: config.context?.summarizerModel,
-        llmSelector: config.context?.llmSelector,
-      }),
+  container.bind(TOKENS.Compactor, () =>
+    // Strategy comes from config.context.strategy: 'hybrid' (default, lossless
+    // rules, no LLM), 'intelligent' (LLM summarization), or 'selective'
+    // (LLM-driven selection). The LLM strategies resolve their provider from
+    // ctx at compact()-time, so binding here (before context.provider exists)
+    // is safe. preserveK / eliseThreshold are class-level fallbacks; the active
+    // ContextWindowPolicy in ctx.meta normally overrides both at runtime.
+    // eliseThreshold is a TOKEN COUNT — a previous value of 0.7 elided
+    // essentially every tool_result (anything > 1 token).
+    createStrategyCompactor({
+      strategy: config.context?.strategy,
+      preserveK: opts.compactor?.preserveK ?? 10,
+      eliseThreshold: opts.compactor?.eliseThreshold ?? 2000,
+      smart: true,
+      summarizerModel: config.context?.summarizerModel,
+      llmSelector: config.context?.llmSelector,
+    }),
   );
 
   return container;

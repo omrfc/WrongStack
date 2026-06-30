@@ -1,4 +1,10 @@
-import type { AgentExtension, PluginAPI, ProviderFactory, SlashCommand, Tool } from '@wrongstack/core';
+import type {
+  AgentExtension,
+  PluginAPI,
+  ProviderFactory,
+  SlashCommand,
+  Tool,
+} from '@wrongstack/core';
 
 /**
  * A first-party or third-party capability bundle that can be mounted by a
