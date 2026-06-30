@@ -1,7 +1,7 @@
 /**
  * @wrongstack/plugins — Official WrongStack Plugin Suite
  *
- * Exported plugins (12 total):
+ * Exported plugins (13 total):
  *  1. auto-doc         — Auto-generates JSDoc/TSDoc (dryRun for preview)
  *  2. git-autocommit  — AI-powered commit messages (git_autocommit/status_summary removed)
  *  3. shell-check     — Runs shellcheck on files or directories (merged)
@@ -18,6 +18,8 @@
  *                        threshold and stops the agent loop when the limit is hit
  * 12. lint-gate       — Pre-tool hook that runs biome/eslint on would-be
  *                        file content before write or edit commits it
+ * 13. branch-guard    — Pre-tool hook that blocks commits, pushes, and
+ *                        merges to protected branches (default: main, master)
  *
  * Removed (use the equivalent built-in tools instead — see
  * `DEPRECATED_PLUGIN_NAMES` in `packages/cli/src/wiring/plugins.ts`

@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Twelve focused, single-purpose plugins ship in this package and load
+Thirteen focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -33,6 +33,7 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 10 | [`todo-tracker`](./src/todo-tracker) | `todo_tracker_list/add/complete/drop/remove/pull/status` | — | Persistent project-scoped backlog that survives across sessions; cross-session bridge via `todo_tracker_pull` |
 | 11 | [`token-budget`](./src/token-budget) | `token_budget_status` | `Stop` | Enforces a per-session token budget — warns at `warnPercent`, stops agent loop at `stopPercent` |
 | 12 | [`lint-gate`](./src/lint-gate) | `lint_gate_status` | `PreToolUse` (`write\|edit`) | Runs biome/eslint on would-be file content before write or edit commits; blocks or warns on lint issues |
+| 13 | [`branch-guard`](./src/branch-guard) | `branch_guard_status` | `PreToolUse` (`bash\|git_autocommit`) | Blocks commits, pushes, and merges to protected branches (default: main, master) |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -233,7 +234,7 @@ To disable a single built-in without removing its config:
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
 `todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
-`token-budget`, `lint-gate`) follow a strict lifecycle to survive hot-reload
+`token-budget`, `lint-gate`, `branch-guard`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's

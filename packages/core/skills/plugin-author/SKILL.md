@@ -19,7 +19,7 @@ Guides the creation and maintenance of first-party plugins in
 the `Plugin` interface from `@wrongstack/core`, registering tools,
 hooks, slash commands, or pipelines into the agent's runtime.
 
-There are currently **12 official plugins** in the suite:
+There are currently **13 official plugins** in the suite:
 
 | Plugin | Tools | Hooks | Stateful |
 |--------|-------|-------|----------|
@@ -35,6 +35,7 @@ There are currently **12 official plugins** in the suite:
 | `todo-tracker` | `todo_tracker_list/add/complete/drop/remove/pull/status` | — | ✅ teardown+health |
 | `token-budget` | `token_budget_status` | `Stop` | ✅ teardown+health |
 | `lint-gate` | `lint_gate_status` | `PreToolUse` (`write\|edit`) | ✅ teardown+health |
+| `branch-guard` | `branch_guard_status` | `PreToolUse` (`bash\|git_autocommit`) | ✅ teardown+health |
 
 ## Rules
 
