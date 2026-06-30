@@ -145,26 +145,80 @@ Reads the git log since the last tag, infers the next version
 tag the new commit. `changelog` generates a markdown changelog
 between two refs.
 
-### 9. `secret-scanner` — credential blocker
+### 9. `secret-scanner` — credential blocker + output leak detector
 
 **Tools**: `secret_scanner_status`, `secret_scanner_test`
-**Hooks**: `PreToolUse` with matcher `bash|write|edit` (default)
+**Hooks**:
+- `PreToolUse` with matcher `bash|write|edit` (configurable via `matcher`)
+- `PostToolUse` with matcher `*` (configurable via `postToolUseMatcher`)
 
-Mirrors the simple patterns from `core/src/security/secret-scrubber.ts`
+**PreToolUse** (prevention — before the tool runs):
+Mirrors 21 simple patterns from `core/src/security/secret-scrubber.ts`
 (LLM provider keys, GitHub PATs v1+v2, AWS, GCP, Slack, Stripe,
 Twilio, Telegram, JWT, PEM private keys, HuggingFace/Replicate/
 Perplexity/Groq, Bearer tokens, mongo/postgres/mysql/redis URIs).
-Read-only tools (`read`, `fetch`) are excluded by default since
-secrets flowing IN to them are fine — the output scrubber handles
-secrets flowing OUT.
+Read-only tools (`read`, `fetch`) are excluded from PreToolUse by
+default since secrets flowing IN to them are fine.
 
-Three modes (config.extensions['secret-scanner'].mode):
+**PostToolUse** (detection — after the tool runs):
+Scans tool OUTPUT for secrets that leaked through. Since the tool
+has already run, the hook cannot block — instead it injects
+`additionalContext` so the LLM knows not to echo, store, or commit
+the leaked value.
+
+Three modes (`config.extensions['secret-scanner'].mode`):
 - **`block` (default)**: returns `HookOutcome{ decision: 'block', reason }`
 - **`redact`**: returns `HookOutcome{ decision: 'allow', modifiedInput, additionalContext }` with the offending strings replaced by `[REDACTED:type]`
 - **`allow`**: only logs; never blocks
 
+```jsonc
+// Basic config
+{
+  "extensions": {
+    "secret-scanner": {
+      "mode": "block",
+      "matcher": "bash|write|edit",
+      "postToolUseMatcher": "*"
+    }
+  }
+}
+```
+
+**Custom patterns** (`customPatterns`): Append your own credential
+patterns alongside the 21 built-in ones. Each entry is a
+`{ type, regex, description? }`. Invalid regex entries are silently
+skipped.
+
+```jsonc
+{
+  "extensions": {
+    "secret-scanner": {
+      "customPatterns": [
+        {
+          "type": "internal_api_key",
+          "regex": "IAK-[A-F0-9]{40}",
+          "description": "Internal API key format"
+        },
+        {
+          "type": "custom_jwt",
+          "regex": "eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"
+        },
+        {
+          "type": "vault_token",
+          "regex": "hvs\\.[A-Za-z0-9_-]{90,}"
+        }
+      ]
+    }
+  }
+}
+```
+
+Custom patterns are detected by all hooks (PreToolUse block/redact,
+PostToolUse leak detection) and by the `secret_scanner_test` tool.
+They are reset to base-only on teardown (H1 pattern).
+
 The `high_entropy_env` pattern from the output scrubber is
-intentionally omitted here — too slow and too false-positive prone
+intentionally omitted — too slow and too false-positive prone
 for a synchronous pre-tool gate.
 
 ### 10. `todo-tracker` — persistent backlog
