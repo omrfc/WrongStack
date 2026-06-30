@@ -14,6 +14,7 @@ export default defineConfig({
     'secret-scanner': 'src/secret-scanner/index.ts',
     'todo-tracker': 'src/todo-tracker/index.ts',
     'token-budget': 'src/token-budget/index.ts',
+    'lint-gate': 'src/lint-gate/index.ts',
   },
   format: ['esm'],
   dts: true,

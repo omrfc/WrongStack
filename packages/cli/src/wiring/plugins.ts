@@ -196,6 +196,7 @@ export const BUILTIN_PLUGIN_FACTORIES: (() => Promise<Plugin>)[] = [
   async () => (await import('@wrongstack/plugins/secret-scanner')).default,
   async () => (await import('@wrongstack/plugins/todo-tracker')).default,
   async () => (await import('@wrongstack/plugins/token-budget')).default,
+  async () => (await import('@wrongstack/plugins/lint-gate')).default,
   // ── LSP plugin ──────────────────────────────────────────────────────
   async () => (await import('@wrongstack/plug-lsp')).default,
   // ── Telegram plugin ─────────────────────────────────────────────────
