@@ -1,10 +1,10 @@
-import { ToolRegistry, type Context, type Tool } from '@wrongstack/core';
+import { type Context, type Tool, ToolRegistry } from '@wrongstack/core';
 import { describe, expect, it } from 'vitest';
 import {
-  ImageInputUnsupportedError,
-  VisionUrlBlockedError,
   createToolVisionAdapters,
+  ImageInputUnsupportedError,
   routeImagesForModel,
+  VisionUrlBlockedError,
 } from '../src/vision.js';
 
 const image = {
@@ -24,6 +24,34 @@ describe('vision routing', () => {
 
     expect(result.route).toBe('native');
     expect(result.blocks[1]).toBe(image);
+  });
+
+  it('blocks private image URLs even when the model supports native vision', async () => {
+    const urlImage = {
+      type: 'image' as const,
+      source: { type: 'url' as const, url: 'http://localhost/a.png', media_type: 'image/png' },
+    };
+    await expect(
+      routeImagesForModel([urlImage], {
+        supportsVision: true,
+        ctx,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(VisionUrlBlockedError);
+  });
+
+  it('allows public image URLs when the model supports native vision', async () => {
+    const urlImage = {
+      type: 'image' as const,
+      source: { type: 'url' as const, url: 'https://example.com/a.png', media_type: 'image/png' },
+    };
+    const result = await routeImagesForModel([urlImage], {
+      supportsVision: true,
+      ctx,
+      signal: new AbortController().signal,
+    });
+    expect(result.route).toBe('native');
+    expect(result.blocks[0]).toBe(urlImage);
   });
 
   it('throws a clear error when images have no native or adapter route', async () => {
@@ -341,7 +369,12 @@ describe('vision routing', () => {
     };
     registry.register(tool);
     const adapters = createToolVisionAdapters(registry);
-    await adapters[0]!.describe({ image, ctx, prompt: 'OCR the image', signal: new AbortController().signal });
+    await adapters[0]!.describe({
+      image,
+      ctx,
+      prompt: 'OCR the image',
+      signal: new AbortController().signal,
+    });
     expect(captured.query).toBe('OCR the image');
     expect(captured.instruction).toBe('OCR the image');
   });
@@ -355,11 +388,7 @@ describe('vision routing', () => {
       permission: 'auto',
       mutating: false,
       async execute() {
-        return [
-          { text: 'line1' },
-          'line2',
-          { other: 'ignored' },
-        ] as never;
+        return [{ text: 'line1' }, 'line2', { other: 'ignored' }] as never;
       },
     };
     registry.register(tool);
@@ -421,7 +450,11 @@ describe('vision routing', () => {
     const registry = new ToolRegistry();
     const urlImage = {
       type: 'image' as const,
-      source: { type: 'url' as const, url: 'https://example.com/snake.png', media_type: 'image/png' },
+      source: {
+        type: 'url' as const,
+        url: 'https://example.com/snake.png',
+        media_type: 'image/png',
+      },
     };
     let received = '';
     const tool: Tool<Record<string, unknown>, string> = {
@@ -496,7 +529,10 @@ describe('vision routing', () => {
     // turn image analysis into an SSRF vector. The guard must run BEFORE
     // the URL is handed to the adapter — same model as fetch.ts.
 
-    function urlTool(name: string, key: 'url' | 'image_url' | 'imageUrl'): Tool<Record<string, unknown>, string> {
+    function urlTool(
+      name: string,
+      key: 'url' | 'image_url' | 'imageUrl',
+    ): Tool<Record<string, unknown>, string> {
       return {
         name,
         description: 'Analyze an image (url input).',

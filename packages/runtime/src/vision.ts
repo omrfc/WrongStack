@@ -1,8 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { assertNotPrivateHost } from '@wrongstack/core';
 import type { ContentBlock, Context, ImageBlock, Tool, ToolRegistry } from '@wrongstack/core';
+import { assertNotPrivateHost } from '@wrongstack/core';
 
 export interface VisionAdapterInput {
   image: ImageBlock;
@@ -38,7 +38,11 @@ export interface VisionRoutingResult {
 }
 
 export class ImageInputUnsupportedError extends Error {
-  constructor(opts: { providerId?: string | undefined; model?: string | undefined; imageCount: number }) {
+  constructor(opts: {
+    providerId?: string | undefined;
+    model?: string | undefined;
+    imageCount: number;
+  }) {
     const target = [opts.providerId, opts.model].filter(Boolean).join('/') || 'current model';
     super(
       `${target} does not support image input, and no image-understanding adapter is available for ${opts.imageCount} image${opts.imageCount === 1 ? '' : 's'}. Switch to a vision model or enable an MCP/tool adapter that can describe images.`,
@@ -76,6 +80,21 @@ export async function routeImagesForModel(
     return { blocks, route: 'none', convertedImages: 0 };
   }
   if (opts.supportsVision) {
+    // Native vision providers typically fetch image URLs server-side, so
+    // enforce the same SSRF guard used for adapter routes.
+    for (const img of images) {
+      if (img.source.type === 'url' && img.source.url) {
+        try {
+          await assertNotPrivateHost(new URL(img.source.url).hostname);
+        } catch (err) {
+          const reason =
+            err instanceof Error && err.message.startsWith('fetch:')
+              ? err.message.slice('fetch:'.length).trim()
+              : 'unresolvable host';
+          throw new VisionUrlBlockedError({ url: img.source.url, reason });
+        }
+      }
+    }
     return { blocks, route: 'native', convertedImages: 0 };
   }
 
@@ -127,7 +146,9 @@ export async function routeImagesForModel(
   return { blocks: out, route: 'adapter', convertedImages, adapterName };
 }
 
-async function resolveAdapters(adapters: VisionAdapters | undefined): Promise<readonly VisionAdapter[]> {
+async function resolveAdapters(
+  adapters: VisionAdapters | undefined,
+): Promise<readonly VisionAdapter[]> {
   if (!adapters) return [];
   return typeof adapters === 'function' ? await adapters() : adapters;
 }
@@ -152,7 +173,9 @@ export function createToolVisionAdapters(
         }
         const built = await buildToolPayload(currentTool, input.image, input.prompt ?? opts.prompt);
         if (!built) {
-          throw new Error(`Tool "${currentTool.name}" does not expose a supported image input schema`);
+          throw new Error(
+            `Tool "${currentTool.name}" does not expose a supported image input schema`,
+          );
         }
         try {
           const result = await currentTool.execute(built.payload, input.ctx, {
@@ -166,31 +189,46 @@ export function createToolVisionAdapters(
     }));
 }
 
+export const VISION_IMAGE_KEYS = [
+  'image',
+  'base64',
+  'data',
+  'url',
+  'image_url',
+  'imageUrl',
+  'path',
+  'image_path',
+  'imagePath',
+  'file_path',
+  'filePath',
+  'filename',
+  'file',
+  'mediaType',
+  'mimeType',
+] as const;
+
+export const VISION_PATH_KEYS = [
+  'path',
+  'image_path',
+  'imagePath',
+  'image_url',
+  'imageUrl',
+  'file_path',
+  'filePath',
+  'filename',
+  'file',
+] as const;
+
+export const VISION_MEDIA_TYPE_KEYS = ['mediaType', 'mimeType', 'media_type'] as const;
+export const VISION_PROMPT_KEYS = ['prompt', 'query', 'instruction'] as const;
+
 function isLikelyVisionTool(tool: Tool): boolean {
   if (tool.permission !== 'auto' || tool.mutating) return false;
   const haystack = `${tool.name} ${tool.description ?? ''} ${tool.usageHint ?? ''}`.toLowerCase();
   if (/(generate|create|draw|paint|edit|upscale|remove|write|delete)/.test(haystack)) return false;
   if (!/(vision|image|screenshot|ocr|describe|analy[sz]e)/.test(haystack)) return false;
   const props = schemaProperties(tool);
-  return [
-    'image',
-    'base64',
-    'data',
-    'url',
-    'image_url',
-    'imageUrl',
-    'path',
-    'image_path',
-    'imagePath',
-    'image_url',
-    'imageUrl',
-    'file_path',
-    'filePath',
-    'filename',
-    'file',
-    'mediaType',
-    'mimeType',
-  ].some((key) => key in props);
+  return VISION_IMAGE_KEYS.some((key) => key in props);
 }
 
 async function buildToolPayload(
@@ -224,17 +262,7 @@ async function buildToolPayload(
     }
   }
 
-  const pathKey = firstPresent(props, [
-    'path',
-    'image_path',
-    'imagePath',
-    'image_url',
-    'imageUrl',
-    'file_path',
-    'filePath',
-    'filename',
-    'file',
-  ]);
+  const pathKey = firstPresent(props, [...VISION_PATH_KEYS]);
   if (pathKey && image.source.type === 'base64' && data) {
     const p = await writeTempImage(data, mediaType);
     payload[pathKey] = p;
@@ -261,12 +289,12 @@ async function buildToolPayload(
     return null;
   }
 
-  if ('mediaType' in props) payload.mediaType = mediaType;
-  if ('mimeType' in props) payload.mimeType = mediaType;
-  if ('media_type' in props) payload.media_type = mediaType;
-  if ('prompt' in props) payload.prompt = prompt;
-  if ('query' in props) payload.query = prompt;
-  if ('instruction' in props) payload.instruction = prompt;
+  for (const key of VISION_MEDIA_TYPE_KEYS) {
+    if (key in props) payload[key] = mediaType;
+  }
+  for (const key of VISION_PROMPT_KEYS) {
+    if (key in props) payload[key] = prompt;
+  }
   const built: { payload: Record<string, unknown>; cleanup?: () => Promise<void> } = { payload };
   if (cleanup !== undefined) built.cleanup = cleanup;
   return built;
