@@ -17,6 +17,22 @@ const API_VERSION = '^0.1.10';
 
 type ConventionalType = 'feat' | 'fix' | 'docs' | 'style' | 'refactor' | 'test' | 'chore' | 'perf' | 'ci' | 'build' | 'revert';
 
+// Module-level state, shared between `setup`, `teardown`, and `health`.
+//
+// Why module-level? The Plugin interface in @wrongstack/core does not
+// thread state from `setup` → `teardown`. Today `git-autocommit` holds
+// no in-process resources (everything goes through `execFileSync`),
+// but `health()` wants to report a commit count and last-commit hash
+// that survive the function-call boundary — and a future reload-cycle
+// audit could turn those into resource-tracking requirements the same
+// way `cron` and `file-watcher` needed timers cleared (H1 audit,
+// 2026-06-03). Module-level state is the path of least friction: it
+// gives `teardown` something concrete to reset and `health()` something
+// concrete to report. Setup re-zeros the counters (idempotent re-init
+// on plugin reload); teardown clears them and logs.
+const commitCount = { value: 0 };
+const lastCommit = { hash: null as string | null, at: null as string | null };
+
 // ---------------------------------------------------------------------------
 // Git helpers
 // ---------------------------------------------------------------------------
@@ -204,6 +220,13 @@ const plugin: Plugin = {
   },
 
   setup(api) {
+    // Idempotent re-init: zero the counters on every reload so the
+    // counters reported by health() reflect the current plugin lifetime,
+    // not the accumulated history across reloads.
+    commitCount.value = 0;
+    lastCommit.hash = null;
+    lastCommit.at = null;
+
     const extConfig = api.config.extensions?.['git-autocommit'] as Record<string, unknown> | undefined;
     const opts = {
       conventionalCommits: (extConfig?.['conventionalCommits'] as boolean) ?? true,
@@ -348,6 +371,12 @@ const plugin: Plugin = {
         catch (err: unknown) { return { ok: false, error: `Failed to commit: ${err instanceof Error ? err.message : String(err)}` }; }
 
         api.log.info('git-autocommit: created commit', { hash, type, scope });
+
+        // Bump the health counters only on success — a failed commit
+        // must not show up in /diag plugins as having happened.
+        commitCount.value += 1;
+        lastCommit.hash = String(hash);
+        lastCommit.at = new Date().toISOString();
         try {
           await api.session.append({
             type: 'git-autocommit:commit',
@@ -385,6 +414,47 @@ const plugin: Plugin = {
       version: '0.2.0',
       conventionalCommits: opts.conventionalCommits,
     });
+  },
+
+  teardown(api) {
+    // git-autocommit has no in-process resources to release (every
+    // git interaction goes through `execFileSync` and finishes before
+    // the tool returns), but we still want a symmetric teardown so:
+    //   1. /diag plugins can observe the unload
+    //   2. The counters reset cleanly on the next setup() — without
+    //      this, a reload that skips a successful commit would leave
+    //      stale counts in health().
+    // Snap the current values for the log line, then zero them so
+    // the next setup() starts fresh (matching the cron/file-watcher
+    // pattern from the H1 audit).
+    const finalCount = commitCount.value;
+    const finalHash = lastCommit.hash;
+    commitCount.value = 0;
+    lastCommit.hash = null;
+    lastCommit.at = null;
+    api.log.info('git-autocommit: teardown complete', {
+      commits: finalCount,
+      lastHash: finalHash,
+    });
+  },
+
+  async health() {
+    // /diag plugins wants a quick yes/no plus a useful message.
+    // `ok` reflects "did the plugin load successfully" — the plugin
+    // is otherwise healthy until git itself is unreachable, which the
+    // tool surface handles per-call. The message surfaces the last
+    // commit so an operator can confirm the plugin is still wiring
+    // commits at a glance.
+    return {
+      ok: true,
+      message:
+        commitCount.value === 0
+          ? 'git-autocommit: no commits yet this session'
+          : `git-autocommit: ${commitCount.value} commit(s), last ${String(lastCommit.hash).slice(0, 8)} at ${lastCommit.at}`,
+      commits: commitCount.value,
+      lastCommitHash: lastCommit.hash,
+      lastCommitAt: lastCommit.at,
+    };
   },
 };
 

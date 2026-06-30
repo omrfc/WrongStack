@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // per registered handle; see the audit notes for the trade-off.
 import cronPlugin from '../src/cron/index.js';
 import fileWatcherPlugin from '../src/file-watcher/index.js';
+import templateEnginePlugin from '../src/template-engine/index.js';
+import gitAutocommitPlugin from '../src/git-autocommit/index.js';
 
 interface MockApi {
   tools: { register: ReturnType<typeof vi.fn> };
@@ -16,6 +18,7 @@ interface MockApi {
   events: { emit: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn> };
   emitCustom: ReturnType<typeof vi.fn>;
   session: { append: ReturnType<typeof vi.fn> };
+  registerSystemPromptContributor: ReturnType<typeof vi.fn>;
 }
 
 function makeApi(): MockApi {
@@ -28,6 +31,7 @@ function makeApi(): MockApi {
     events: { emit: vi.fn(), on: vi.fn() },
     emitCustom: vi.fn(),
     session: { append: vi.fn() },
+    registerSystemPromptContributor: vi.fn(() => () => {}),
   };
 }
 
@@ -133,6 +137,128 @@ describe('plugin teardown (H1 regression guard)', () => {
 
       const logCalls = (api.log.info as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
       expect(logCalls).toContain('file-watcher: teardown complete');
+    });
+  });
+
+  describe('template-engine', () => {
+    // Mirror of the H1 pattern: template-engine used to declare its
+    // `templates` Map inside setup(), so teardown had no handle on it
+    // and saved templates leaked across reload cycles. The fix
+    // promotes `templates` to module scope (mirroring cron.state.jobs)
+    // and clears it in teardown.
+
+    it('teardown clears the saved-template store', async () => {
+      const api = makeApi();
+      templateEnginePlugin.setup(api as never as Parameters<typeof templateEnginePlugin.setup>[0]);
+
+      // Populate the store through the public tool surface — the same
+      // shape cron uses (execute the registered tool, not poke the Map).
+      const createTool = getTool(api, 'template_create');
+      await createTool.execute({ name: 'a', content: 'AAA' });
+      await createTool.execute({ name: 'b', content: 'BBBB' });
+
+      // Sanity: list now shows two templates
+      const listTool = getTool(api, 'template_list');
+      const before = (await listTool.execute({})) as { count: number };
+      expect(before.count).toBe(2);
+
+      // Act
+      templateEnginePlugin.teardown!(api as never as Parameters<typeof templateEnginePlugin.teardown>[0]);
+
+      // After teardown, a fresh setup() must observe an empty store.
+      // The plugin's `setup` is idempotent — re-init clears the Map —
+      // so this also exercises that contract.
+      vi.clearAllMocks();
+      templateEnginePlugin.setup(api as never as Parameters<typeof templateEnginePlugin.setup>[0]);
+      const listToolAfter = getTool(api, 'template_list');
+      const after = (await listToolAfter.execute({})) as { count: number };
+      expect(after.count).toBe(0);
+    });
+
+    it('teardown emits a completion log line and does not throw', () => {
+      const api = makeApi();
+      templateEnginePlugin.setup(api as never as Parameters<typeof templateEnginePlugin.setup>[0]);
+
+      expect(() =>
+        templateEnginePlugin.teardown!(api as never as Parameters<typeof templateEnginePlugin.teardown>[0]),
+      ).not.toThrow();
+
+      const logCalls = (api.log.info as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(logCalls).toContain('template-engine: teardown complete');
+    });
+
+    it('health() reports store size and survives teardown', async () => {
+      const api = makeApi();
+      templateEnginePlugin.setup(api as never as Parameters<typeof templateEnginePlugin.setup>[0]);
+
+      const createTool = getTool(api, 'template_create');
+      await createTool.execute({ name: 'small', content: 'x' });
+      await createTool.execute({ name: 'big', content: 'y'.repeat(1024) });
+
+      // health() must succeed and reflect the populated store
+      const before = await templateEnginePlugin.health!();
+      expect(before.ok).toBe(true);
+      expect(before.count).toBe(2);
+      expect(before.totalBytes).toBe(1 + 1024);
+      expect(before.message).toContain('2 saved template(s)');
+
+      // After teardown the store is empty; health() reflects that
+      templateEnginePlugin.teardown!(api as never as Parameters<typeof templateEnginePlugin.teardown>[0]);
+      const after = await templateEnginePlugin.health!();
+      expect(after.ok).toBe(true);
+      expect(after.count).toBe(0);
+      expect(after.totalBytes).toBe(0);
+    });
+  });
+
+  describe('git-autocommit', () => {
+    // git-autocommit has no in-process resources today (every git call
+    // is execFileSync and finishes before the tool returns). The H1
+    // audit gap that matters here is *observability*: a symmetric
+    // teardown + health() so /diag plugins can show whether the plugin
+    // wired any commits this session and so reload cycles leave no
+    // stale counter state behind.
+
+    it('teardown emits a completion log line and does not throw', () => {
+      const api = makeApi();
+      gitAutocommitPlugin.setup(api as never as Parameters<typeof gitAutocommitPlugin.setup>[0]);
+
+      expect(() =>
+        gitAutocommitPlugin.teardown!(api as never as Parameters<typeof gitAutocommitPlugin.teardown>[0]),
+      ).not.toThrow();
+
+      const logCalls = (api.log.info as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(logCalls).toContain('git-autocommit: teardown complete');
+    });
+
+    it('health() reports no commits after a fresh setup and zero after teardown', async () => {
+      const api = makeApi();
+      gitAutocommitPlugin.setup(api as never as Parameters<typeof gitAutocommitPlugin.setup>[0]);
+
+      const before = await gitAutocommitPlugin.health!();
+      expect(before.ok).toBe(true);
+      expect(before.commits).toBe(0);
+      expect(before.lastCommitHash).toBeNull();
+      expect(before.message).toContain('no commits yet');
+
+      // Teardown does not throw even with no commits recorded — the
+      // counter reset path must work from the zero state too.
+      gitAutocommitPlugin.teardown!(api as never as Parameters<typeof gitAutocommitPlugin.teardown>[0]);
+
+      const after = await gitAutocommitPlugin.health!();
+      expect(after.ok).toBe(true);
+      expect(after.commits).toBe(0);
+      expect(after.lastCommitHash).toBeNull();
+    });
+
+    it('health() returns ok even when called before setup (defensive contract)', async () => {
+      // The Plugin contract allows health() to be invoked at any time
+      // after plugin declaration. With module-level state initialized
+      // to zero, health() must report a clean "no commits" state
+      // rather than throwing on undefined access.
+      const result = await gitAutocommitPlugin.health!();
+      expect(result.ok).toBe(true);
+      expect(result.commits).toBe(0);
     });
   });
 });

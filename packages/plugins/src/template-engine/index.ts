@@ -20,6 +20,18 @@ interface StoredTemplate {
   updatedAt: string;
 }
 
+// Module-level state, shared between `setup` and `teardown`.
+//
+// Why module-level? The Plugin interface in @wrongstack/core does not
+// thread state from `setup` → `teardown`. Keeping `templates` inside
+// the setup closure made the Map unreachable from teardown, which
+// would leak the saved-template store across plugin reload cycles
+// (H1 audit pattern, 2026-06-03 — same shape as cron/file-watcher).
+// With stable Map identity at module scope, teardown can finally
+// reach the resource and clear it. Setup re-initializes the Map
+// (idempotent re-init on plugin reload); teardown releases it.
+const templates = new Map<string, StoredTemplate>();
+
 // ---------------------------------------------------------------------------
 // Template engine
 // ---------------------------------------------------------------------------
@@ -133,7 +145,11 @@ const plugin: Plugin = {
   },
 
   setup(api) {
-    const templates = new Map<string, StoredTemplate>();
+    // Idempotent re-init: drop any templates that survived a previous
+    // teardown (the H1 fix path — maps cleared in teardown, fresh maps
+    // here). If setup is called for the first time, the module-level
+    // Map is already empty.
+    templates.clear();
     const autoEscapeHtml = (api.config.extensions?.['template-engine'] as Record<string, unknown>)?.['autoEscapeHtml'] as boolean ?? true;
 
     // --- template_expand ---
@@ -365,6 +381,31 @@ const plugin: Plugin = {
     ]);
 
     api.log.info('template-engine plugin loaded', { version: '0.1.0' });
+  },
+
+  teardown(api) {
+    // Drop every saved template so the next setup() starts from a
+    // clean store (H1 fix — see module-level state comment above).
+    // Templates are pure data so this is a single Map.clear().
+    const count = templates.size;
+    templates.clear();
+    api.log.info('template-engine: teardown complete', { cleared: count });
+  },
+
+  async health() {
+    // Surface store size + total bytes via /diag plugins. Templates
+    // are small (a few KB each) so totalBytes is a useful gauge of
+    // store weight without paying for an aggregation per request.
+    let totalBytes = 0;
+    for (const t of templates.values()) {
+      totalBytes += t.content.length;
+    }
+    return {
+      ok: true,
+      message: `template-engine: ${templates.size} saved template(s), ${totalBytes} bytes total`,
+      count: templates.size,
+      totalBytes,
+    };
   },
 };
 
