@@ -236,10 +236,12 @@ describe('formatToolOutput', () => {
       JSON.stringify({ exit_code: 124, stdout: 'partial\noutput', stderr: '', timed_out: true }),
       true,
     );
+    
     expect(out[0]).toContain('exit 124');
     expect(out[0]).toContain('timed out');
     expect(out[0]).toContain('2 out');
     expect(out[1]).toContain('partial');
+    
   });
   it('bash: exit_code: null is treated as "no exit" — only the line counts render', () => {
     // Some bash failure paths (e.g. spawn ENOENT) yield exit_code: null.
