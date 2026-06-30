@@ -33,8 +33,7 @@ export async function readClipboardText(): Promise<string | null> {
   if (platform === 'win32') {
     // -Raw preserves embedded newlines; force UTF-8 so non-ASCII survives the
     // pipe. PowerShell appends one trailing newline to stdout — strip it.
-    const ps =
-      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw';
+    const ps = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw';
     const out = await runCmd('powershell', ['-NoProfile', '-Command', ps]);
     if (out == null) return null;
     const text = out.replace(/\r?\n$/, '');
@@ -140,45 +139,65 @@ const CLIPBOARD_CMD_TIMEOUT_MS = 5_000;
 
 function runCmd(cmd: string, args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(cmd, args, {
+      env: buildChildEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
     let out = '';
     let settled = false;
+    let killedByTimeout = false;
     const finish = (value: string | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(killCap);
       resolve(value);
     };
     const timer = setTimeout(() => {
+      killedByTimeout = true;
       child.kill('SIGTERM');
-      finish(null);
     }, CLIPBOARD_CMD_TIMEOUT_MS);
+    // Safety cap: if the child ignores SIGTERM, do not hang forever.
+    const killCap = setTimeout(() => finish(null), CLIPBOARD_CMD_TIMEOUT_MS + 2_000);
     child.stdout.on('data', (c) => {
       out += String(c);
     });
     child.on('error', () => finish(null));
-    child.on('exit', (code) => finish(code === 0 ? out : null));
+    child.on('exit', (code) => {
+      if (killedByTimeout) return finish(null);
+      finish(code === 0 ? out : null);
+    });
   });
 }
 
 function runCmdToFile(cmd: string, args: string[], outPath: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(cmd, args, {
+      env: buildChildEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
     const chunks: Buffer[] = [];
     let settled = false;
+    let killedByTimeout = false;
     const finish = (value: boolean) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(killCap);
       resolve(value);
     };
     const timer = setTimeout(() => {
+      killedByTimeout = true;
       child.kill('SIGTERM');
-      finish(false);
     }, CLIPBOARD_CMD_TIMEOUT_MS);
+    // Safety cap: if the child ignores SIGTERM, do not hang forever.
+    const killCap = setTimeout(() => finish(false), CLIPBOARD_CMD_TIMEOUT_MS + 2_000);
     child.stdout.on('data', (c: Buffer) => chunks.push(c));
     child.on('error', () => finish(false));
     child.on('exit', async (code) => {
+      if (killedByTimeout) return finish(false);
       if (code !== 0 || chunks.length === 0) return finish(false);
       try {
         await fs.writeFile(outPath, Buffer.concat(chunks));
