@@ -8,8 +8,6 @@ export default defineConfig({
     'shell-check': 'src/shell-check/index.ts',
     'cost-tracker': 'src/cost-tracker/index.ts',
     'file-watcher': 'src/file-watcher/index.ts',
-    'web-search': 'src/web-search/index.ts',
-    'json-path': 'src/json-path/index.ts',
     'cron': 'src/cron/index.ts',
     'template-engine': 'src/template-engine/index.ts',
     'semver-bump': 'src/semver-bump/index.ts',

@@ -1,7 +1,7 @@
 /**
  * @wrongstack/plugins — smoke tests
  *
- * Verifies that all 10 plugin modules:
+ * Verifies that all 8 plugin modules:
  *  1. Import as a default export
  *  2. Have name, apiVersion, and setup
  *  3. setup() does not throw with a minimal mock API
@@ -122,8 +122,6 @@ const PLUGIN_FILES = [
   ['shell-check',      '../src/shell-check/index.ts'],
   ['cost-tracker',    '../src/cost-tracker/index.ts'],
   ['file-watcher',     '../src/file-watcher/index.ts'],
-  ['web-search',       '../src/web-search/index.ts'],
-  ['json-path',        '../src/json-path/index.ts'],
   ['cron',             '../src/cron/index.ts'],
   ['template-engine',  '../src/template-engine/index.ts'],
   ['semver-bump',      '../src/semver-bump/index.ts'],
@@ -215,8 +213,8 @@ describe('@wrongstack/plugins — smoke tests', () => {
   }
 
   describe('plugin count', () => {
-    it('has exactly 10 plugin files', () => {
-      expect(PLUGIN_FILES).toHaveLength(10);
+    it('has exactly 8 plugin files', () => {
+      expect(PLUGIN_FILES).toHaveLength(8);
     });
   });
 

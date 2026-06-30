@@ -21,6 +21,75 @@ import type { MCPRegistry } from '@wrongstack/mcp';
 import createApi from '../plugin-api-factory.js';
 import { patchConfig } from '../utils.js';
 
+// ---------------------------------------------------------------------------
+// Deprecated plugin names — built-ins that have been merged into core
+// tools and no longer ship as separate plugins. We no longer auto-import
+// these factories, and if a user references one of these names in their
+// `config.plugins` we warn once and skip. Removal is split into two
+// phases:
+//   1. Remove the factory from BUILTIN_PLUGIN_FACTORIES (today).
+//   2. Drop the source files + subpath exports + tests from
+//      @wrongstack/plugins in a follow-up commit.
+// Keeping the source files temporarily (phase 2) means user configs
+// that hard-code `@wrongstack/plugins/web-search` as a string spec
+// still resolve at runtime — the loader receives a no-op stub plugin
+// instead of an import error. Once the user removes the entry from
+// their config, the source can be safely deleted.
+// ---------------------------------------------------------------------------
+export const DEPRECATED_PLUGIN_NAMES: Record<string, string> = {
+  'web-search': 'use the built-in `search` and `fetch` tools',
+  'json-path': 'use the built-in `json` tool with action: query | validate | transform | merge',
+};
+
+// Per-process dedupe so we don't spam the log if a user lists the
+// same deprecated name across multiple config entries (object form
+// + string form, etc.). Cleared on process restart by design —
+// startup noise is fine, mid-session noise is not.
+const deprecatedWarningsEmitted = new Set<string>();
+
+/** Test helper: reset the dedupe set between test cases. */
+export function _resetDeprecatedWarningsForTests(): void {
+  deprecatedWarningsEmitted.clear();
+}
+
+/**
+ * If `name` is in `DEPRECATED_PLUGIN_NAMES`, log a one-shot `warn`
+ * describing the migration target and return true (caller should
+ * skip the plugin). If the name is deprecated but already warned
+ * about, return true WITHOUT logging again — the caller still needs
+ * to know to skip the plugin. For unknown names, return false.
+ */
+export function warnIfDeprecatedPluginName(name: string, log: Logger): boolean {
+  const replacement = DEPRECATED_PLUGIN_NAMES[name];
+  if (!replacement) return false;
+  if (deprecatedWarningsEmitted.has(name)) return true;
+  deprecatedWarningsEmitted.add(name);
+  log.warn(
+    `[setupPlugins] plugin "${name}" is deprecated and no longer loaded — ${replacement}`,
+  );
+  return true;
+}
+
+/**
+ * Normalize a plugin spec (either a short name like `'web-search'` or a
+ * fully-qualified import path like `'@wrongstack/plugins/web-search'`)
+ * to its bare plugin name. Used to look the spec up in
+ * `DEPRECATED_PLUGIN_NAMES` regardless of how the user spelled it.
+ *
+ * Returns null if the spec is not a string we can normalize (e.g.
+ * relative paths, file URLs).
+ */
+export function pluginNameFromSpec(spec: string): string | null {
+  if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('file:')) {
+    return null;
+  }
+  // `@scope/name/sub` → 'name'; `@scope/name` → 'name'; `name/sub` → 'name'.
+  const parts = spec.split('/');
+  const last = parts[parts.length - 1];
+  if (!last) return null;
+  return last.split('?')[0] ?? null;
+}
+
 export interface PluginsWiringDeps {
   config: Config;
   container: Container;
@@ -101,8 +170,6 @@ export const BUILTIN_PLUGIN_FACTORIES: (() => Promise<Plugin>)[] = [
   },
   // ── Workspace plugins (@wrongstack/plugins subpath exports) ──────────
   async () => (await import('@wrongstack/plugins/cost-tracker')).default,
-  async () => (await import('@wrongstack/plugins/json-path')).default,
-  async () => (await import('@wrongstack/plugins/web-search')).default,
   async () => (await import('@wrongstack/plugins/file-watcher')).default,
   async () => (await import('@wrongstack/plugins/git-autocommit')).default,
   async () => (await import('@wrongstack/plugins/auto-doc')).default,
@@ -162,6 +229,13 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
           log.info(`[setupPlugins] built-in plugin "${plugin.name}" disabled by config`);
           continue;
         }
+        // Defensive: if a future PR leaves a deprecated factory in
+        // BUILTIN_PLUGIN_FACTORIES, the loader-level deprecation policy
+        // still skips it (and warns once per name). Today this branch
+        // is unreachable because we removed those factories — but the
+        // check stays so a sloppy re-add doesn't silently re-enable a
+        // retired plugin.
+        if (warnIfDeprecatedPluginName(plugin.name, log)) continue;
         builtinPlugins.push(plugin);
       } catch (err) {
         log.warn('[setupPlugins] builtin plugin failed to load:', err);
@@ -175,6 +249,16 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
     for (const p of config.plugins ?? []) {
       if (typeof p === 'object' && p.enabled === false) continue;
       const spec = typeof p === 'string' ? p : p.name;
+      // Deprecation policy: if the spec resolves to a deprecated plugin
+      // name (either as `'web-search'` or `'@wrongstack/plugins/web-search'`),
+      // warn once and skip the dynamic import. Today this means
+      // web-search/json-path stub plugins silently load — after the
+      // source files are deleted (phase 2), this branch becomes the
+      // only line of defense.
+      const bareName = pluginNameFromSpec(spec);
+      if (bareName && warnIfDeprecatedPluginName(bareName, log)) {
+        continue;
+      }
       try {
         const mod = (await import(spec)) as { default?: Plugin | undefined };
         if (mod.default) userPlugins.push(mod.default);

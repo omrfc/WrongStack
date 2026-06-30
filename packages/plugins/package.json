@@ -1,7 +1,7 @@
 {
   "name": "@wrongstack/plugins",
   "version": "0.277.2",
-  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, web-search, json-path, cron, template-engine, semver-bump",
+  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump",
   "license": "MIT",
   "author": "ECOSTACK TECHNOLOGY OÜ",
   "type": "module",
@@ -31,14 +31,6 @@
     "./file-watcher": {
       "types": "./dist/file-watcher.d.ts",
       "import": "./dist/file-watcher.js"
-    },
-    "./web-search": {
-      "types": "./dist/web-search.d.ts",
-      "import": "./dist/web-search.js"
-    },
-    "./json-path": {
-      "types": "./dist/json-path.d.ts",
-      "import": "./dist/json-path.js"
     },
     "./cron": {
       "types": "./dist/cron.d.ts",

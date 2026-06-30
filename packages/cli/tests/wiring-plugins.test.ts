@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { setupPlugins } from '../src/wiring/plugins.js';
+import {
+  setupPlugins,
+  DEPRECATED_PLUGIN_NAMES,
+  pluginNameFromSpec,
+  warnIfDeprecatedPluginName,
+  _resetDeprecatedWarningsForTests,
+} from '../src/wiring/plugins.js';
 import type { Config, Logger } from '@wrongstack/core';
 
 // loadPlugins is the one external function we care about — capture its
@@ -55,6 +61,7 @@ function baseDeps(overrides: Partial<Config> = {}) {
 
 beforeEach(() => {
   loadPluginsMock.mockClear();
+  _resetDeprecatedWarningsForTests();
 });
 
 describe('setupPlugins', () => {
@@ -202,5 +209,168 @@ describe('setupPlugins', () => {
     opts.apiFactory({ name: 'virtual:test-plugin' });
     expect(apiCfgCapture).toHaveBeenCalled();
     expect(deps.sessionWriter.append).toHaveBeenCalledWith({ type: 't', ts: 'now', data: 'x' });
+  });
+});
+
+// ── deprecated plugin names (loader-level deprecation policy) ────────────
+//
+// `web-search` and `json-path` were retired (their tools were merged
+// into the built-in `search`/`fetch`/`json` tools). The CLI wiring now
+// skips any user config that names these plugins and emits a one-shot
+// warning pointing at the migration target. The tests below cover both
+// surfaces — the helper (`warnIfDeprecatedPluginName`) and the wiring
+// (`setupPlugins` integration).
+
+describe('plugin deprecation policy', () => {
+  describe('DEPRECATED_PLUGIN_NAMES', () => {
+    it('lists web-search and json-path with migration hints', () => {
+      expect(DEPRECATED_PLUGIN_NAMES['web-search']).toContain('search');
+      expect(DEPRECATED_PLUGIN_NAMES['web-search']).toContain('fetch');
+      expect(DEPRECATED_PLUGIN_NAMES['json-path']).toContain('json');
+    });
+  });
+
+  describe('pluginNameFromSpec', () => {
+    it('returns the basename for a fully-qualified spec', () => {
+      expect(pluginNameFromSpec('@wrongstack/plugins/web-search')).toBe('web-search');
+      expect(pluginNameFromSpec('@wrongstack/plugins/json-path')).toBe('json-path');
+    });
+
+    it('returns the input unchanged for a short name', () => {
+      expect(pluginNameFromSpec('web-search')).toBe('web-search');
+      expect(pluginNameFromSpec('json-path')).toBe('json-path');
+    });
+
+    it('returns null for relative paths, URLs, and fs paths', () => {
+      expect(pluginNameFromSpec('./local-plugin')).toBeNull();
+      expect(pluginNameFromSpec('/abs/path/plugin')).toBeNull();
+      expect(pluginNameFromSpec('file:///abs/path')).toBeNull();
+    });
+  });
+
+  describe('warnIfDeprecatedPluginName', () => {
+    it('returns false and does not log for unknown names', () => {
+      const log = fakeLogger();
+      expect(warnIfDeprecatedPluginName('not-deprecated', log)).toBe(false);
+      expect(log.warn).not.toHaveBeenCalled();
+    });
+
+    it('warns once for a deprecated name and returns true', () => {
+      const log = fakeLogger();
+      expect(warnIfDeprecatedPluginName('web-search', log)).toBe(true);
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      expect((log.warn as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toContain(
+        'web-search',
+      );
+      expect((log.warn as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toContain(
+        'deprecated',
+      );
+    });
+
+    it('dedupes: a second call for the same name does not log again', () => {
+      const log = fakeLogger();
+      // First call: warns + returns true (caller skips plugin).
+      expect(warnIfDeprecatedPluginName('json-path', log)).toBe(true);
+      // Subsequent calls: still return true (caller should skip),
+      // but don't log again — keeps the noise at one line.
+      expect(warnIfDeprecatedPluginName('json-path', log)).toBe(true);
+      expect(warnIfDeprecatedPluginName('json-path', log)).toBe(true);
+      expect(log.warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('dedupes are per-name: json-path warn does not silence web-search', () => {
+      const log = fakeLogger();
+      warnIfDeprecatedPluginName('json-path', log);
+      warnIfDeprecatedPluginName('web-search', log);
+      expect(log.warn).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('setupPlugins integration', () => {
+    it('skips a user plugin named web-search (object form) and warns once', async () => {
+      const deps = baseDeps({
+        plugins: [{ name: 'web-search', enabled: true }] as never,
+      });
+      await setupPlugins(deps);
+      // The wiring short-circuits when no plugins survive filtering —
+      // loadPlugins is NOT called. That is the desired contract: an
+      // empty plugin set means "nothing to load", not "load zero".
+      expect(loadPluginsMock).not.toHaveBeenCalled();
+      // Warning fires once with the migration hint
+      expect(deps.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('web-search'),
+      );
+      expect(deps.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('search'),
+      );
+    });
+
+    it('skips a user plugin named @wrongstack/plugins/json-path (qualified spec)', async () => {
+      const deps = baseDeps({
+        plugins: ['@wrongstack/plugins/json-path'] as never,
+      });
+      await setupPlugins(deps);
+      expect(loadPluginsMock).not.toHaveBeenCalled();
+      expect(deps.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('json-path'),
+      );
+    });
+
+    it('dedupes across object-form and string-form references in the same config', async () => {
+      const deps = baseDeps({
+        plugins: [
+          { name: 'web-search', enabled: true },
+          '@wrongstack/plugins/web-search',
+        ] as never,
+      });
+      await setupPlugins(deps);
+      // Both entries resolve to bare name 'web-search' — the helper's
+      // per-process dedupe means the warning fires once and both
+      // entries are skipped before reaching the dynamic import.
+      const deprecationWarns = (deps.log.warn as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('deprecated'),
+      );
+      expect(deprecationWarns).toHaveLength(1);
+      // No "failed to load" warn — both entries were short-circuited
+      // before reaching the dynamic import.
+      const failedLoadWarns = (deps.log.warn as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('failed to load'),
+      );
+      expect(failedLoadWarns).toHaveLength(0);
+      // loadPlugins receives zero plugins → not called.
+      expect(loadPluginsMock).not.toHaveBeenCalled();
+    });
+
+    it('does not warn or skip plugins that share a substring with a deprecated name', async () => {
+      // A plugin named 'web-search-extras' would NOT trip the policy
+      // (basename match is exact). We model a non-deprecated user
+      // plugin to confirm the wiring doesn't false-positive.
+      const deps = baseDeps({
+        plugins: ['virtual:test-plugin'] as never,
+      });
+      await setupPlugins(deps);
+      // The non-deprecated plugin loads normally
+      expect(loadPluginsMock).toHaveBeenCalledTimes(1);
+      const warnCalls = (deps.log.warn as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c) => typeof c[0] === 'string' && c[0].includes('deprecated'),
+      );
+      expect(warnCalls).toHaveLength(0);
+    });
+
+    it('a mix of deprecated and active user plugins still loads the active ones', async () => {
+      // web-search should be skipped; virtual:test-plugin should load.
+      const deps = baseDeps({
+        plugins: [
+          { name: 'web-search', enabled: true },
+          'virtual:test-plugin',
+        ] as never,
+      });
+      await setupPlugins(deps);
+      expect(loadPluginsMock).toHaveBeenCalledTimes(1);
+      const [plugins] = loadPluginsMock.mock.calls[0]!;
+      const names = (plugins as Array<{ name: string }>).map((p) => p.name);
+      expect(names).toContain('virtual:test-plugin');
+      expect(names).not.toContain('web-search');
+    });
   });
 });
