@@ -21,7 +21,7 @@ npm i -g wrongstack && wrongstack
 
 ---
 
-WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **multi-agent Director orchestration**, **Brain-governed policy decisions**, and **collaborative debugging** — and walks you through full **Spec-Driven Development** cycles. It ships with **36 built-in tools**, **22 skills**, **8 core plugins** + **10 bundled** in `@wrongstack/plugins`, and **~110 providers** pulled live from [models.dev](https://models.dev) — no hardcoded model names, no hardcoded pricing, no hardcoded lists. Secrets are **AES-256-GCM** encrypted at rest with a per-machine key; every tool call clears a **per-tool permission policy**. Everything lives under `~/.wrongstack/` — the only thing you'd ever commit is `.wrongstack/AGENTS.md`.
+WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **multi-agent Director orchestration**, **Brain-governed policy decisions**, and **collaborative debugging** — and walks you through full **Spec-Driven Development** cycles. It ships with **36 built-in tools**, **22 skills**, **8 core plugins** + **10 bundled** in `@wrongstack/plugins`, and **~140 providers** pulled live from [models.dev](https://models.dev) — 138 with a built-in transport (8 `anthropic` / 3 `openai` / 126 `openai-compatible` / 1 `google`) plus 3 OAuth families (`anthropic-oauth`, `openai-codex`, `github-copilot`). No hardcoded model names, no hardcoded pricing, no hardcoded lists. Secrets are **AES-256-GCM** encrypted at rest with a per-machine key; every tool call clears a **per-tool permission policy**. Everything lives under `~/.wrongstack/` — the only thing you'd ever commit is `.wrongstack/AGENTS.md`.
 
 ### ✨ Why it slaps
 
@@ -29,7 +29,7 @@ WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **mu
 - 🤖 **A fleet, not a lone agent** — a 47-role roster + smart dispatcher fan out under a Director, each subagent fully isolated with its own budget and JSONL transcript.
 - 🧠 **Brain as an authority seam** — risky AutoPhase and Director choices can be auto-decided by policy, denied, or escalated to the human through the TUI.
 - ♾️ **Set a goal, walk away** — `/goal` locks in a contract and the eternal / parallel engines grind until it's _verifiably_ done.
-- 🔌 **~110 providers, zero lock-in** — Anthropic, OpenAI, Google, and ~100 OpenAI-compatible endpoints, catalog refreshed from models.dev at boot.
+- 🔌 **~140 providers, zero lock-in** — Anthropic, OpenAI, Google, and ~125 OpenAI-compatible endpoints, catalog refreshed from models.dev at boot.
 - 🔑 **Sign in with a subscription** — authenticate with a **ChatGPT (Codex)**, **Claude Pro/Max**, or **GitHub Copilot** subscription over OAuth, *alongside* (not instead of) API keys. See [`docs/oauth-signin.md`](docs/oauth-signin.md).
 - 🔎 **Fast model switching** — the TUI `/model` picker supports type-to-search filtering with scroll-window navigation, and `wstack models` supports search + pagination.
 - 🔐 **Locked down by default** — encrypted secrets, SSRF guards on every redirect hop, fail-closed subagents, symlink containment, plugin trust tiers, WebUI redaction, and cloud-sync path guards.
@@ -320,13 +320,13 @@ Sonnet 4.6) serves its full **1M-token** context on this path automatically.
 > programmatic use is an API key; sign in with a subscription only if you accept
 > that risk. Full reference + per-provider details: [`docs/oauth-signin.md`](docs/oauth-signin.md).
 
-### Provider catalog (~110 providers, 4 API-key families + 3 subscription families + 1 stub)
+### Provider catalog (~140 providers, 4 API-key families + 3 subscription families + 1 stub)
 
 | Family | Transport | Providers |
 |--------|-----------|-----------|
 | `anthropic` | Native Claude API + SSE | Anthropic, MiniMax, Kimi, Google Vertex (Anthropic) |
 | `openai` | Native OpenAI Chat Completions + SSE | OpenAI, Perplexity Agent, Vivgrid |
-| `openai-compatible` | OpenAI-spec endpoints + SSE | ~100 providers: Mistral, Groq, DeepSeek, OpenRouter, Together, xAI, Cerebras, Ollama, Fireworks, Moonshot, GLM, Alibaba, … |
+| `openai-compatible` | OpenAI-spec endpoints + SSE | ~125 providers: Mistral, Groq, DeepSeek, OpenRouter, Together, xAI, Cerebras, Ollama, Fireworks, Moonshot, GLM, Alibaba, … |
 | `google` | Gemini `:streamGenerateContent?alt=sse` | Google AI Studio |
 | `anthropic-oauth` | Claude Messages API + Bearer (OAuth) | Claude Pro/Max — *Sign in with Claude* |
 | `openai-codex` | ChatGPT Responses API (OAuth) | ChatGPT Plus/Pro/Team — *Sign in with ChatGPT* |
@@ -597,7 +597,7 @@ wrongstack audit <id>     # Verify the SHA-256-chained tool-call audit trail
 wrongstack config         # Show / edit config
 wrongstack tools          # List registered tools
 wrongstack skills         # List discovered skills
-wrongstack providers      # ~110 providers grouped by wire family
+wrongstack providers      # ~140 providers grouped by wire family
 wrongstack models [prov] [--search <term>] [--page N] [--per-page N]  # searchable, paginated model list
 wrongstack models hide|show|hidden|reset <id>  # curate which catalog models appear in pickers + listings
 wrongstack mcp            # Inspect connected MCP servers
