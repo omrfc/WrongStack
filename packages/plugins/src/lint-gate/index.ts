@@ -42,6 +42,8 @@ const state = {
   invocationCount: 0,
   /** Times the linter found issues at or above the severity threshold. */
   hitCount: 0,
+  /** Times the linter auto-fixed content (fix mode only). */
+  fixCount: 0,
   /** Times the linter process itself failed (timeout, not installed, etc.). */
   linterErrorCount: 0,
   /** Hook handle for teardown. */
@@ -61,7 +63,7 @@ const state = {
 // ---------------------------------------------------------------------------
 
 type Linter = 'biome' | 'eslint' | 'auto';
-type Mode = 'block' | 'warn';
+type Mode = 'block' | 'warn' | 'fix';
 type Severity = 'error' | 'warning';
 
 interface LintGateConfig {
@@ -83,7 +85,7 @@ function readConfig(raw: unknown): LintGateConfig {
   const r = raw as Record<string, unknown>;
   return {
     linter: r['linter'] === 'biome' || r['linter'] === 'eslint' ? r['linter'] : 'auto',
-    mode: r['mode'] === 'block' ? 'block' : 'warn',
+    mode: r['mode'] === 'block' ? 'block' : r['mode'] === 'fix' ? 'fix' : 'warn',
     severity: r['severity'] === 'warning' ? 'warning' : 'error',
     timeoutMs: typeof r['timeoutMs'] === 'number' ? r['timeoutMs'] : DEFAULTS.timeoutMs,
   };
@@ -173,6 +175,54 @@ function lintContent(
 }
 
 /**
+ * Run the linter with auto-fix enabled, returning the fixed content.
+ * Biome: `biome check --write`. ESLint: `eslint --fix`.
+ *
+ * The fix runs on the SAME temp file as `lintContent`. After the
+ * linter exits, the file is read back and returned. If the linter
+ * fails or the content is unchanged, the original content is returned
+ * (so the caller falls through to warn mode gracefully).
+ *
+ * @internal
+ */
+function lintAndFix(
+  content: string,
+  filePath: string,
+  linter: { cmd: string; args: string[]; name: string },
+  timeoutMs: number,
+): string {
+  const ext = filePath.includes('.') ? filePath.slice(filePath.lastIndexOf('.')) : '.ts';
+  const tmpDir = mkdtempSync(join(tmpdir(), 'lint-gate-fix-'));
+  const tmpFile = join(tmpDir, `input${ext}`);
+  try {
+    writeFileSync(tmpFile, content, 'utf-8');
+    // Build the fix command: biome uses `check --write`, eslint uses `--fix`.
+    const fixArgs =
+      linter.name === 'biome'
+        ? ['biome', 'check', '--write', tmpFile]
+        : ['eslint', '--fix', tmpFile];
+    try {
+      execSync(`${linter.cmd} ${fixArgs.map((a) => `"${a}"`).join(' ')}`, {
+        encoding: 'utf-8',
+        timeout: timeoutMs,
+        cwd: process.cwd(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (err: unknown) {
+      const e = err as { killed?: boolean };
+      if (e.killed) return content; // timeout — return original
+      // Linters exit non-zero even after fixing. The file may still
+      // have been written to — read it back regardless.
+    }
+    return readFileSync(tmpFile, 'utf-8');
+  } catch {
+    return content; // any error → return original
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Parse linter JSON output into a flat list of issues.
  * Biome: `{ diagnostics: [{ category, severity, description, location }] }`
  * ESLint: `[{ messages: [{ ruleId, severity, message, line }] }]`
@@ -254,9 +304,9 @@ const plugin: Plugin = {
       },
       mode: {
         type: 'string',
-        enum: ['block', 'warn'],
+        enum: ['block', 'warn', 'fix'],
         default: 'warn',
-        description: '"block" refuses the write/edit; "warn" injects lint errors as context but lets the call through.',
+        description: '"block" refuses the write/edit; "warn" injects lint errors as context; "fix" auto-runs the linter with --write/--fix and substitutes the fixed content (write only; edit falls back to warn).',
       },
       severity: {
         type: 'string',
@@ -277,6 +327,7 @@ const plugin: Plugin = {
     // Idempotent re-init (H1 pattern).
     state.invocationCount = 0;
     state.hitCount = 0;
+    state.fixCount = 0;
     state.linterErrorCount = 0;
     state.hookUnregister = null;
     state.lastResult = null;
@@ -297,7 +348,7 @@ const plugin: Plugin = {
     const hook = (input: {
       toolName?: string | undefined;
       toolInput?: unknown;
-    }): { decision?: 'block' | 'allow' | undefined; reason?: string; additionalContext?: string } | void => {
+    }): { decision?: 'block' | 'allow' | undefined; reason?: string; modifiedInput?: Record<string, unknown>; additionalContext?: string } | void => {
       if (!linter) return; // no linter → no-op
 
       const toolName = input.toolName ?? '';
@@ -368,6 +419,32 @@ const plugin: Plugin = {
         };
       }
 
+      if (cfg.mode === 'fix') {
+        // Auto-fix only works for `write` — we can replace the entire
+        // content. For `edit`, we can't safely re-derive the
+        // new_string from a whole-file fix, so fall through to warn.
+        if (toolName === 'write') {
+          const fixedContent = lintAndFix(content, filePath, linter, cfg.timeoutMs);
+          if (fixedContent !== content) {
+            // Linter changed the content — inject it.
+            state.fixCount += 1;
+            api.log.info(`lint-gate: auto-fixed ${filtered.length} issue(s) in ${filePath}`, {
+              severity: cfg.severity,
+            });
+            return {
+              decision: 'allow',
+              modifiedInput: { ...inp, content: fixedContent },
+              additionalContext:
+                `\n✅ lint-gate: auto-fixed ${filtered.length} linter issue(s) in the content ` +
+                `being written to '${filePath}'. The fixed content has been substituted automatically.`,
+            };
+          }
+          // Linter didn't change anything (unfixable rules) — fall
+          // through to warn.
+        }
+        // edit or no fix applied — warn instead.
+      }
+
       // mode === 'warn' — inject context but let the call through.
       api.log.info(`lint-gate: warning on ${toolName} for ${filePath} — ${filtered.length} issue(s)`, {
         severity: cfg.severity,
@@ -401,6 +478,7 @@ const plugin: Plugin = {
           counters: {
             invocations: state.invocationCount,
             hits: state.hitCount,
+            fixes: state.fixCount,
             linterErrors: state.linterErrorCount,
           },
           lastResult: state.lastResult,
@@ -428,10 +506,12 @@ const plugin: Plugin = {
     const final = {
       invocations: state.invocationCount,
       hits: state.hitCount,
+      fixes: state.fixCount,
       linterErrors: state.linterErrorCount,
     };
     state.invocationCount = 0;
     state.hitCount = 0;
+    state.fixCount = 0;
     state.linterErrorCount = 0;
     state.lastResult = null;
     api.log.info('lint-gate: teardown complete', { final });
@@ -447,6 +527,7 @@ const plugin: Plugin = {
       counters: {
         invocations: state.invocationCount,
         hits: state.hitCount,
+        fixes: state.fixCount,
         linterErrors: state.linterErrorCount,
       },
       lastResult: state.lastResult,

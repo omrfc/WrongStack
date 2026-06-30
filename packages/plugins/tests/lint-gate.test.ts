@@ -130,4 +130,20 @@ describe('config parsing', () => {
     const status = await getStatusTool(api).execute({});
     expect(status.mode).toBe('warn'); // default
   });
+
+  it('parses fix mode from config', async () => {
+    const api = makeApi({
+      extensions: { 'lint-gate': { mode: 'fix' } },
+    });
+    lintGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.mode).toBe('fix');
+  });
+
+  it('reports fixes counter in status', async () => {
+    const api = makeApi();
+    lintGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.counters.fixes).toBe(0);
+  });
 });
