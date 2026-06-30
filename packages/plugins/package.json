@@ -1,7 +1,7 @@
 {
   "name": "@wrongstack/plugins",
   "version": "0.277.2",
-  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump, secret-scanner",
+  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump, secret-scanner, todo-tracker",
   "license": "MIT",
   "author": "ECOSTACK TECHNOLOGY OÜ",
   "type": "module",
@@ -47,6 +47,10 @@
     "./secret-scanner": {
       "types": "./dist/secret-scanner.d.ts",
       "import": "./dist/secret-scanner.js"
+    },
+    "./todo-tracker": {
+      "types": "./dist/todo-tracker.d.ts",
+      "import": "./dist/todo-tracker.js"
     }
   },
   "files": [

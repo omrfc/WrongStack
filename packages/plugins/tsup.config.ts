@@ -12,6 +12,7 @@ export default defineConfig({
     'template-engine': 'src/template-engine/index.ts',
     'semver-bump': 'src/semver-bump/index.ts',
     'secret-scanner': 'src/secret-scanner/index.ts',
+    'todo-tracker': 'src/todo-tracker/index.ts',
   },
   format: ['esm'],
   dts: true,

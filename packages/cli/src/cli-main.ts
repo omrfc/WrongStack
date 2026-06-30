@@ -957,7 +957,17 @@ export async function main(argv: string[]): Promise<number> {
     promptLoader: config.features.prompts === false ? undefined : promptLoader,
     configStore,
     vault,
-    paths: wpaths,
+    paths: {
+      globalRoot: wpaths.globalRoot,
+      globalConfig: wpaths.globalConfig,
+      globalSkills: wpaths.globalSkills,
+      globalPrompts: wpaths.globalPrompts,
+      globalMemory: wpaths.globalMemory,
+      historyFile: wpaths.historyFile,
+      syncConfig: wpaths.syncConfig,
+      projectDir: wpaths.projectDir,
+      projectGoal: wpaths.projectGoal,
+    },
     hookRegistry,
   });
 

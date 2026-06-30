@@ -130,6 +130,15 @@ export interface PluginsWiringDeps {
     globalMemory: string;
     historyFile: string;
     syncConfig: string;
+    /**
+     * Per-project root (`~/.wrongstack/projects/<slug>/`). Plugins that
+     * need project-scoped state (todo-tracker, etc.) should put their
+     * files here so they follow the same lifecycle as goals/SDD
+     * boards/tasks.
+     */
+    projectDir?: string;
+    /** Per-project goal.json path. Useful as a sibling anchor. */
+    projectGoal?: string;
   };
 }
 
@@ -185,6 +194,7 @@ export const BUILTIN_PLUGIN_FACTORIES: (() => Promise<Plugin>)[] = [
   async () => (await import('@wrongstack/plugins/template-engine')).default,
   async () => (await import('@wrongstack/plugins/semver-bump')).default,
   async () => (await import('@wrongstack/plugins/secret-scanner')).default,
+  async () => (await import('@wrongstack/plugins/todo-tracker')).default,
   // ── LSP plugin ──────────────────────────────────────────────────────
   async () => (await import('@wrongstack/plug-lsp')).default,
   // ── Telegram plugin ─────────────────────────────────────────────────
