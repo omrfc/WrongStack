@@ -457,9 +457,7 @@ describe('modelsRegistry hydration', () => {
         },
       },
     });
-    costTrackerPlugin.setup(api as any);
-    // The hydration is fire-and-forget — give it a tick to settle.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await costTrackerPlugin.setup(api as any);
     const result = await costTrackerPlugin.health!();
     expect(result.registryCount).toBe(2);
   });
@@ -476,8 +474,7 @@ describe('modelsRegistry hydration', () => {
         },
       },
     });
-    costTrackerPlugin.setup(api as any);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await costTrackerPlugin.setup(api as any);
 
     const handler = getResponseHandler(api);
     handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
@@ -502,8 +499,7 @@ describe('modelsRegistry hydration', () => {
     api.config.extensions['cost-tracker'] = {
       pricingOverrides: { 'gpt-4o': { input: 100, output: 200 } },
     };
-    costTrackerPlugin.setup(api as any);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await costTrackerPlugin.setup(api as any);
 
     const handler = getResponseHandler(api);
     handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
@@ -529,8 +525,7 @@ describe('modelsRegistry hydration', () => {
         },
       },
     });
-    costTrackerPlugin.setup(api as any);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await costTrackerPlugin.setup(api as any);
 
     // Only the valid entry should land in the registry map.
     const result = await costTrackerPlugin.health!();
@@ -539,8 +534,7 @@ describe('modelsRegistry hydration', () => {
 
   it('falls back to bundled PRICING when registry.load() throws', async () => {
     const { api } = makeApiWithRegistry(new Error('network unreachable'));
-    costTrackerPlugin.setup(api as any);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await costTrackerPlugin.setup(api as any);
 
     // The setup must not throw and bundledFromRegistry stays empty.
     const result = await costTrackerPlugin.health!();
@@ -565,7 +559,7 @@ describe('modelsRegistry hydration', () => {
     // Default makeApi() has no modelsRegistry field — confirms the
     // "host did not provide one" path is handled.
     const api = makeApi();
-    costTrackerPlugin.setup(api as any);
+    await costTrackerPlugin.setup(api as any);
     const result = await costTrackerPlugin.health!();
     expect(result.registryCount).toBe(0);
 
@@ -588,8 +582,7 @@ describe('modelsRegistry hydration', () => {
         models: { 'gpt-4o': { id: 'gpt-4o', cost: { input: 7, output: 21 } } },
       },
     });
-    costTrackerPlugin.setup(api as any);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await costTrackerPlugin.setup(api as any);
     const before = await costTrackerPlugin.health!();
     expect(before.registryCount).toBe(1);
 

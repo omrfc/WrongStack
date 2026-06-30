@@ -230,13 +230,10 @@ const plugin: Plugin = {
     },
   },
 
-  setup(api) {
+  async setup(api) {
     // Idempotent re-init: clear any overrides that survived a previous
     // teardown, then apply the user-supplied ones. Mirroring the
     // template-engine / git-autocommit / cron / file-watcher pattern.
-    // Reassignment of a module-level const... actually we declared
-    // pricingOverrides as a `const` reference with a mutable inner
-    // shape — so clear the keys instead of reassigning.
     for (const k of Object.keys(pricingOverrides)) {
       delete pricingOverrides[k];
     }
@@ -247,51 +244,8 @@ const plugin: Plugin = {
     lastCost.model = null;
     lastCost.at = null;
 
-    // Hydrate `bundledFromRegistry` from the host's models registry if
-    // one is provided. The registry's `load()` is cached (subsequent
-    // calls are in-memory) and returns the models.dev payload. We
-    // flatten it into a lowercase-keyed { input, output } map. On any
-    // failure (no network, no cache, no model entries) we log a
-    // warning and proceed with the bundled PRICING table as the
-    // baseline — the lookup chain's other layers still cover
-    // common models.
-    if (api.modelsRegistry) {
-      void (async () => {
-        try {
-          const payload = await api.modelsRegistry!.load();
-          let hydrated = 0;
-          for (const provider of Object.values(payload)) {
-            const providerModels = provider?.models;
-            if (!providerModels) continue;
-            for (const [modelId, model] of Object.entries(providerModels)) {
-              const cost = model?.cost;
-              if (
-                cost &&
-                typeof cost.input === 'number' &&
-                typeof cost.output === 'number'
-              ) {
-                bundledFromRegistry[modelId.toLowerCase()] = {
-                  input: cost.input,
-                  output: cost.output,
-                };
-                hydrated += 1;
-              }
-            }
-          }
-          api.log.info('cost-tracker: hydrated pricing from models registry', {
-            models: hydrated,
-          });
-        } catch (err) {
-          // Defensive: a broken or absent registry must not break
-          // cost-tracking. The lookup chain falls through to PRICING.
-          api.log.warn(
-            'cost-tracker: failed to hydrate pricing from models registry — using bundled PRICING',
-            err,
-          );
-        }
-      })();
-    }
-
+    // Apply user-supplied pricing overrides from config first (sync —
+    // available immediately for the first cost calculation).
     const rawConfig = api.config.extensions?.['cost-tracker'] as
       | Record<string, unknown>
       | undefined;
@@ -303,9 +257,53 @@ const plugin: Plugin = {
         const input = v['input'];
         const output = v['output'];
         if (typeof input !== 'number' || typeof output !== 'number') continue;
-        // Lowercase keys so user-supplied entries match the same
-        // case-insensitive lookup that estimateCost uses.
         pricingOverrides[model.toLowerCase()] = { input, output };
+      }
+    }
+
+    // Hydrate `bundledFromRegistry` from the host's models registry.
+    // This is now AWAITED (not fire-and-forget) so the registry layer
+    // is populated BEFORE setup() returns — guaranteeing the first
+    // `provider.response` event sees the full lookup chain.
+    //
+    // The registry's `load()` is cached (subsequent calls are
+    // in-memory), so the await is near-instant on warm cache. On cold
+    // start the network fetch is bounded by the registry's own
+    // refreshTimeoutMs (default 15s). On any failure we log a warning
+    // and proceed with the bundled PRICING table — the lookup chain's
+    // other layers still cover common models.
+    if (api.modelsRegistry) {
+      try {
+        const payload = await api.modelsRegistry.load();
+        let hydrated = 0;
+        for (const provider of Object.values(payload)) {
+          const providerModels = provider?.models;
+          if (!providerModels) continue;
+          for (const [modelId, model] of Object.entries(providerModels)) {
+            const cost = model?.cost;
+            if (
+              cost &&
+              typeof cost.input === 'number' &&
+              typeof cost.output === 'number'
+            ) {
+              bundledFromRegistry[modelId.toLowerCase()] = {
+                input: cost.input,
+                output: cost.output,
+              };
+              hydrated += 1;
+            }
+          }
+        }
+        api.log.info('cost-tracker: hydrated pricing from models registry', {
+          models: hydrated,
+        });
+      } catch (err) {
+        // Defensive: a broken or absent registry must not break
+        // cost-tracking. The lookup chain falls through to PRICING.
+        api.log.warn(
+          'cost-tracker: failed to hydrate pricing from models registry — using bundled PRICING',
+          err,
+        );
       }
     }
 
