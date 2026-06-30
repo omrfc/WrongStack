@@ -183,12 +183,12 @@
   },
   "dependencies": {
     "@wrongstack/core": "workspace:*",
-    "turndown": "^7.2.0",
+    "turndown": "^7.2.4",
     "typescript": "^6.0.3",
-    "undici": "^8.4.1"
+    "undici": "^8.5.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.3",
+    "@types/node": "^25.9.4",
     "tsup": "^8.5.1"
   },
   "publishConfig": {
