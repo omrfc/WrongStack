@@ -55,6 +55,66 @@ describe('resolveWin32Command', () => {
     // No PATH → nothing found → returns original (exercises the ?? defaults).
     expect(resolveWin32Command('nope-cmd')).toBe('nope-cmd');
   });
+
+  it('resolves a bare command to a .exe in a path containing spaces (win32)', () => {
+    // Regression: the WrongStack exec allowlist did not include `gh`, and
+    // developers reported "gh.exe unreachable due to path-with-spaces" — but
+    // the underlying resolver was actually correct. The allowlist miss was
+    // what was masking the real (working) behavior. This test pins the
+    // resolver's contract: a directory whose path contains spaces, containing
+    // a .exe matching PATHEXT, must be resolved to its full path.
+    //
+    // The actual gh.exe lives at "C:\Program Files\GitHub CLI\gh.exe" on
+    // developer workstations, so this scenario is the realistic one.
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'w32-spaces-'));
+    const dirWithSpaces = path.join(parent, 'dir with spaces');
+    fs.mkdirSync(dirWithSpaces, { recursive: true });
+    try {
+      const full = path.join(dirWithSpaces, 'mytool.exe');
+      fs.writeFileSync(full, '');
+      fs.chmodSync(full, 0o755);
+      process.env['PATHEXT'] = '.EXE';
+      process.env['PATH'] = dirWithSpaces;
+      expect(resolveWin32Command('mytool')).toBe(full);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolveWin32Command — gh.exe path-with-spaces regression', () => {
+  // Stronger regression: not just "resolver returns the right string",
+  // but "the returned path is something node:child_process.spawn() can
+  // invoke with shell:false, the same way exec.ts calls it for .exe
+  // targets". This is the path that historically failed for users trying
+  // to run `gh` from "C:\Program Files\GitHub CLI\gh.exe".
+  //
+  // Skipped off-win32 (quoting is Windows-specific) and skipped when
+  // gh is not installed (env-dependent).
+
+  it.skipIf(process.platform !== 'win32')(
+    'resolves bare "gh" to "C:\\Program Files\\GitHub CLI\\gh.exe" when installed',
+    () => {
+      const ghPath = 'C:\\Program Files\\GitHub CLI\\gh.exe';
+      if (!fs.existsSync(ghPath)) return; // env-dependent: gh not installed
+
+      // Point PATH at the dir so the resolver finds the bare name.
+      process.env['PATHEXT'] = '.EXE';
+      const sep = path.delimiter;
+      const originalPath = process.env['PATH'];
+      process.env['PATH'] = path.dirname(ghPath) + sep + (originalPath ?? '');
+
+      const resolved = resolveWin32Command('gh');
+      expect(resolved).toBe(ghPath);
+      // The path is callable: it exists and is executable.
+      expect(fs.existsSync(resolved)).toBe(true);
+      fs.accessSync(resolved, fs.constants.X_OK);
+
+      // Restore PATH so the rest of the suite isn't perturbed.
+      process.env['PATH'] = originalPath;
+    },
+  );
 });
 
 describe('assertSafeWin32ShellArgs', () => {
