@@ -140,6 +140,9 @@ describe('teardown', () => {
     setup();
     const tlog = { info: vi.fn() };
     autoDocPlugin.teardown?.({ log: tlog } as never);
-    expect(tlog.info).toHaveBeenCalledWith('auto-doc plugin unloaded');
+    expect(tlog.info).toHaveBeenCalledWith(
+      'auto-doc: teardown complete',
+      expect.objectContaining({ invocations: expect.any(Number) }),
+    );
   });
 });

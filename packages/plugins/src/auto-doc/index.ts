@@ -11,6 +11,25 @@ import type { Plugin } from '@wrongstack/core';
 const AUTO_DOC_API_VERSION = '^0.1.10';
 
 // ---------------------------------------------------------------------------
+// Module-scope state (H1 audit pattern: shared between setup, teardown,
+// health). auto-doc is fundamentally stateless — the actual work happens
+// in `runAutoDoc` per call. We track per-session invocation counts so
+// /diag plugins can report "how many docstrings this session generated".
+// Setup is idempotent: re-init zeros the counter; teardown leaves the
+// counter at zero.
+// ---------------------------------------------------------------------------
+const state = {
+  invocationCount: 0,
+  /** Last invocation summary — surfaced by health() for /diag plugins. */
+  lastInvocation: null as null | {
+    when: string;
+    files: number;
+    style: 'jsdoc' | 'tsdoc';
+    dryRun: boolean;
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Input types
 // ---------------------------------------------------------------------------
 
@@ -187,6 +206,10 @@ const plugin: Plugin = {
   },
 
   setup(api) {
+    // Idempotent re-init (H1 pattern): zero counters on reload.
+    state.invocationCount = 0;
+    state.lastInvocation = null;
+
     api.tools.register({
       name: 'auto_doc',
       description: 'Auto-generate JSDoc/TSDoc comments for functions, classes, types, and interfaces in source files. Set `dry_run: true` to preview without writing.',
@@ -204,7 +227,27 @@ const plugin: Plugin = {
       mutating: true,
       category: 'Project',
       async execute(input: Record<string, unknown>) {
-        return runAutoDoc(input as never as AutoDocInput, api);
+        // Bump the per-session counter on every invocation. The
+        // health() snapshot below is updated on success so /diag can
+        // answer "what was the last auto_doc call this session?"
+        const inp = input as never as AutoDocInput;
+        state.invocationCount += 1;
+        try {
+          const result = await runAutoDoc(inp, api);
+          state.lastInvocation = {
+            when: new Date().toISOString(),
+            files: Array.isArray(inp.files) ? inp.files.length : 0,
+            style: inp.style === 'jsdoc' ? 'jsdoc' : 'tsdoc',
+            dryRun: inp.dry_run === true,
+          };
+          return result;
+        } catch (err) {
+          // Failed invocations still count — the operator wants to
+          // see the count go up when the LLM actually tried to use
+          // the tool, regardless of outcome. Re-raise so the host
+          // tool-error surface is unchanged.
+          throw err;
+        }
       },
     });
 
@@ -212,7 +255,30 @@ const plugin: Plugin = {
   },
 
   teardown(api) {
-    api.log.info('auto-doc plugin unloaded');
+    // H1 pattern: zero counters on unload. auto-doc has no file
+    // handles or timers to release — the existing log is preserved
+    // plus a final invocation count so operators can see how many
+    // docstrings the session generated.
+    const finalCount = state.invocationCount;
+    state.invocationCount = 0;
+    state.lastInvocation = null;
+    api.log.info('auto-doc: teardown complete', { invocations: finalCount });
+  },
+
+  async health() {
+    // /diag plugins — surface a one-line status plus per-session
+    // counters so an operator can confirm the plugin is wired and
+    // see how heavily it's been used. No resources to track (the
+    // tool is a per-call pure function).
+    return {
+      ok: true,
+      message:
+        state.lastInvocation === null
+          ? `auto-doc: ${state.invocationCount} invocation(s) this session`
+          : `auto-doc: last run ${state.lastInvocation.files} file(s) at ${state.lastInvocation.when} (${state.lastInvocation.dryRun ? 'dry-run' : 'write'})`,
+      invocationCount: state.invocationCount,
+      lastInvocation: state.lastInvocation,
+    };
   },
 };
 

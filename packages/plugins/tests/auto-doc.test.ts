@@ -48,7 +48,12 @@ describe('auto-doc plugin', () => {
       expect.any(Object),
     );
     autoDocPlugin.teardown(mockApi as any);
-    expect(mockApi.log.info).toHaveBeenCalledWith('auto-doc plugin unloaded');
+    // H1 audit pattern: teardown now logs a single info line with a
+    // structured payload (the final invocation count).
+    expect(mockApi.log.info).toHaveBeenCalledWith(
+      'auto-doc: teardown complete',
+      expect.objectContaining({ invocations: expect.any(Number) }),
+    );
   });
 });
 

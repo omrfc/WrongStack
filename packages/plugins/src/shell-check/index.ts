@@ -15,6 +15,30 @@ import { join } from 'node:path';
 
 const API_VERSION = '^0.1.10';
 
+// ---------------------------------------------------------------------------
+// Module-scope state (H1 audit pattern: shared between setup, teardown,
+// health). shell-check is a pure CLI wrapper — no timers, no handles,
+// no caches. The state block tracks per-session invocation counts and a
+// "last run" snapshot so /diag plugins can answer useful questions
+// (how many lints this session, what was the last severity filter).
+// Setup is idempotent: re-init zeros the counters; teardown leaves them
+// at zero and the host's hot-reload cycle is clean.
+// ---------------------------------------------------------------------------
+const state = {
+  /** Per-session invocation count. */
+  invocationCount: 0,
+  /** Total issues found across all runs this session (success or fail). */
+  totalIssues: 0,
+  /** Most recent run summary, surfaced by health(). */
+  lastRun: null as null | {
+    when: string;
+    filesChecked: number;
+    issues: number;
+    severity: 'error' | 'warning' | 'info' | 'style';
+    mode: 'files' | 'directory';
+  },
+};
+
 interface ShellCheckIssue {
   file: string;
   line: number;
@@ -145,6 +169,11 @@ const plugin: Plugin = {
   },
 
   setup(api) {
+    // Idempotent re-init (H1 pattern): zero counters on reload.
+    state.invocationCount = 0;
+    state.totalIssues = 0;
+    state.lastRun = null;
+
     // --- shellcheck tool (merged: specific files OR recursive directory scan) ---
     api.tools.register({
       name: 'shellcheck',
@@ -187,10 +216,17 @@ const plugin: Plugin = {
       category: 'Code Quality',
       mutating: true,
       async execute(input: Record<string, unknown>) {
-        const files = input['files'] as string[] | undefined;
-        const directory = (input['directory'] as string) ?? '.';
-        const pattern = (input['pattern'] as string) ?? '';
-        const severity = (input['severity'] as ShellCheckIssue['level']) ?? 'warning';
+        // Bump the per-session counter on every invocation. The
+        // lastRun snapshot below is updated on success so /diag can
+        // answer "what was the last lint?" — failed runs (empty
+        // file list, runShellCheck threw) are still counted because
+        // the operator wants to see activity.
+        const inp = input as { files?: string[]; directory?: string; pattern?: string; severity?: ShellCheckIssue['level'] };
+        const files = inp.files;
+        const directory = inp.directory ?? '.';
+        const pattern = inp.pattern ?? '';
+        const severity = inp.severity ?? 'warning';
+        state.invocationCount += 1;
 
         // Resolve the file list: explicit files, or recursive directory scan.
         let checkFiles: string[];
@@ -204,6 +240,13 @@ const plugin: Plugin = {
         }
 
         if (checkFiles.length === 0) {
+          state.lastRun = {
+            when: new Date().toISOString(),
+            filesChecked: 0,
+            issues: 0,
+            severity,
+            mode: scannedDirectories ? 'directory' : 'files',
+          };
           return {
             ok: true,
             filesScanned: 0,
@@ -237,6 +280,14 @@ const plugin: Plugin = {
 
         api.metrics.counter('issues_found', issues.length, { severity });
         api.metrics.histogram('issues_per_file', issues.length / Math.max(checkFiles.length, 1));
+        state.totalIssues += issues.length;
+        state.lastRun = {
+          when: new Date().toISOString(),
+          filesChecked: checkFiles.length,
+          issues: issues.length,
+          severity,
+          mode: scannedDirectories ? 'directory' : 'files',
+        };
 
         return {
           ok: true,
@@ -262,6 +313,40 @@ const plugin: Plugin = {
     });
 
     api.log.info('shell-check plugin loaded', { version: '0.2.0' });
+  },
+
+  teardown(api) {
+    // H1 pattern: zero counters on unload. shell-check has no
+    // file handles, timers, or watches — execFileSync calls are
+    // synchronous and complete before the tool returns. The unload
+    // log preserves the per-session counter so operators can see
+    // how many lints this session ran.
+    const finalInvocations = state.invocationCount;
+    const finalIssues = state.totalIssues;
+    state.invocationCount = 0;
+    state.totalIssues = 0;
+    state.lastRun = null;
+    api.log.info('shell-check: teardown complete', {
+      invocations: finalInvocations,
+      totalIssues: finalIssues,
+    });
+  },
+
+  async health() {
+    // /diag plugins — surface a one-line status plus per-session
+    // counters so an operator can confirm the plugin is wired and
+    // see how heavily it's been used. No resources to track (the
+    // tool is a per-call sync CLI wrapper).
+    return {
+      ok: true,
+      message:
+        state.lastRun === null
+          ? `shell-check: ${state.invocationCount} run(s) this session`
+          : `shell-check: last run checked ${state.lastRun.filesChecked} file(s), ${state.lastRun.issues} issue(s) at ${state.lastRun.when}`,
+      invocationCount: state.invocationCount,
+      totalIssues: state.totalIssues,
+      lastRun: state.lastRun,
+    };
   },
 };
 

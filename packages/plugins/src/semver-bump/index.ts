@@ -14,6 +14,30 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const API_VERSION = '^0.1.10';
 
+// ---------------------------------------------------------------------------
+// Module-scope state (H1 audit pattern: shared between setup, teardown,
+// health). semver-bump is a pure git-wrapper — no timers, no handles,
+// no caches. The state block tracks per-session invocation counts
+// (per-tool and total) so /diag plugins can report "how many bumps
+// did this session perform?" Setup is idempotent: re-init zeros
+// the counters; teardown leaves them at zero.
+// ---------------------------------------------------------------------------
+const state = {
+  /** Total invocations across all three tools this session. */
+  invocationCount: 0,
+  /** Per-tool invocation counts so /diag can show "bumps: 2, current: 5". */
+  perTool: { semver_bump: 0, semver_current: 0, semver_changelog: 0 } as Record<string, number>,
+  /** Most recent bump result, surfaced by health() (null until first call). */
+  lastBump: null as null | {
+    when: string;
+    from: string;
+    to: string;
+    type: 'major' | 'minor' | 'patch' | 'auto';
+    commitCount: number;
+    breakingCount: number;
+  },
+};
+
 type BumpType = 'major' | 'minor' | 'patch' | 'auto';
 
 interface ConventionalCommit {
@@ -220,6 +244,11 @@ const plugin: Plugin = {
   },
 
   setup(api) {
+    // Idempotent re-init (H1 pattern): zero counters on reload.
+    state.invocationCount = 0;
+    state.perTool = { semver_bump: 0, semver_current: 0, semver_changelog: 0 };
+    state.lastBump = null;
+
     const tagPrefix = (api.config.extensions?.['semver-bump'] as Record<string, unknown>)?.['tagPrefix'] as string ?? 'v';
     const autoTag = (api.config.extensions?.['semver-bump'] as Record<string, unknown>)?.['autoTag'] as boolean ?? true;
 
@@ -345,6 +374,19 @@ const plugin: Plugin = {
           bump: bumpPart,
         });
 
+        // Snapshot the success for health() / /diag plugins. We capture
+        // commit counts at this point because the bumps write a
+        // "chore: bump version" commit after this block, so the
+        // pre-bump count is the meaningful one for an operator.
+        state.lastBump = {
+          when: new Date().toISOString(),
+          from: currentVersion,
+          to: newVersion,
+          type: bumpPart,
+          commitCount: commits.length,
+          breakingCount: commits.filter((c) => c.breaking).length,
+        };
+
         return {
           ok: true,
           currentVersion,
@@ -370,6 +412,8 @@ const plugin: Plugin = {
       permission: 'confirm',
       mutating: true,
       async execute(input: Record<string, unknown>) {
+        state.invocationCount += 1;
+        state.perTool['semver_bump'] = (state.perTool['semver_bump'] ?? 0) + 1;
         const cwd = input['cwd'] as string | undefined;
         const dryRun = (input['dry_run'] as boolean | undefined) ?? false;
         const part = (input['part'] as BumpType) ?? defaultPart;
@@ -452,6 +496,8 @@ const plugin: Plugin = {
       permission: 'auto',
       mutating: false,
       async execute(input: Record<string, unknown>) {
+        state.invocationCount += 1;
+        state.perTool['semver_current'] = (state.perTool['semver_current'] ?? 0) + 1;
         const cwd = input['cwd'] as string | undefined;
 
         const pkg = getPackageJson(cwd);
@@ -497,6 +543,8 @@ const plugin: Plugin = {
       permission: 'auto',
       mutating: false,
       async execute(input: Record<string, unknown>) {
+        state.invocationCount += 1;
+        state.perTool['semver_changelog'] = (state.perTool['semver_changelog'] ?? 0) + 1;
         const from = input['from'] as string | undefined;
         const to = input['to'] as string ?? 'HEAD';
         const cwd = input['cwd'] as string | undefined;
@@ -541,6 +589,40 @@ const plugin: Plugin = {
     });
 
     api.log.info('semver-bump plugin loaded', { version: '0.1.0', tagPrefix, autoTag });
+  },
+
+  teardown(api) {
+    // H1 pattern: zero counters on unload. semver-bump has no
+    // file handles, timers, or watches — every git command runs
+    // synchronously and completes before the tool returns. The
+    // unload log preserves per-session invocation counts so
+    // operators can see how many bumps/changelogs/queries the
+    // session performed.
+    const finalTotal = state.invocationCount;
+    const finalPerTool = { ...state.perTool };
+    state.invocationCount = 0;
+    state.perTool = { semver_bump: 0, semver_current: 0, semver_changelog: 0 };
+    state.lastBump = null;
+    api.log.info('semver-bump: teardown complete', {
+      invocations: finalTotal,
+      perTool: finalPerTool,
+    });
+  },
+
+  async health() {
+    // /diag plugins — surface a one-line status plus per-session
+    // counters so an operator can confirm the plugin is wired and
+    // see how heavily it's been used. No resources to track.
+    return {
+      ok: true,
+      message:
+        state.lastBump === null
+          ? `semver-bump: ${state.invocationCount} call(s) this session`
+          : `semver-bump: last bump ${state.lastBump.from} → ${state.lastBump.to} (${state.lastBump.type}) at ${state.lastBump.when}`,
+      invocationCount: state.invocationCount,
+      perTool: { ...state.perTool },
+      lastBump: state.lastBump,
+    };
   },
 };
 
