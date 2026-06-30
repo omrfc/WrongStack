@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Ten focused, single-purpose plugins ship in this package and load
+Eleven focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -11,7 +11,7 @@ exports a default `Plugin` object. The host's plugin loader
 (`@wrongstack/core/plugin/loader`) accepts, validates, and
 `setup()`s them. Plugins register **tools** on the host's
 `ToolRegistry` and may also register **hooks** (e.g.
-`secret-scanner` registers a `PreToolUse` hook).
+`secret-scanner` registers `PreToolUse` + `PostToolUse` hooks).
 
 Plugins are loaded lazily by `packages/cli/src/wiring/plugins.ts`
 under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
@@ -29,8 +29,9 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 6 | [`cron`](./src/cron) | `cron_schedule`, `cron_list`, `cron_cancel` | — | In-session recurring tasks; lifecycle via `beforeIteration` |
 | 7 | [`template-engine`](./src/template-engine) | `template_expand`, `template_render`, `template_create`, `template_list` | — | Handlebars-style `{{var}}`, `{{#if}}`, `{{#each}}` |
 | 8 | [`semver-bump`](./src/semver-bump) | `semver_bump`, `semver_current`, `semver_changelog` | — | Conventional-commit → semver version bump; can tag |
-| 9 | [`secret-scanner`](./src/secret-scanner) | `secret_scanner_status`, `secret_scanner_test` | `PreToolUse` matcher=`bash\|write\|edit` | Blocks (or auto-redacts) tools whose arguments contain plaintext credentials |
+| 9 | [`secret-scanner`](./src/secret-scanner) | `secret_scanner_status`, `secret_scanner_test` | `PreToolUse` (`bash\|write\|edit`) + `PostToolUse` (`*`) | Blocks/redacts input secrets; warns on output leaks |
 | 10 | [`todo-tracker`](./src/todo-tracker) | `todo_tracker_list/add/complete/drop/remove/pull/status` | — | Persistent project-scoped backlog that survives across sessions; cross-session bridge via `todo_tracker_pull` |
+| 11 | [`token-budget`](./src/token-budget) | `token_budget_status` | `Stop` | Enforces a per-session token budget — warns at `warnPercent`, stops agent loop at `stopPercent` |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -230,7 +231,8 @@ To disable a single built-in without removing its config:
 
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
-`todo-tracker`) follow a strict lifecycle to survive hot-reload
+`todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
+`token-budget`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's

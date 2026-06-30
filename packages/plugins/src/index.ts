@@ -1,7 +1,7 @@
 /**
  * @wrongstack/plugins — Official WrongStack Plugin Suite
  *
- * Exported plugins (10 total):
+ * Exported plugins (11 total):
  *  1. auto-doc         — Auto-generates JSDoc/TSDoc (dryRun for preview)
  *  2. git-autocommit  — AI-powered commit messages (git_autocommit/status_summary removed)
  *  3. shell-check     — Runs shellcheck on files or directories (merged)
@@ -10,10 +10,12 @@
  *  6. cron            — Schedules recurring tasks via extension hooks
  *  7. template-engine — Expands file templates with variable substitution
  *  8. semver-bump     — Conventional-commit-driven semver version bumps
- *  9. secret-scanner  — Pre-tool hook that blocks (or redacts) tools
- *                        whose arguments contain plaintext credentials
+ *  9. secret-scanner  — Pre+post-tool hooks that block, redact, or warn
+ *                        about plaintext credentials flowing into/out of tools
  * 10. todo-tracker    — Persistent, project-scoped todo backlog that
  *                        survives across sessions
+ * 11. token-budget    — Enforces a per-session token budget — warns at a
+ *                        threshold and stops the agent loop when the limit is hit
  *
  * Removed (use the equivalent built-in tools instead — see
  * `DEPRECATED_PLUGIN_NAMES` in `packages/cli/src/wiring/plugins.ts`

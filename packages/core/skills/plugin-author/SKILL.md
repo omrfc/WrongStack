@@ -19,7 +19,7 @@ Guides the creation and maintenance of first-party plugins in
 the `Plugin` interface from `@wrongstack/core`, registering tools,
 hooks, slash commands, or pipelines into the agent's runtime.
 
-There are currently **10 official plugins** in the suite:
+There are currently **11 official plugins** in the suite:
 
 | Plugin | Tools | Hooks | Stateful |
 |--------|-------|-------|----------|
@@ -31,8 +31,9 @@ There are currently **10 official plugins** in the suite:
 | `cron` | `cron_schedule`, `cron_list`, `cron_cancel` | — | ✅ teardown+health |
 | `template-engine` | `template_expand`, `template_render`, `template_create`, `template_list` | — | ✅ teardown+health |
 | `semver-bump` | `semver_bump`, `semver_current`, `semver_changelog` | — | ✅ teardown+health |
-| `secret-scanner` | `secret_scanner_status`, `secret_scanner_test` | `PreToolUse` | ✅ teardown+health |
+| `secret-scanner` | `secret_scanner_status`, `secret_scanner_test` | `PreToolUse` + `PostToolUse` | ✅ teardown+health |
 | `todo-tracker` | `todo_tracker_list/add/complete/drop/remove/pull/status` | — | ✅ teardown+health |
+| `token-budget` | `token_budget_status` | `Stop` | ✅ teardown+health |
 
 ## Rules
 
