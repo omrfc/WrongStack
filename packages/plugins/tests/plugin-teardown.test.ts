@@ -8,6 +8,7 @@ import cronPlugin from '../src/cron/index.js';
 import fileWatcherPlugin from '../src/file-watcher/index.js';
 import templateEnginePlugin from '../src/template-engine/index.js';
 import gitAutocommitPlugin from '../src/git-autocommit/index.js';
+import costTrackerPlugin from '../src/cost-tracker/index.js';
 
 interface MockApi {
   tools: { register: ReturnType<typeof vi.fn> };
@@ -19,6 +20,10 @@ interface MockApi {
   emitCustom: ReturnType<typeof vi.fn>;
   session: { append: ReturnType<typeof vi.fn> };
   registerSystemPromptContributor: ReturnType<typeof vi.fn>;
+  // onEvent is the lifecycle-event subscription API used by plugins
+  // that wire cost tracking / request counting — cost-tracker uses it
+  // for `provider.response` and `session.ended`.
+  onEvent: ReturnType<typeof vi.fn>;
 }
 
 function makeApi(): MockApi {
@@ -32,6 +37,7 @@ function makeApi(): MockApi {
     emitCustom: vi.fn(),
     session: { append: vi.fn() },
     registerSystemPromptContributor: vi.fn(() => () => {}),
+    onEvent: vi.fn(),
   };
 }
 
@@ -259,6 +265,99 @@ describe('plugin teardown (H1 regression guard)', () => {
       const result = await gitAutocommitPlugin.health!();
       expect(result.ok).toBe(true);
       expect(result.commits).toBe(0);
+    });
+  });
+
+  describe('cost-tracker', () => {
+    // cost-tracker holds two pieces of module-scope state:
+    //   - pricingOverrides: user-supplied per-model pricing
+    //   - lastCost: snapshot of the most recent cost calculation
+    // Both must be cleared on teardown so a reload cycle starts fresh
+    // — the same H1 pattern as template-engine and git-autocommit.
+
+    it('teardown clears user-supplied pricing overrides', async () => {
+      const api = makeApi();
+      // Seed pricing overrides via the public config surface, so the
+      // test exercises the same path real users hit.
+      api.config.extensions['cost-tracker'] = {
+        pricingOverrides: {
+          'gpt-4o': { input: 99, output: 199 },
+        },
+      };
+      costTrackerPlugin.setup(api as never as Parameters<typeof costTrackerPlugin.setup>[0]);
+
+      // Sanity: health() reflects the override count
+      const before = await costTrackerPlugin.health!();
+      expect(before.overrideCount).toBe(1);
+
+      // Act
+      costTrackerPlugin.teardown!(api as never as Parameters<typeof costTrackerPlugin.teardown>[0]);
+
+      // After teardown, the override map is empty — confirmed via
+      // health() which exposes the count from module-scope state.
+      const after = await costTrackerPlugin.health!();
+      expect(after.overrideCount).toBe(0);
+    });
+
+    it('teardown emits a completion log line and does not throw', () => {
+      const api = makeApi();
+      costTrackerPlugin.setup(api as never as Parameters<typeof costTrackerPlugin.setup>[0]);
+
+      expect(() =>
+        costTrackerPlugin.teardown!(api as never as Parameters<typeof costTrackerPlugin.teardown>[0]),
+      ).not.toThrow();
+
+      const logCalls = (api.log.info as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(logCalls).toContain('cost-tracker: teardown complete');
+    });
+
+    it('health() reports empty state before setup and clean state after teardown', async () => {
+      const api = makeApi();
+      costTrackerPlugin.setup(api as never as Parameters<typeof costTrackerPlugin.setup>[0]);
+
+      // Fresh setup: no overrides, no requests yet
+      const before = await costTrackerPlugin.health!();
+      expect(before.ok).toBe(true);
+      expect(before.overrideCount).toBe(0);
+      expect(before.lastCostModel).toBeNull();
+      expect(before.lastCostUsd).toBe(0);
+      expect(before.message).toContain('no requests recorded yet');
+
+      // Teardown path runs even with no traffic
+      costTrackerPlugin.teardown!(api as never as Parameters<typeof costTrackerPlugin.teardown>[0]);
+
+      const after = await costTrackerPlugin.health!();
+      expect(after.ok).toBe(true);
+      expect(after.overrideCount).toBe(0);
+      expect(after.lastCostModel).toBeNull();
+    });
+
+    it('reload cycle: setup → teardown → setup reads fresh overrides', async () => {
+      // The H1 pattern proves out: after teardown clears module-scope
+      // state, the next setup() must observe ONLY the new config —
+      // not the union of the old and new overrides. Without the H1
+      // fix this would have leaked the previous round's overrides.
+      const api = makeApi();
+
+      // First round: seed 'gpt-4o' override
+      api.config.extensions['cost-tracker'] = {
+        pricingOverrides: { 'gpt-4o': { input: 1, output: 2 } },
+      };
+      costTrackerPlugin.setup(api as never as Parameters<typeof costTrackerPlugin.setup>[0]);
+      expect((await costTrackerPlugin.health!()).overrideCount).toBe(1);
+
+      costTrackerPlugin.teardown!(api as never as Parameters<typeof costTrackerPlugin.teardown>[0]);
+
+      // Second round: completely different override set
+      api.config.extensions['cost-tracker'] = {
+        pricingOverrides: {
+          'claude-3-5-sonnet': { input: 5, output: 15 },
+          'gemini-1.5-pro': { input: 1, output: 4 },
+        },
+      };
+      costTrackerPlugin.setup(api as never as Parameters<typeof costTrackerPlugin.setup>[0]);
+      const after = await costTrackerPlugin.health!();
+      expect(after.overrideCount).toBe(2);
     });
   });
 });

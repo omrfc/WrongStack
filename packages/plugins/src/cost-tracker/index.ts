@@ -28,7 +28,11 @@ interface SessionCost {
   byModel: Record<string, { tokens: number; costUsd: number; requests: number }>;
 }
 
-// Simple pricing lookup (per 1M tokens)
+// Simple pricing lookup (per 1M tokens). Values are intentionally
+// hardcoded — provider-side pricing changes are picked up here per
+// release. Users can override per-model via config.extensions
+// ['cost-tracker'].pricingOverrides without waiting for a plugin
+// version bump (see pricingOverrides handling in setup()).
 const PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4o': { input: 5.0, output: 15.0 },
   'gpt-4o-mini': { input: 0.15, output: 0.6 },
@@ -43,6 +47,24 @@ const PRICING: Record<string, { input: number; output: number }> = {
 
 const DEFAULT_PRICING = { input: 5.0, output: 15.0 };
 
+// Module-level state, shared between `setup`, `teardown`, and `health`.
+//
+// Why module-level? The Plugin interface in @wrongstack/core does not
+// thread state from `setup` → `teardown`. Two reasons the override map
+// needs module scope:
+//   1. `estimateCost()` is called inside the `provider.response` event
+//      handler — that handler closes over `pricingOverrides` if we keep
+//      it local to setup, but the cleaner pattern (mirroring cron /
+//      file-watcher / template-engine / git-autocommit) is module
+//      scope so teardown can clear it cleanly on reload.
+//   2. The `lastCost` snapshot is for `health()` to report, which
+//      needs to survive across the tool boundary.
+//
+// Setup re-initializes both (idempotent re-init on plugin reload);
+// teardown clears them and logs.
+const pricingOverrides: Record<string, { input: number; output: number }> = {};
+const lastCost = { usd: 0, model: null as string | null, at: null as string | null };
+
 interface CostTrackerConfig {
   budgetLimit: number;
   warningThreshold: number;
@@ -56,7 +78,15 @@ function readCostTrackerConfig(raw: Record<string, unknown> | undefined): CostTr
 }
 
 function estimateCost(model: string, promptTokens: number, completionTokens: number): number {
-  const pricing = PRICING[model.toLowerCase()] ?? DEFAULT_PRICING;
+  // Lookup chain (first hit wins):
+  //   1. pricingOverrides[model]   — user-supplied, takes precedence
+  //   2. PRICING[model]             — bundled baseline
+  //   3. DEFAULT_PRICING             — fallback for unknown models
+  // All keys are normalized to lowercase so user overrides match
+  // regardless of how the provider reports the model name (gpt-4o
+  // vs GPT-4o vs gpt-4O).
+  const key = model.toLowerCase();
+  const pricing = pricingOverrides[key] ?? PRICING[key] ?? DEFAULT_PRICING;
   const inputCost = (promptTokens / 1_000_000) * pricing.input;
   const outputCost = (completionTokens / 1_000_000) * pricing.output;
   return inputCost + outputCost;
@@ -77,6 +107,7 @@ const plugin: Plugin = {
     trackPerUser: false,
     budgetLimit: 0,
     warningThreshold: 80,
+    pricingOverrides: {},
   },
   configSchema: {
     type: 'object',
@@ -85,10 +116,54 @@ const plugin: Plugin = {
       trackPerUser: { type: 'boolean', default: false },
       budgetLimit: { type: 'number', default: 0, description: 'Budget limit in USD (0 = no limit)' },
       warningThreshold: { type: 'number', default: 80, description: 'Warning threshold as percentage of budget' },
+      pricingOverrides: {
+        type: 'object',
+        description: 'Per-model pricing overrides in USD per 1M tokens. Keys are lowercased model names; values are { input, output }. Takes precedence over the bundled PRICING table.',
+        additionalProperties: {
+          type: 'object',
+          properties: {
+            input: { type: 'number', minimum: 0, description: 'Cost per 1M input tokens in USD' },
+            output: { type: 'number', minimum: 0, description: 'Cost per 1M output tokens in USD' },
+          },
+          required: ['input', 'output'],
+          additionalProperties: false,
+        },
+        default: {},
+      },
     },
   },
 
   setup(api) {
+    // Idempotent re-init: clear any overrides that survived a previous
+    // teardown, then apply the user-supplied ones. Mirroring the
+    // template-engine / git-autocommit / cron / file-watcher pattern.
+    // Reassignment of a module-level const... actually we declared
+    // pricingOverrides as a `const` reference with a mutable inner
+    // shape — so clear the keys instead of reassigning.
+    for (const k of Object.keys(pricingOverrides)) {
+      delete pricingOverrides[k];
+    }
+    lastCost.usd = 0;
+    lastCost.model = null;
+    lastCost.at = null;
+
+    const rawConfig = api.config.extensions?.['cost-tracker'] as
+      | Record<string, unknown>
+      | undefined;
+    const userOverrides = rawConfig?.['pricingOverrides'];
+    if (userOverrides && typeof userOverrides === 'object') {
+      for (const [model, value] of Object.entries(userOverrides as Record<string, unknown>)) {
+        if (!value || typeof value !== 'object') continue;
+        const v = value as Record<string, unknown>;
+        const input = v['input'];
+        const output = v['output'];
+        if (typeof input !== 'number' || typeof output !== 'number') continue;
+        // Lowercase keys so user-supplied entries match the same
+        // case-insensitive lookup that estimateCost uses.
+        pricingOverrides[model.toLowerCase()] = { input, output };
+      }
+    }
+
     // Track token usage per request across the response pipeline
     const sessionCost: SessionCost = {
       requests: [],
@@ -134,6 +209,11 @@ const plugin: Plugin = {
 
       api.metrics.counter('tokens_total', totalTokens, { model });
       api.metrics.histogram('cost_usd', costUsd, { model });
+
+      // Snapshot for /diag plugins (health()).
+      lastCost.usd = costUsd;
+      lastCost.model = model;
+      lastCost.at = new Date().toISOString();
     });
 
     // --- cost_summary tool ---
@@ -286,6 +366,46 @@ const plugin: Plugin = {
     });
 
     api.log.info('cost-tracker plugin loaded', { version: '0.1.0' });
+  },
+
+  teardown(api) {
+    // Mirror of the H1 pattern: clear module-scope state on unload so
+    // the next setup() starts fresh and a reload cycle doesn't
+    // accumulate stale overrides or last-cost snapshots.
+    const overrideCount = Object.keys(pricingOverrides).length;
+    for (const k of Object.keys(pricingOverrides)) {
+      delete pricingOverrides[k];
+    }
+    const finalLast = { ...lastCost };
+    lastCost.usd = 0;
+    lastCost.model = null;
+    lastCost.at = null;
+    api.log.info('cost-tracker: teardown complete', {
+      overrideCount,
+      lastModel: finalLast.model,
+    });
+  },
+
+  async health() {
+    // /diag plugins wants a quick yes/no plus context. We surface:
+    //   - override count (so operators can confirm their pricingOverrides
+    //     were applied without grepping config)
+    //   - the last cost we recorded (so a fresh diag right after a
+    //     request confirms the wiring is alive)
+    // Note: session totals are *not* reported here — they live inside
+    // the setup() closure (sessionCost) and are exposed via the
+    // cost_summary tool instead. health() is module-scope only.
+    return {
+      ok: true,
+      message:
+        lastCost.model === null
+          ? 'cost-tracker: no requests recorded yet this session'
+          : `cost-tracker: last ${lastCost.model} cost=${lastCost.usd.toFixed(6)} at ${lastCost.at}`,
+      overrideCount: Object.keys(pricingOverrides).length,
+      lastCostUsd: lastCost.usd,
+      lastCostModel: lastCost.model,
+      lastCostAt: lastCost.at,
+    };
   },
 };
 

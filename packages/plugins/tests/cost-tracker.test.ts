@@ -271,3 +271,150 @@ describe('session.ended event handler', () => {
     expect(api.session.append).not.toHaveBeenCalled();
   });
 });
+
+// ── pricingOverrides ──────────────────────────────────────────────────────────
+//
+// cost-tracker exposes a config.extensions['cost-tracker'].pricingOverrides
+// field that lets users override per-model pricing without waiting for
+// a plugin release. Lookup chain is: override → bundled PRICING → default.
+
+function getResponseHandler(api: ReturnType<typeof makeApi>): (payload: unknown) => void {
+  const call = api.onEvent.mock.calls.find(([event]: unknown[]) => event === 'provider.response');
+  if (!call) throw new Error('provider.response handler not registered');
+  return (call as unknown[])[1] as (payload: unknown) => void;
+}
+
+describe('pricingOverrides', () => {
+  it('applies a user override and uses it instead of bundled PRICING', async () => {
+    const api = makeApi();
+    // PRICING is "USD per 1M tokens" — so 1000 input tokens at input=10
+    // costs (1000/1e6)*10 = 0.01 USD. Override beats the bundled
+    // gpt-4o rate (input=5, output=15 → 0.0125 USD for the same usage).
+    api.config.extensions['cost-tracker'] = {
+      pricingOverrides: {
+        'gpt-4o': { input: 10, output: 20 },
+      },
+    };
+    costTrackerPlugin.setup(api as any);
+
+    const handler = getResponseHandler(api);
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
+
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const result = await summaryTool.execute({});
+    // Override rate: (1000/1e6)*10 + (500/1e6)*20 = 0.01 + 0.01 = 0.02
+    expect(result.usage.totalCostUsd).toBeCloseTo(0.02, 7);
+  });
+
+  it('override keys are case-insensitive', async () => {
+    const api = makeApi();
+    api.config.extensions['cost-tracker'] = {
+      pricingOverrides: {
+        'GPT-4O': { input: 10, output: 20 }, // uppercased by user
+      },
+    };
+    costTrackerPlugin.setup(api as any);
+
+    const handler = getResponseHandler(api);
+    // Provider reports lowercase — must still match the override.
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'gpt-4o' } });
+
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const result = await summaryTool.execute({});
+    expect(result.usage.totalCostUsd).toBeCloseTo(0.02, 7);
+  });
+
+  it('falls through to bundled PRICING when model is not in overrides', async () => {
+    const api = makeApi();
+    // Override gpt-4o only; claude-3-5-sonnet must use bundled.
+    api.config.extensions['cost-tracker'] = {
+      pricingOverrides: {
+        'gpt-4o': { input: 999, output: 999 },
+      },
+    };
+    costTrackerPlugin.setup(api as any);
+
+    const handler = getResponseHandler(api);
+    // claude-3-5-sonnet bundled: input=3.0, output=15.0
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'claude-3-5-sonnet' } });
+
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const result = await summaryTool.execute({});
+    // Bundled rate: (1000/1e6)*3 + (500/1e6)*15 = 0.003 + 0.0075 = 0.0105
+    expect(result.usage.totalCostUsd).toBeCloseTo(0.0105, 7);
+  });
+
+  it('falls through to DEFAULT_PRICING for unknown models', async () => {
+    const api = makeApi();
+    costTrackerPlugin.setup(api as any);
+
+    const handler = getResponseHandler(api);
+    // 'future-model-9000' is not in overrides nor bundled PRICING.
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'future-model-9000' } });
+
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const result = await summaryTool.execute({});
+    // DEFAULT_PRICING: input=5.0, output=15.0
+    // (1000/1e6)*5 + (500/1e6)*15 = 0.005 + 0.0075 = 0.0125
+    expect(result.usage.totalCostUsd).toBeCloseTo(0.0125, 7);
+  });
+
+  it('overrides survive multiple cost calculations within one setup', async () => {
+    const api = makeApi();
+    api.config.extensions['cost-tracker'] = {
+      pricingOverrides: {
+        'gpt-4o-mini': { input: 0.5, output: 1.5 },
+      },
+    };
+    costTrackerPlugin.setup(api as any);
+
+    const handler = getResponseHandler(api);
+    handler({ usage: { input: 2000, output: 1000 }, ctx: { model: 'gpt-4o-mini' } });
+    handler({ usage: { input: 4000, output: 2000 }, ctx: { model: 'gpt-4o-mini' } });
+
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const result = await summaryTool.execute({});
+    // Override rate aggregated: (6000/1e6)*0.5 + (3000/1e6)*1.5
+    // = 0.003 + 0.0045 = 0.0075
+    expect(result.usage.totalPromptTokens).toBe(6000);
+    expect(result.usage.totalCompletionTokens).toBe(3000);
+    expect(result.usage.totalCostUsd).toBeCloseTo(0.0075, 7);
+  });
+
+  it('ignores malformed override entries (missing input/output) without throwing', async () => {
+    const api = makeApi();
+    api.config.extensions['cost-tracker'] = {
+      pricingOverrides: {
+        'bad-model': { input: 1 }, // missing output
+        'also-bad': { output: 2 }, // missing input
+        'wrong-type': { input: 'free', output: 'cheap' }, // strings
+        'good-model': { input: 1, output: 2 }, // valid
+      },
+    };
+    // The schema validator in the loader would reject this config, but
+    // setup() must be defensive for tests and direct callers.
+    expect(() => costTrackerPlugin.setup(api as any)).not.toThrow();
+
+    // Only the valid entry should land in the override map — confirmed
+    // by trying to use the bad entries and observing they fall through.
+    const handler = getResponseHandler(api);
+    handler({ usage: { input: 1000, output: 500 }, ctx: { model: 'good-model' } });
+
+    const summaryTool = api.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_summary',
+    )?.[0];
+    const result = await summaryTool.execute({});
+    // (1000/1e6)*1 + (500/1e6)*2 = 0.001 + 0.001 = 0.002
+    expect(result.usage.totalCostUsd).toBeCloseTo(0.002, 7);
+  });
+});
