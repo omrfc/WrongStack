@@ -2,13 +2,53 @@ import { expectDefined } from '@wrongstack/core';
 /**
  * cost-tracker plugin — Tracks LLM token usage and cost per session.
  *
+ * Config surface (`config.extensions['cost-tracker']`):
+ *
+ * ```jsonc
+ * {
+ *   "budgetLimit": 10,            // USD; 0 = no limit
+ *   "warningThreshold": 80,       // percent of budget before warning
+ *   "pricingOverrides": {         // user-supplied per-model rates (USD/1M tokens)
+ *     "gpt-4o":              { "input": 5.0,  "output": 15.0 },
+ *     "claude-3-5-sonnet":   { "input": 3.0,  "output": 15.0 }
+ *   }
+ * }
+ * ```
+ *
+ * Pricing lookup chain (first match wins, all keys lowercased):
+ *
+ * | Priority | Source                              | Populated by                         |
+ * |----------|-------------------------------------|--------------------------------------|
+ * | 1        | `pricingOverrides[model]`           | User config (highest priority)       |
+ * | 2        | `bundledFromRegistry[model]`        | `api.modelsRegistry` (models.dev)    |
+ * | 3        | `PRICING[model]`                    | Bundled baseline (updated per release)|
+ * | 4        | `DEFAULT_PRICING`                   | Last-resort fallback for unknown models |
+ *
  * Tools registered:
  * - cost_summary: Show token usage breakdown by model
  * - cost_reset: Reset tracking counters
  * - cost_export: Export cost report as JSON or CSV
+ *
+ * @public
  */
 import type { Plugin } from '@wrongstack/core';
 const API_VERSION = '^0.1.10';
+
+/**
+ * Per-model pricing in USD per 1 million tokens.
+ *
+ * Used by `pricingOverrides` (user config), `bundledFromRegistry`
+ * (models.dev), and the bundled `PRICING` table. All three share
+ * the same shape so the lookup chain can fall through uniformly.
+ *
+ * @public
+ */
+export interface ModelPricing {
+  /** Cost per 1M input (prompt) tokens in USD. */
+  input: number;
+  /** Cost per 1M output (completion) tokens in USD. */
+  output: number;
+}
 
 interface TokenUsage {
   promptTokens: number;
@@ -28,12 +68,19 @@ interface SessionCost {
   byModel: Record<string, { tokens: number; costUsd: number; requests: number }>;
 }
 
-// Simple pricing lookup (per 1M tokens). Values are intentionally
-// hardcoded — provider-side pricing changes are picked up here per
-// release. Users can override per-model via config.extensions
-// ['cost-tracker'].pricingOverrides without waiting for a plugin
-// version bump (see pricingOverrides handling in setup()).
-const PRICING: Record<string, { input: number; output: number }> = {
+/**
+ * Bundled pricing baseline (USD per 1M tokens).
+ *
+ * Values are intentionally hardcoded — provider-side pricing changes
+ * are picked up here per release. Users can override per-model via
+ * `config.extensions['cost-tracker'].pricingOverrides` without waiting
+ * for a plugin version bump. The models.dev registry (when available
+ * via `api.modelsRegistry`) provides a second override layer that
+ * beats this baseline automatically.
+ *
+ * @internal
+ */
+const PRICING: Record<string, ModelPricing> = {
   'gpt-4o': { input: 5.0, output: 15.0 },
   'gpt-4o-mini': { input: 0.15, output: 0.6 },
   'gpt-4-turbo': { input: 10.0, output: 30.0 },
@@ -45,28 +92,35 @@ const PRICING: Record<string, { input: number; output: number }> = {
   'default': { input: 5.0, output: 15.0 },
 };
 
-const DEFAULT_PRICING = { input: 5.0, output: 15.0 };
+const DEFAULT_PRICING: ModelPricing = { input: 5.0, output: 15.0 };
 
-// Module-level state, shared between `setup`, `teardown`, and `health`.
-//
-// Why module-level? The Plugin interface in @wrongstack/core does not
-// thread state from `setup` → `teardown`. Three reasons these maps need
-// module scope:
-//   1. `estimateCost()` is called inside the `provider.response` event
-//      handler — that handler closes over `pricingOverrides` if we keep
-//      it local to setup, but the cleaner pattern (mirroring cron /
-//      file-watcher / template-engine / git-autocommit) is module
-//      scope so teardown can clear it cleanly on reload.
-//   2. The `lastCost` snapshot is for `health()` to report, which
-//      needs to survive across the tool boundary.
-//   3. The `bundledFromRegistry` map is hydrated from
-//      `api.modelsRegistry.load()` on setup; once populated, the
-//      `provider.response` event handler reads it synchronously.
-//
-// Setup re-initializes all three (idempotent re-init on plugin reload);
-// teardown clears them and logs.
-const pricingOverrides: Record<string, { input: number; output: number }> = {};
-const bundledFromRegistry: Record<string, { input: number; output: number }> = {};
+/**
+ * User-supplied per-model pricing overrides, populated from
+ * `config.extensions['cost-tracker'].pricingOverrides` during `setup()`.
+ *
+ * Keys are lowercased to match the case-insensitive lookup in
+ * `estimateCost`. Takes highest priority in the lookup chain.
+ *
+ * @internal
+ */
+const pricingOverrides: Record<string, ModelPricing> = {};
+
+/**
+ * Per-model pricing hydrated from the host's models registry
+ * (`api.modelsRegistry`, backed by models.dev). Populated during
+ * `setup()` as a fire-and-forget async operation. Second priority
+ * in the lookup chain (beats bundled `PRICING`, loses to user
+ * `pricingOverrides`).
+ *
+ * @internal
+ */
+const bundledFromRegistry: Record<string, ModelPricing> = {};
+
+/**
+ * Snapshot of the most recent cost calculation, for `health()`.
+ *
+ * @internal
+ */
 const lastCost = { usd: 0, model: null as string | null, at: null as string | null };
 
 interface CostTrackerConfig {
@@ -74,6 +128,11 @@ interface CostTrackerConfig {
   warningThreshold: number;
 }
 
+/**
+ * Read budget + warning-threshold from the user's config.
+ *
+ * @internal
+ */
 function readCostTrackerConfig(raw: Record<string, unknown> | undefined): CostTrackerConfig {
   return {
     budgetLimit: typeof raw?.['budgetLimit'] === 'number' ? raw['budgetLimit'] : 0,
@@ -81,17 +140,44 @@ function readCostTrackerConfig(raw: Record<string, unknown> | undefined): CostTr
   };
 }
 
+/**
+ * Estimate the USD cost of a single LLM request.
+ *
+ * Uses the four-layer pricing lookup chain (first match wins, all keys
+ * lowercased):
+ *
+ * 1. **User override** — `pricingOverrides[model]`, from
+ *    `config.extensions['cost-tracker'].pricingOverrides`. Highest
+ *    priority; lets users correct stale bundled rates immediately.
+ * 2. **Registry** — `bundledFromRegistry[model]`, hydrated from the
+ *    host's models.dev-backed `ModelsRegistry` on setup. Beats the
+ *    bundled baseline so fresh catalog data wins automatically.
+ * 3. **Bundled** — `PRICING[model]`, hardcoded per release.
+ * 4. **Default** — `DEFAULT_PRICING` (input=$5, output=$15 per 1M),
+ *    used when none of the above recognize the model name.
+ *
+ * @param model - The provider-reported model identifier (e.g. `'gpt-4o'`,
+ *   `'claude-3-5-sonnet'`). Case-insensitive — lowercased internally.
+ * @param promptTokens - Number of input/prompt tokens consumed.
+ * @param completionTokens - Number of output/completion tokens generated.
+ * @returns Estimated cost in USD.
+ *
+ * @example
+ * ```ts
+ * // 1000 prompt + 500 completion tokens of gpt-4o ($5/$15 per 1M):
+ * estimateCost('gpt-4o', 1000, 500);  // → 0.0125
+ *
+ * // Unknown model falls through to DEFAULT_PRICING:
+ * estimateCost('future-model', 1000, 500);  // → 0.0125
+ *
+ * // User override of $10/$20 per 1M takes priority:
+ * // (config: pricingOverrides: { 'gpt-4o': { input: 10, output: 20 } })
+ * estimateCost('gpt-4o', 1000, 500);  // → 0.02
+ * ```
+ *
+ * @public
+ */
 function estimateCost(model: string, promptTokens: number, completionTokens: number): number {
-  // Lookup chain (first hit wins):
-  //   1. pricingOverrides[model]   — user-supplied config, highest priority
-  //   2. bundledFromRegistry[model] — models.dev catalog (api.modelsRegistry)
-  //   3. PRICING[model]             — bundled baseline
-  //   4. DEFAULT_PRICING             — fallback for unknown models
-  // All keys are normalized to lowercase so all sources match
-  // regardless of how the provider reports the model name (gpt-4o
-  // vs GPT-4o vs gpt-4O). The registry layer is hydrated once per
-  // setup() from a cache file; subsequent reloads come from the same
-  // module-scope map.
   const key = model.toLowerCase();
   const pricing =
     pricingOverrides[key] ??
