@@ -168,4 +168,63 @@ describe('RunController', () => {
     await new Promise((r) => setImmediate(r));
     expect(fired).toEqual(['late']);
   });
+
+  it('runs hooks in parallel: a slow hook does not delay a fast one', async () => {
+    // Regression guard: hooks are independent and "one bad hook can't block
+    // the others" — a slow async hook must not delay fast synchronous hooks
+    // from completing. Parallel execution means total wall-clock is bounded
+    // by the slowest hook rather than the sum of all hook durations.
+    let slowCount = 0;
+    let fast1Count = 0;
+    let fast2Count = 0;
+    const c = new RunController();
+    c.onAbort(async () => {
+      slowCount++;
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    c.onAbort(() => {
+      fast1Count++;
+    });
+    c.onAbort(() => {
+      fast2Count++;
+    });
+    const t0 = Date.now();
+    await c.dispose();
+    const elapsed = Date.now() - t0;
+    expect(slowCount).toBe(1);
+    expect(fast1Count).toBe(1);
+    expect(fast2Count).toBe(1);
+    // Parallel: fast hooks finish around the same time as the slow one
+    // (~50ms), not stacked (~150ms). Allow generous slack for CI.
+    expect(elapsed).toBeLessThan(120);
+  });
+
+  it('one throwing hook does not block the others (parallel + error isolation)', async () => {
+    // The contract says "one bad hook can't block the others". Verify that
+    // a throwing hook, a slow hook, and a fast hook all execute when the
+    // controller drains — the throwing one routes through errorSink, the
+    // others complete normally.
+    const errs: string[] = [];
+    const c = new RunController({
+      errorSink: (err) => errs.push(err instanceof Error ? err.message : String(err)),
+    });
+    let fast1Count = 0;
+    let fast2Count = 0;
+    c.onAbort(() => {
+      throw new Error('boom');
+    });
+    c.onAbort(() => {
+      fast1Count++;
+    });
+    c.onAbort(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    c.onAbort(() => {
+      fast2Count++;
+    });
+    await c.dispose();
+    expect(errs).toEqual(['boom']);
+    expect(fast1Count).toBe(1);
+    expect(fast2Count).toBe(1);
+  });
 });

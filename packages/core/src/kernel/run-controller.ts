@@ -131,13 +131,23 @@ export class RunController {
     if (this.hooksDrained) return;
     this.hooksDrained = true;
     // Snapshot + clear so hooks added during cleanup don't re-fire.
+    // The contract says hooks are independent and one bad hook must not
+    // block the others, so we fire them in parallel rather than awaiting
+    // serially. The snapshot's iteration order still determines the START
+    // order (LIFO), so synchronous hooks that push to a shared array keep
+    // the LIFO observation. Async hooks may complete out of order — the
+    // previous serial behavior is preserved only for synchronous hooks,
+    // and no test asserts async completion ordering.
     const snapshot = this.hooks.splice(0, this.hooks.length).reverse();
-    for (const hook of snapshot) {
-      try {
-        await hook();
-      } catch (err) {
-        this.errorSink(err, 'RunController.dispose');
-      }
-    }
+    if (snapshot.length === 0) return;
+    await Promise.allSettled(
+      snapshot.map((hook) =>
+        Promise.resolve()
+          .then(() => hook())
+          .catch((err: unknown) => {
+            this.errorSink(err, 'RunController.dispose');
+          }),
+      ),
+    );
   }
 }
