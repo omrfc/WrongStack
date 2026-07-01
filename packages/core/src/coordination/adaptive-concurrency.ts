@@ -10,6 +10,7 @@
 
 import type { FleetBus, FleetEvent } from './fleet-bus.js';
 import type { AdaptiveConcurrencyConfig } from '../types/config.js';
+import type { Logger } from '../types/logger.js';
 
 export interface AdaptiveConcurrencyState {
   current: number;
@@ -51,13 +52,18 @@ export class AdaptiveConcurrencyController {
   private state: AdaptiveConcurrencyState;
   private readonly disposers: (() => void)[] = [];
   private stateChangeHandlers: ((state: AdaptiveConcurrencyState) => void)[] = [];
+  private readonly logger: Pick<Logger, 'warn'> | undefined;
 
   constructor(
     fleetBus: FleetBus,
     setMaxConcurrent: (n: number) => void,
     config: Partial<AdaptiveConcurrencyConfig> = {},
     onStateChange?: (state: AdaptiveConcurrencyState) => void,
+    // Writing to stdout from core corrupts TUI rendering; adjustments are
+    // only reported through this logger (and the onStateChange handlers).
+    logger?: Pick<Logger, 'warn'>,
   ) {
+    this.logger = logger;
     // Apply config with defaults
     this.config = {
       enabled: config.enabled ?? DEFAULT_CONFIG.enabled,
@@ -137,17 +143,13 @@ export class AdaptiveConcurrencyController {
       setMaxConcurrent(this.state.current);
       this.notifyStateChange();
 
-      console.log(
-        JSON.stringify({
-          level: 'warn',
-          event: 'adaptive_concurrency.decreased',
-          reason: 'rate_limit',
-          previousConcurrent,
-          newConcurrent: this.state.current,
-          decreaseFactor: this.config.decreaseFactor,
-          totalDecreases: this.state.totalDecreases,
-        }),
-      );
+      this.logger?.warn('adaptive_concurrency.decreased', {
+        reason: 'rate_limit',
+        previousConcurrent,
+        newConcurrent: this.state.current,
+        decreaseFactor: this.config.decreaseFactor,
+        totalDecreases: this.state.totalDecreases,
+      });
     }
   }
 
@@ -170,16 +172,12 @@ export class AdaptiveConcurrencyController {
 
       this.notifyStateChange();
 
-      console.log(
-        JSON.stringify({
-          level: 'warn',
-          event: 'adaptive_concurrency.decreased',
-          reason: 'manual',
-          previousConcurrent,
-          newConcurrent: this.state.current,
-          totalDecreases: this.state.totalDecreases,
-        }),
-      );
+      this.logger?.warn('adaptive_concurrency.decreased', {
+        reason: 'manual',
+        previousConcurrent,
+        newConcurrent: this.state.current,
+        totalDecreases: this.state.totalDecreases,
+      });
     }
   }
 
