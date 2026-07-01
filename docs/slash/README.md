@@ -36,7 +36,7 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/mcp` | `packages/cli/src/slash-commands/mcp.ts` | Manage MCP servers |
 | `/auth` | `packages/cli/src/slash-commands/auth.ts` | API key status dashboard; run `wstack auth` for full key manager |
 | `/spawn` | `packages/cli/src/slash-commands/spawn-agents.ts` | Spawn an isolated subagent |
-| `/agents` | `packages/cli/src/slash-commands/spawn-agents.ts` | Show subagents or toggle the agents monitor |
+| `/agents` | `packages/cli/src/slash-commands/agents.ts` | Monitor subagents: timeline stream toggle, list, per-agent transcript |
 | `/director` | `packages/cli/src/slash-commands/spawn-agents.ts` | Promote to director mode |
 | `/delegate` | `packages/cli/src/slash-commands/delegate.ts` | Hand a task to a specialist subagent; `/delegate list` for roles |
 | `/fleet` | `packages/cli/src/slash-commands/fleet.ts` | Fleet status, usage, kill, manifest, retry, log, stream |
@@ -59,11 +59,16 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/review` | `packages/cli/src/slash-commands/review.ts` | Run a review pass (LLM-driven code review) |
 | `/mailbox` | `packages/cli/src/slash-commands/mailbox.ts` | Inter-agent mailbox inspection and messaging |
 | `/mailbox-demo` | `packages/cli/src/slash-commands/mailbox-demo.ts` | Demo mailbox routing for development |
+| `/mailbox-serve` | `packages/cli/src/slash-commands/mailbox-serve.ts` | Start the mailbox HTTP bridge for external agents |
 | `/fallback` | `packages/cli/src/slash-commands/fallback.ts` | Configure fallback model behavior |
-| `/working-dir` | `packages/cli/src/slash-commands/working-dir.ts` | Inspect and manage working directory state |
-| `/project` | `packages/cli/src/slash-commands/project.ts` | Project-level operations (list, pick, create) |
+| `/working_dir` | `packages/cli/src/slash-commands/working-dir.ts` | Show or change the working directory; `/wd`, `/cd` aliases |
+| `/project` | `packages/cli/src/slash-commands/project.ts` | Project picker and registry (list, add, rename, remove, switch) |
 | `/mouse` | `packages/cli/src/slash-commands/mouse.ts` | Mouse event capture for UI testing |
 | `/telegram-settings` | `packages/cli/src/slash-commands/telegram-settings.ts` | Configure Telegram notification preferences |
+| `/audit` | `packages/cli/src/slash-commands/audit.ts` | Side-effect audit trail (bash, install, fetch); `/sideeffects`, `/side` aliases |
+| `/f` | `packages/cli/src/slash-commands/f-keys.ts` | Open F-key panels by number (`/f 1`–`/f 12`, `/f1`–`/f12`) |
+| `/shadow` | `packages/cli/src/slash-commands/shadow.ts` | Start, manage, and stop the Shadow Agent fleet monitor |
+| `/security` | `packages/cli/src/slash-commands/security.ts` | Security diagnostics: audit-deps, scan dispatch, redact-test |
 
 ## Built-in plugin commands
 
