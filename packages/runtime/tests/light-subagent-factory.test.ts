@@ -13,6 +13,14 @@ import {
 import { describe, expect, it } from 'vitest';
 import { makeLightSubagentFactory } from '../src/index.js';
 
+const reasoningCaps = {
+  default: 'enabled',
+  disableSupported: true,
+  effortSupported: true,
+  effortLevels: ['low', 'medium', 'high'],
+  preserveThinking: 'optional',
+} as const;
+
 const noopProvider: Provider = {
   id: 'noop',
   capabilities: { streaming: false, tools: true, vision: false, reasoning: false },
@@ -90,13 +98,14 @@ function sessionShim(): SessionWriter {
   } satisfies SessionWriter;
 }
 
-function makeDeps(providerRegistered = true) {
+function makeDeps(providerRegistered = true, configOverride: Partial<Config> = {}) {
   const config = {
     provider: 'noop',
     model: 'noop',
     providers: { noop: { type: 'noop' } },
     features: {},
     tools: {},
+    ...configOverride,
   } as never as Config;
 
   const container = new Container();
@@ -136,6 +145,11 @@ function makeDeps(providerRegistered = true) {
     toolRegistry,
     session: sessionShim(),
     projectRoot: '/proj',
+    modelsRegistry: {
+      getModel: async () => ({
+        capabilities: { reasoningConfig: reasoningCaps },
+      }),
+    } as never,
   };
 }
 
@@ -190,5 +204,20 @@ describe('makeLightSubagentFactory', () => {
     expect(r.agent.ctx.session.traceId).toBe('parent-trace');
     r.agent.ctx.session.traceId = 'child-trace';
     expect(deps.session.traceId).toBe('child-trace');
+  });
+
+  it('applies role-specific reasoning runtime from the model matrix', async () => {
+    const deps = makeDeps(true, {
+      modelRuntime: { reasoning: { mode: 'auto', effort: 'high' } },
+      modelMatrix: {
+        executor: { modelRuntime: { reasoning: { effort: 'low' } } },
+      },
+    } as never);
+    const factory = makeLightSubagentFactory(deps);
+    const r = await factory({ id: 's1', role: 'executor' });
+
+    const req = await r.agent.pipelines.request.run({ model: 'noop' } as never);
+
+    expect(req.reasoning).toEqual({ effort: 'low' });
   });
 });

@@ -38,6 +38,8 @@ describe('wstack-paths', () => {
       projectRoot: '/work/x',
     });
     expect(paths.globalRoot).toBe(path.join('/home/dev', '.wrongstack'));
+    expect(paths.globalSkills).toBe(path.join('/home/dev', '.wrongstack', 'skills'));
+    expect(paths.inProjectSkills).toBe(path.join('/work/x', '.wrongstack', 'skills'));
     expect(paths.modelsCache).toContain('cache');
     expect(paths.projectDir).toContain('projects');
     expect(paths.projectDir).toContain(paths.projectSlug);

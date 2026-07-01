@@ -30,6 +30,36 @@ export interface ResolvedModelRuntime {
 }
 
 /**
+ * Overlay a scoped runtime override (for example a subagent role matrix entry)
+ * on top of the session-wide runtime settings. Nested objects merge so a role
+ * can set only `reasoning.effort` without losing the leader's cache TTL or
+ * other gated parameters.
+ */
+export function mergeModelRuntime(
+  base: ModelRuntimeConfig | undefined,
+  override: ModelRuntimeConfig | undefined,
+): ModelRuntimeConfig | undefined {
+  if (!base) return override;
+  if (!override) return base;
+  return {
+    ...base,
+    ...override,
+    reasoning:
+      base.reasoning || override.reasoning
+        ? { ...base.reasoning, ...override.reasoning }
+        : undefined,
+    cache:
+      base.cache || override.cache
+        ? { ...base.cache, ...override.cache }
+        : undefined,
+    parameters:
+      base.parameters || override.parameters
+        ? { ...base.parameters, ...override.parameters }
+        : undefined,
+  };
+}
+
+/**
  * Resolve user-facing runtime settings into request fields for a specific
  * model capability profile. Pure function — safe to unit-test without a
  * provider or event bus.

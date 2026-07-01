@@ -49,6 +49,8 @@ export interface RunTuiOptions {
   yolo?: boolean | undefined;
   /** Query live YOLO state from the permission policy. */
   getYolo?: (() => boolean) | undefined;
+  /** Set live YOLO state from TUI-owned controls such as ConfirmPrompt. */
+  onYolo?: ((enabled: boolean) => boolean) | undefined;
   /** Query the live autonomy mode. */
   getAutonomy?: (() => 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel') | undefined;
   /**
@@ -856,6 +858,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           onQueueChange: opts.onQueueChange,
           yolo: opts.yolo,
           getYolo: opts.getYolo,
+          onYolo: opts.onYolo,
           getAutonomy: opts.getAutonomy,
           getEternalEngine: opts.getEternalEngine,
           getParallelEngine: opts.getParallelEngine,

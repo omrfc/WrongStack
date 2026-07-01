@@ -139,6 +139,28 @@ describe('createFallbackModelExtension', () => {
     expect(fired[0]?.providerSwitched).toBe(true);
   });
 
+  it('passes the fallback target model to buildProvider', async () => {
+    const buildProvider = vi.fn((id: string) => fakeProvider(id));
+    const ext = createFallbackModelExtension({
+      getConfig: () => cfg({ fallbackModels: ['openai/gpt-x'] }),
+      buildProvider,
+      events: new EventBus(),
+      logger,
+    })!;
+    const ctx = makeCtx('anthropic', 'opus');
+    let call = 0;
+    await ext.wrapProviderRunner!(
+      ctx,
+      { model: 'opus' } as never,
+      (async () => {
+        call++;
+        if (call === 1) throw overload('anthropic');
+        return { stopReason: 'end_turn', usage: { input: 0, output: 0 } } as never;
+      }) as never,
+    );
+    expect(buildProvider).toHaveBeenCalledWith('openai', 'gpt-x');
+  });
+
   it('does not fall back on a non-overload error', async () => {
     const ext = createFallbackModelExtension({
       getConfig: () => cfg({ fallbackModels: ['haiku'] }),
@@ -179,11 +201,12 @@ describe('createFallbackModelExtension', () => {
     expect(ctx.model).toBe('haiku');
   });
 
-  it('notifies onModelSwitch on fallback hop and on primary restore', async () => {
+  it('notifies onModelSwitch on fallback hop and on primary restore when cooldown is disabled', async () => {
     const switches: Array<[string, string]> = [];
     const ext = createFallbackModelExtension({
       getConfig: () => cfg({ fallbackModels: ['openai/gpt-x'] }),
       buildProvider: fakeProvider,
+      primaryCooldownMs: 0,
       onModelSwitch: (p, m) => {
         switches.push([p, m]);
       },
@@ -245,10 +268,13 @@ describe('createFallbackModelExtension', () => {
     expect(order).toEqual(['inner-1', 'switch-start', 'switch-done', 'inner-2']);
   });
 
-  it('restores the primary at the start of the next turn (beforeRun)', async () => {
+  it('keeps the fallback during primary cooldown, then probes the primary', async () => {
+    let t = 0;
     const ext = createFallbackModelExtension({
       getConfig: () => cfg({ fallbackModels: ['haiku'] }),
       buildProvider: fakeProvider,
+      primaryCooldownMs: 1000,
+      now: () => t,
       events: new EventBus(),
       logger,
     })!;
@@ -265,10 +291,55 @@ describe('createFallbackModelExtension', () => {
       }) as never,
     );
     expect(ctx.model).toBe('haiku');
-    // Next turn: beforeRun resets to the configured primary.
+    // Next turn during cooldown: stay on the working fallback.
+    await ext.beforeRun!(ctx, {} as never);
+    expect(ctx.model).toBe('haiku');
+    t = 1000;
+    // Cooldown elapsed: beforeRun restores the configured primary as a probe.
     await ext.beforeRun!(ctx, {} as never);
     expect(ctx.model).toBe('opus');
     expect(ctx.provider.id).toBe('anthropic');
+  });
+
+  it('increases the primary cooldown after repeated failed probes', async () => {
+    let t = 0;
+    const ext = createFallbackModelExtension({
+      getConfig: () => cfg({ fallbackModels: ['haiku'] }),
+      buildProvider: fakeProvider,
+      primaryCooldownMs: 100,
+      primaryCooldownMaxMs: 1000,
+      now: () => t,
+      events: new EventBus(),
+      logger,
+    })!;
+    const ctx = makeCtx('anthropic', 'opus');
+
+    let call = 0;
+    const runOnce = () =>
+      ext.wrapProviderRunner!(
+        ctx,
+        { model: ctx.model } as never,
+        (async () => {
+          call++;
+          if (call === 1 || call === 3) throw overload('anthropic');
+          return { stopReason: 'end_turn', usage: { input: 0, output: 0 } } as never;
+        }) as never,
+      );
+
+    await runOnce();
+    expect(ctx.model).toBe('haiku');
+    t = 100;
+    await ext.beforeRun!(ctx, {} as never);
+    expect(ctx.model).toBe('opus');
+
+    await runOnce();
+    expect(ctx.model).toBe('haiku');
+    t = 299;
+    await ext.beforeRun!(ctx, {} as never);
+    expect(ctx.model).toBe('haiku');
+    t = 300;
+    await ext.beforeRun!(ctx, {} as never);
+    expect(ctx.model).toBe('opus');
   });
 });
 

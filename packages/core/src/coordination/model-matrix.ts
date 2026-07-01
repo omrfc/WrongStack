@@ -59,6 +59,7 @@ export function resolveModelMatrix(
 export interface ResolvedModelTarget {
   provider?: string | undefined;
   model?: string | undefined;
+  modelRuntime?: Config['modelRuntime'] | undefined;
   fallbackModels?: string[] | undefined;
   fallbackProfile?: string | undefined;
 }
@@ -77,17 +78,21 @@ export function resolveModelTargetFromEntry(
     return {
       provider: entry.provider,
       model: entry.model,
+      modelRuntime: entry.modelRuntime,
       fallbackProfile: entry.fallbackProfile,
       fallbackModels: fallbackProfileChain(config, entry.fallbackProfile),
     };
   }
   const chain = fallbackProfileChain(config, entry.fallbackProfile);
   const first = chain[0];
-  if (!first) return undefined;
+  if (!first) {
+    return entry.modelRuntime ? { modelRuntime: entry.modelRuntime } : undefined;
+  }
   const parsed = parseModelRef(first);
   return {
     provider: parsed.provider,
     model: parsed.model,
+    modelRuntime: entry.modelRuntime,
     fallbackProfile: entry.fallbackProfile,
     fallbackModels: chain.slice(1),
   };

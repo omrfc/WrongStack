@@ -18,6 +18,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import type { Config } from '@wrongstack/core';
 
 // Minimal shape of what seedConfigToMeta / createPrefsSeeding need from runWebUI's opts.
 // CliWebUIOptions is defined in webui-server.ts; importing it directly would create a
@@ -31,16 +32,7 @@ interface CliWebUIOptions {
     favoriteModels?: string[] | undefined;
     favoriteModelsOnly?: boolean | undefined;
     fallbackAuto?: boolean | undefined;
-    modelMatrix?:
-      | Record<
-          string,
-          {
-            provider?: string | undefined;
-            model?: string | undefined;
-            fallbackProfile?: string | undefined;
-          }
-        >
-      | undefined;
+    modelMatrix?: Config['modelMatrix'] | undefined;
   } | undefined;
 }
 
@@ -146,9 +138,7 @@ export async function seedConfigToMeta(opts: CliWebUIOptions): Promise<void> {
       (cfg.fallbackProfiles as Record<string, string[]> | undefined) ?? {};
     meta['favoriteModels'] = (cfg.favoriteModels as string[]) ?? [];
     meta['favoriteModelsOnly'] = cfg.favoriteModelsOnly === true;
-    meta['modelMatrix'] =
-      (cfg.modelMatrix as Record<string, { provider?: string; model?: string; fallbackProfile?: string }> | undefined) ??
-      {};
+    meta['modelMatrix'] = (cfg.modelMatrix as Config['modelMatrix'] | undefined) ?? {};
     meta['fallbackAuto'] = cfg.fallbackAuto !== false;
     meta['featureMcp'] = features['mcp'] !== false;
     meta['featurePlugins'] = features['plugins'] !== false;
@@ -252,16 +242,7 @@ export function createPrefsSeeding(opts: CliWebUIOptions): PrefsSeeding {
       typeof payload['modelMatrix'] === 'object' &&
       !Array.isArray(payload['modelMatrix'])
     ) {
-      patchLiveAppConfig({
-        modelMatrix: payload['modelMatrix'] as Record<
-          string,
-          {
-            provider?: string | undefined;
-            model?: string | undefined;
-            fallbackProfile?: string | undefined;
-          }
-        >,
-      });
+      patchLiveAppConfig({ modelMatrix: payload['modelMatrix'] as Config['modelMatrix'] });
     }
     if (!configPath) return;
 

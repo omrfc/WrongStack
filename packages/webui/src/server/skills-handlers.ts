@@ -36,6 +36,10 @@ export interface SkillsContext {
   skillInstaller: SkillInstaller | undefined;
   /** Project root — used by skills.create to write `.wrongstack/skills/…`. */
   projectRoot: string;
+  /** Project skills directory, normally `<project>/.wrongstack/skills`. */
+  projectSkillsDir?: string | undefined;
+  /** User-global skills directory, normally `~/.wrongstack/skills`. */
+  globalSkillsDir?: string | undefined;
 }
 
 // ── Shared handlers ───────────────────────────────────────────────────
@@ -279,8 +283,14 @@ export async function handleSkillsCreate(
   try {
     const targetDir =
       createPayload.scope === 'global'
-        ? path.join(wstackGlobalRoot(), 'skills', createPayload.name.trim())
-        : path.join(ctx.projectRoot, '.wrongstack', 'skills', createPayload.name.trim());
+        ? path.join(
+            ctx.globalSkillsDir ?? path.join(wstackGlobalRoot(), 'skills'),
+            createPayload.name.trim(),
+          )
+        : path.join(
+            ctx.projectSkillsDir ?? path.join(ctx.projectRoot, '.wrongstack', 'skills'),
+            createPayload.name.trim(),
+          );
 
     // Check if directory already exists
     try {

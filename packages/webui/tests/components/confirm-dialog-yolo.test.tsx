@@ -1,10 +1,11 @@
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sendConfirm = vi.hoisted(() => vi.fn());
+const updatePrefs = vi.hoisted(() => vi.fn());
 
 vi.mock('@/hooks/useWebSocket', () => ({
-  useWebSocket: () => ({ sendConfirm }),
+  useWebSocket: () => ({ sendConfirm, updatePrefs }),
 }));
 
 import { ConfirmDialog } from '../../src/components/ConfirmDialog';
@@ -14,6 +15,7 @@ import { useUIStore } from '../../src/stores/ui-store';
 describe('ConfirmDialog YOLO behavior', () => {
   beforeEach(() => {
     sendConfirm.mockClear();
+    updatePrefs.mockClear();
     act(() => {
       useLocalPrefs.getState().set({ yolo: false });
       useUIStore.getState().hideConfirm();
@@ -64,5 +66,34 @@ describe('ConfirmDialog YOLO behavior', () => {
       expect(useUIStore.getState().showConfirmDialog).toBe(true);
     });
     expect(sendConfirm).not.toHaveBeenCalled();
+  });
+
+  it('offers an "Enable YOLO" CTA when yolo is off; clicking it enables YOLO and auto-approves the prompt', async () => {
+    const { getByTitle } = render(<ConfirmDialog />);
+
+    act(() => {
+      useUIStore.getState().showConfirm({
+        id: 'confirm_3',
+        toolName: 'batch_tool_use',
+        input: { calls: [{ tool: 'grep', input: { pattern: 'x' } }] },
+        suggestedPattern: 'batch_tool_use',
+        riskTier: 'standard',
+      });
+    });
+
+    const cta = getByTitle('Enable YOLO mode (auto-approve this and future non-destructive calls)');
+    expect(cta).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(cta);
+    });
+
+    // Pref flipped locally and pushed to the server.
+    expect(useLocalPrefs.getState().yolo).toBe(true);
+    expect(updatePrefs).toHaveBeenCalledWith({ yolo: true });
+    // The now-live YOLO effect auto-approves the visible non-destructive prompt.
+    await waitFor(() => {
+      expect(sendConfirm).toHaveBeenCalledWith('confirm_3', 'yes');
+    });
   });
 });

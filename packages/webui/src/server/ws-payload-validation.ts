@@ -288,6 +288,41 @@ const ENUM_PREF_KEYS: Record<string, Set<string>> = {
   cacheTtl: CACHE_TTL_VALUES,
 };
 
+function validateModelRuntimeValue(modelRuntime: Record<string, unknown>, path: string): string | null {
+  const reasoning = modelRuntime['reasoning'];
+  if (reasoning !== undefined) {
+    if (!isRecord(reasoning)) return `${path}.reasoning must be an object when provided`;
+    const mode = reasoning['mode'];
+    const effort = reasoning['effort'];
+    const preserve = reasoning['preserve'];
+    if (mode !== undefined && (typeof mode !== 'string' || !REASONING_MODE_VALUES.has(mode))) {
+      return `${path}.reasoning.mode must be one of: ${Array.from(REASONING_MODE_VALUES).join(', ')}`;
+    }
+    if (effort !== undefined && (typeof effort !== 'string' || !REASONING_EFFORT_VALUES.has(effort))) {
+      return `${path}.reasoning.effort must be one of: ${Array.from(REASONING_EFFORT_VALUES).join(', ')}`;
+    }
+    if (preserve !== undefined && typeof preserve !== 'boolean') {
+      return `${path}.reasoning.preserve must be a boolean when provided`;
+    }
+  }
+
+  const cache = modelRuntime['cache'];
+  if (cache !== undefined) {
+    if (!isRecord(cache)) return `${path}.cache must be an object when provided`;
+    const ttl = cache['ttl'];
+    if (ttl !== undefined && (typeof ttl !== 'string' || !CACHE_TTL_VALUES.has(ttl) || ttl === 'default')) {
+      return `${path}.cache.ttl must be one of: 5m, 1h`;
+    }
+  }
+
+  const parameters = modelRuntime['parameters'];
+  if (parameters !== undefined && !isRecord(parameters)) {
+    return `${path}.parameters must be an object when provided`;
+  }
+
+  return null;
+}
+
 function validatePreferenceValue(key: string, value: unknown): string | null {
   if (BOOLEAN_PREF_KEYS.has(key)) {
     return typeof value === 'boolean' ? null : `prefs.update payload.${key} must be a boolean`;
@@ -320,6 +355,7 @@ function validatePreferenceValue(key: string, value: unknown): string | null {
       const provider = entry['provider'];
       const model = entry['model'];
       const fallbackProfile = entry['fallbackProfile'];
+      const modelRuntime = entry['modelRuntime'];
       if (provider !== undefined && typeof provider !== 'string') {
         return `prefs.update payload.${key}.provider must be a string when provided`;
       }
@@ -329,8 +365,15 @@ function validatePreferenceValue(key: string, value: unknown): string | null {
       if (fallbackProfile !== undefined && typeof fallbackProfile !== 'string') {
         return `prefs.update payload.${key}.fallbackProfile must be a string when provided`;
       }
-      if (model === undefined && fallbackProfile === undefined) {
-        return `prefs.update payload.${key} entries require model or fallbackProfile`;
+      if (modelRuntime !== undefined && !isRecord(modelRuntime)) {
+        return `prefs.update payload.${key}.modelRuntime must be an object when provided`;
+      }
+      if (isRecord(modelRuntime)) {
+        const runtimeError = validateModelRuntimeValue(modelRuntime, `prefs.update payload.${key}.modelRuntime`);
+        if (runtimeError) return runtimeError;
+      }
+      if (model === undefined && fallbackProfile === undefined && modelRuntime === undefined) {
+        return `prefs.update payload.${key} entries require model, fallbackProfile, or modelRuntime`;
       }
     }
     return null;

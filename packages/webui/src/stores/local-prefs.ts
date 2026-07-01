@@ -35,7 +35,19 @@ export interface LocalPrefs {
   /** Restrict auto-derived fallback chains to favorite models. */
   favoriteModelsOnly: boolean;
   /** Per-role/phase/default model routing matrix. */
-  modelMatrix: Record<string, { provider?: string; model?: string; fallbackProfile?: string }>;
+  modelMatrix: Record<
+    string,
+    {
+      provider?: string;
+      model?: string;
+      fallbackProfile?: string;
+      modelRuntime?: {
+        reasoning?: { mode?: 'auto' | 'on' | 'off'; effort?: string; preserve?: boolean };
+        cache?: { ttl?: '5m' | '1h' };
+        parameters?: Record<string, unknown>;
+      };
+    }
+  >;
   /** Auto-derive a fallback chain from keyed providers when the list is empty. */
   fallbackAuto: boolean;
 
@@ -93,10 +105,14 @@ export interface LocalPrefs {
 }
 
 const DEFAULTS: Omit<LocalPrefs, 'set' | 'reset'> = {
-  autonomy: 'off',
+  // Default to self-driving + auto-approve, matching the core config defaults
+  // (config.autonomy.defaultMode='auto', config.yolo=true). Existing browsers
+  // are synced from the server's prefs snapshot on connect (handlePrefsUpdated),
+  // so this only seeds fresh browsers before the first connect.
+  autonomy: 'auto',
   autonomyDelayMs: 45_000,
   autoProceedMaxIterations: 50,
-  yolo: false,
+  yolo: true,
   maxIterations: 500,
   chime: false,
   confirmExit: true,

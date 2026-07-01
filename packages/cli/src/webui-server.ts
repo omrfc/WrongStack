@@ -61,7 +61,6 @@ import {
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DefaultSecretScrubber,
   GlobalMailbox,
-  projectHash,
   PromptUsageStore,
   resolveProjectDir,
   resolveWstackPaths,
@@ -405,6 +404,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     wsPort = await findFreePort(host, requestedWsPort, { exclude: new Set([httpPort]) });
   }
   const port = wsPort; // existing WS code below refers to `port`
+  const globalRoot = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : wstackGlobalRoot();
   // Per-connection message rate limit. OFF by default — this is a local,
   // single-user tool and the limit (which counted pings/list calls too) was
   // tripping during normal use. Opt back in by setting WEBUI_RATE_LIMIT to a
@@ -431,8 +431,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   let customModeStoreP: Promise<CustomModeStore> | null = null;
   const getCustomModeStore = (): Promise<CustomModeStore> => {
     customModeStoreP ??= (async () => {
-      const dir = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : wstackGlobalRoot();
-      const store = createCustomModeStore(dir);
+      const store = createCustomModeStore(globalRoot);
       await store.load();
       return store;
     })();
@@ -496,7 +495,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // Seed agent.ctx.meta from config.json on startup, then snapshot/persist
   // via the prefs handlers. Extracted to prefs-seeding.ts (PR 8 of Issue #30).
   await seedConfigToMeta(opts);
-  if (typeof opts.agent.ctx.meta['yolo'] === 'boolean') {
+  if (typeof opts.agent.ctx?.meta?.['yolo'] === 'boolean') {
     opts.onYoloSwitch?.(opts.agent.ctx.meta['yolo']);
   }
 
@@ -691,7 +690,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     host,
     httpPort,
     wsPort,
-    globalRoot: path.dirname(opts.globalConfigPath ?? ''),
+    globalRoot,
     onFleetPing: () => {
       void fleetBroadcastCli?.();
     },
@@ -718,7 +717,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
 
   // Record this instance so it shows up in `wstackui --list` /
   // ~/.wrongstack/webui-instances.json alongside standalone instances.
-  const registryBaseDir = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : undefined;
+  const registryBaseDir = globalRoot;
   if (opts.projectRoot) {
     registerWebuiInstance({
       pid: process.pid,
@@ -1671,18 +1670,30 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // disabled and the handlers respond with an "enabled: false" payload.
   const skillsProjectRoot =
     opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
+  const skillsPaths = skillsProjectRoot
+    ? resolveWstackPaths({
+        projectRoot: skillsProjectRoot,
+        globalRoot,
+      })
+    : undefined;
   const skillsCtx: SkillsContext = {
     skillLoader: opts.skillLoader,
     skillInstaller: opts.skillLoader
       ? new SkillInstaller({
-          manifestPath: path.join(wstackGlobalRoot(), 'installed-skills.json'),
-          projectSkillsDir: path.join(skillsProjectRoot, '.wrongstack', 'skills'),
-          globalSkillsDir: path.join(wstackGlobalRoot(), 'skills'),
-          projectHash: skillsProjectRoot ? projectHash(skillsProjectRoot) : '',
+          manifestPath: path.join(
+            skillsPaths?.globalRoot ?? wstackGlobalRoot(),
+            'installed-skills.json',
+          ),
+          projectSkillsDir:
+            skillsPaths?.inProjectSkills ?? path.join(skillsProjectRoot, '.wrongstack', 'skills'),
+          globalSkillsDir: skillsPaths?.globalSkills ?? path.join(wstackGlobalRoot(), 'skills'),
+          projectHash: skillsPaths?.projectHash ?? '',
           skillLoader: opts.skillLoader,
         })
       : undefined,
     projectRoot: skillsProjectRoot,
+    projectSkillsDir: skillsPaths?.inProjectSkills,
+    globalSkillsDir: skillsPaths?.globalSkills,
   };
 
   // Prompt library context — shared handlers, one source of truth with the
@@ -1803,7 +1814,6 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       // live agent/session status to all connected WebSocket clients.
       // This keeps the WebUI session panel in sync even when agents
       // run in background (project switches, multiple processes).
-      const globalRoot = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : undefined;
       if (globalRoot) {
         const broadcastSessions = async () => {
           try {

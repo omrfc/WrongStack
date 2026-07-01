@@ -36,6 +36,22 @@ interface LiveSession {
   agents: LiveAgent[];
 }
 
+export async function sessionApiError(res: Response): Promise<string> {
+  try {
+    const body = (await res.clone().json()) as { error?: unknown; message?: unknown };
+    const message = typeof body.error === 'string' ? body.error : body.message;
+    if (typeof message === 'string' && message.trim()) return message;
+  } catch {
+    try {
+      const text = await res.text();
+      if (text.trim()) return text.trim();
+    } catch {
+      // fall through to status text
+    }
+  }
+  return res.statusText || `HTTP ${res.status}`;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function agentIcon(status: string): string {
@@ -105,7 +121,7 @@ export function SessionsDashboard() {
           setSessions([]);
           return;
         }
-        throw new Error(`HTTP ${res.status}`);
+        throw new Error(`HTTP ${res.status}: ${await sessionApiError(res)}`);
       }
       const data = (await res.json()) as LiveSession[];
       setSessions(data);
@@ -136,7 +152,7 @@ export function SessionsDashboard() {
   if (error) {
     return (
       <div className="p-4 text-slate-500 text-sm">
-        Session API unavailable — run <code className="text-cyan-400">wstack --webui</code> with session tracking enabled.
+        Session API unavailable: <span className="text-slate-400">{error}</span>
       </div>
     );
   }

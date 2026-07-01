@@ -504,20 +504,29 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     });
   } else {
     // When skipping interactive prompts (--webui or --no-interactive), use saved
-    // preferences or sensible defaults. Director and autonomy are OFF in non-interactive
-    // mode to prevent unexpected autonomous behavior.
+    // preferences or sensible defaults. Director stays OFF in non-interactive mode.
+    // Autonomy defaults to the configured defaultMode (now 'auto') so non-interactive
+    // sessions self-drive too — unless the user explicitly opts out with --no-autonomy
+    // (or sets autonomy.defaultMode: 'off' in config).
+    // Launch autonomy only supports 'off' | 'auto' (no 'suggest' surface here).
+    // Respect an explicit opt-out (--no-autonomy or defaultMode 'off'); otherwise
+    // default to 'auto' so non-interactive sessions self-drive too.
+    const nonInteractiveAutonomy: 'off' | 'auto' =
+      flags['no-autonomy'] === true || config.autonomy?.defaultMode === 'off'
+        ? 'off'
+        : 'auto';
     const effectiveChoices = config.launch
       ? {
           mode: flags['no-tui'] ? 'repl' : (config.launch.mode ?? 'tui'),
           yolo: config.yolo ?? true,
           director: false, // Disable director in non-interactive mode
-          autonomy: 'off', // Disable autonomy in non-interactive mode
+          autonomy: nonInteractiveAutonomy,
         }
       : {
           mode: 'repl',
           yolo: true,
           director: false,
-          autonomy: 'off',
+          autonomy: nonInteractiveAutonomy,
         };
 
     if (effectiveChoices.mode === 'repl') {

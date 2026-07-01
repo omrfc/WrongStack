@@ -398,6 +398,8 @@ export type State = {
     input: unknown;
     suggestedPattern: string;
     resolve: (decision: 'yes' | 'no' | 'always' | 'deny') => void;
+    /** True when the call was classified destructive (enabling YOLO won't auto-approve it). */
+    destructive: boolean;
   }[];
   /**
    * Active prompt-refinement ("did you mean this?") panel. Set while the

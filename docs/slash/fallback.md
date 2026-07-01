@@ -4,10 +4,12 @@ View or change the **cross-provider fallback chain** — the ordered list of
 models the agent rotates to when the active model is rate-limited or overloaded
 (HTTP **429 / 529 / 5xx**) and its own retries are exhausted.
 
-This makes 429 storms recoverable without babysitting: the primary model is
-retried first on every user turn, and only after its per-model retry policy
-(up to 5 backoff attempts for a 429) gives up does the chain engage. The switch
-applies to the leader **and** every subagent.
+This makes 429 storms recoverable without babysitting: after the primary model's
+per-model retry policy gives up, the chain engages and the agent stays on the
+working fallback while the primary is cooling down. Once the cooldown expires,
+the primary is tried as a half-open probe; a successful probe restores it, while
+another overload backs off again. The switch applies to the leader **and** every
+subagent.
 
 ## Usage
 
@@ -40,9 +42,11 @@ Turn it off with `/fallback auto off` to use **only** an explicit
 Both the explicit chain (`fallbackModels`) and the toggle (`fallbackAuto`) are
 written to `~/.wrongstack/config.json`. Changes take effect immediately — the
 effective chain is recomputed on every turn, so there's no need to restart.
+The WebUI Settings panel edits the same fields.
 
 ## Related
 
 - `/setmodel` — change the leader model and the per-task model matrix.
 - `--fallback-model <list>` — set the chain at launch from the CLI.
-- The `provider.fallback` event fires on each hop (surfaced in the REPL/TUI).
+- The `provider.fallback` event fires on each hop (surfaced in the REPL/TUI and
+  available to WebUI event plumbing).

@@ -2,7 +2,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { color } from '../utils/color.js';
 import { toErrorMessage } from '../utils/error.js';
-import { projectHash, wstackGlobalRoot } from '../utils/wstack-paths.js';
+import { resolveWstackPaths } from '../utils/wstack-paths.js';
 import { FOREIGN_SKILL_TOOLS } from '../skills/foreign-sources.js';
 import { SkillInstaller } from '../skills/skill-installer.js';
 import type { Plugin } from '../types/plugin.js';
@@ -57,12 +57,12 @@ export function createSkillsPlugin(opts?: SkillsPluginOptions): Plugin {
 }
 
 function makeInstaller(skillLoader: SkillLoader | undefined, projectRoot: string): SkillInstaller {
-  const globalRoot = wstackGlobalRoot();
+  const paths = resolveWstackPaths({ projectRoot });
   return new SkillInstaller({
-    manifestPath: path.join(globalRoot, 'installed-skills.json'),
-    projectSkillsDir: path.join(projectRoot, '.wrongstack', 'skills'),
-    globalSkillsDir: path.join(globalRoot, 'skills'),
-    projectHash: projectHash(projectRoot),
+    manifestPath: path.join(paths.globalRoot, 'installed-skills.json'),
+    projectSkillsDir: paths.inProjectSkills,
+    globalSkillsDir: paths.globalSkills,
+    projectHash: paths.projectHash,
     skillLoader,
   });
 }

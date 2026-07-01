@@ -31,7 +31,7 @@ export interface FallbackModelDeps {
    * path, which shares this with the `/model` switch logic. May be async — the
    * subagent host resolves a provider's real context window asynchronously.
    */
-  buildProvider: (providerId: string) => Provider | Promise<Provider>;
+  buildProvider: (providerId: string, modelId?: string | undefined) => Provider | Promise<Provider>;
   /**
    * Called after the active model changes (a fallback hop or the primary
    * restore) so the host can refresh the auto-compaction / context-window
@@ -41,6 +41,20 @@ export interface FallbackModelDeps {
   events: EventBus;
   /** Optional — warnings about un-buildable fallback providers. */
   logger?: Logger | undefined;
+  /**
+   * Base cooldown after the configured primary fails with a fallback-worthy
+   * error. While active, `beforeRun` leaves the context on the working fallback
+   * instead of retrying the primary at the start of every turn. Default: 60s.
+   * Set 0 to preserve the legacy "probe primary every turn" behavior.
+   */
+  primaryCooldownMs?: number | undefined;
+  /**
+   * Maximum exponential cooldown for repeated failed primary probes. Default:
+   * 10 minutes. Ignored when `primaryCooldownMs` is 0.
+   */
+  primaryCooldownMaxMs?: number | undefined;
+  /** Test hook for deterministic cooldown assertions. */
+  now?: (() => number) | undefined;
 }
 
 interface ModelRef {
@@ -189,6 +203,16 @@ export function effectiveFallbackChain(config: Config): string[] {
   return smartDefaultFallbackChain(config);
 }
 
+const DEFAULT_PRIMARY_COOLDOWN_MS = 60_000;
+const DEFAULT_PRIMARY_COOLDOWN_MAX_MS = 10 * 60_000;
+
+function sameTarget(
+  a: { providerId: string; model: string } | undefined,
+  b: { providerId: string; model: string },
+): boolean {
+  return !!a && a.providerId === b.providerId && a.model === b.model;
+}
+
 /**
  * Build the cross-provider fallback extension. Always returns an extension —
  * the effective chain (`effectiveFallbackChain`) is recomputed every turn from
@@ -202,12 +226,42 @@ export function effectiveFallbackChain(config: Config): string[] {
  * fallback only engages AFTER the active model's own retries are exhausted.
  * Because the wrapper resolves within a single provider call, it does not
  * consume the agent loop's `recoveryRetries` budget — chains longer than two
- * entries work. `beforeRun` restores the configured primary at the start of
- * every turn, giving Claude's "retry the primary each user turn" semantics.
+ * entries work. `beforeRun` keeps the last working fallback while the primary
+ * is cooling down, then restores the configured primary for a half-open probe.
  */
 export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExtension {
   // True when a prior turn left the live context on a fallback model.
   let dirty = false;
+  let primaryFailureStreak = 0;
+  let blockedPrimary: { providerId: string; model: string } | undefined;
+  let primaryBlockedUntil = 0;
+
+  const now = () => deps.now?.() ?? Date.now();
+  const primaryTarget = (cfg: Config) => ({ providerId: cfg.provider, model: cfg.model });
+  const cooldownBase = () => Math.max(0, deps.primaryCooldownMs ?? DEFAULT_PRIMARY_COOLDOWN_MS);
+  const cooldownMax = () => Math.max(cooldownBase(), deps.primaryCooldownMaxMs ?? DEFAULT_PRIMARY_COOLDOWN_MAX_MS);
+  const primaryInCooldown = (cfg: Config) =>
+    sameTarget(blockedPrimary, primaryTarget(cfg)) && now() < primaryBlockedUntil;
+
+  const markPrimaryFailure = (cfg: Config) => {
+    const primary = primaryTarget(cfg);
+    primaryFailureStreak = sameTarget(blockedPrimary, primary) ? primaryFailureStreak + 1 : 1;
+    blockedPrimary = primary;
+    const base = cooldownBase();
+    if (base <= 0) {
+      primaryBlockedUntil = 0;
+      return;
+    }
+    const multiplier = 2 ** Math.max(0, primaryFailureStreak - 1);
+    primaryBlockedUntil = now() + Math.min(cooldownMax(), base * multiplier);
+  };
+
+  const resetPrimaryLadder = (cfg: Config) => {
+    if (!sameTarget(blockedPrimary, primaryTarget(cfg))) return;
+    primaryFailureStreak = 0;
+    blockedPrimary = undefined;
+    primaryBlockedUntil = 0;
+  };
 
   return {
     name: 'fallback-model',
@@ -215,27 +269,42 @@ export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExte
     beforeRun: async (ctx) => {
       if (!dirty) return;
       const cfg = deps.getConfig();
+      if (primaryInCooldown(cfg)) return;
       try {
-        ctx.provider = await deps.buildProvider(cfg.provider);
+        ctx.provider = await deps.buildProvider(cfg.provider, cfg.model);
         ctx.model = cfg.model;
         await deps.onModelSwitch?.(cfg.provider, cfg.model);
+        // The next provider call is the half-open primary probe. If it
+        // succeeds, the wrapper resets the ladder; if it fails, the catch path
+        // marks a longer cooldown and rotates back through the chain.
+        primaryBlockedUntil = 0;
       } catch (err) {
         deps.logger?.warn(
           `fallback-model: could not restore primary "${cfg.provider}/${cfg.model}": ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
+        markPrimaryFailure(cfg);
+        return;
       }
       dirty = false;
     },
 
     wrapProviderRunner: async (ctx, request, inner) => {
       try {
-        return await inner(ctx, request);
+        const response = await inner(ctx, request);
+        const cfg = deps.getConfig();
+        if (ctx.provider.id === cfg.provider && ctx.model === cfg.model) {
+          resetPrimaryLadder(cfg);
+        }
+        return response;
       } catch (firstErr) {
         let lastErr: unknown = firstErr;
         const cfg = deps.getConfig();
         const chain = effectiveFallbackChain(cfg);
+        if (shouldFallback(firstErr) !== null && ctx.provider.id === cfg.provider && ctx.model === cfg.model) {
+          markPrimaryFailure(cfg);
+        }
 
         for (const ref of chain) {
           const status = shouldFallback(lastErr);
@@ -244,12 +313,20 @@ export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExte
           const parsed = parseModelRef(ref);
           if (!parsed.model) continue;
           const targetProviderId = parsed.provider ?? cfg.provider;
+          if (targetProviderId === ctx.provider.id && parsed.model === ctx.model) continue;
+          if (
+            primaryInCooldown(cfg) &&
+            targetProviderId === cfg.provider &&
+            parsed.model === cfg.model
+          ) {
+            continue;
+          }
 
           const from = { providerId: ctx.provider.id, model: ctx.model };
 
           let nextProvider: Provider;
           try {
-            nextProvider = await deps.buildProvider(targetProviderId);
+            nextProvider = await deps.buildProvider(targetProviderId, parsed.model);
           } catch (err) {
             deps.logger?.warn(
               `fallback-model: skipping "${ref}" — cannot build provider "${targetProviderId}": ${

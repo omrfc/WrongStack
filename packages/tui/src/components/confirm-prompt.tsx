@@ -9,6 +9,10 @@ export interface ConfirmPromptProps {
   input: unknown;
   suggestedPattern: string;
   onDecision: (decision: ConfirmDecision) => void;
+  /** Enable YOLO mode (capital Y). Approves the current call only when non-destructive. */
+  onEnableYolo: () => void;
+  /** Whether this call was classified destructive (enabling YOLO won't auto-approve it). */
+  destructive?: boolean;
 }
 
 /** Ink color for each button's bracketed key. */
@@ -110,6 +114,8 @@ export function ConfirmPrompt({
   input,
   suggestedPattern,
   onDecision,
+  onEnableYolo,
+  destructive,
 }: ConfirmPromptProps): React.ReactElement {
   // Terminal bell on mount — alerts the user that action is required,
   // especially important when the agent has been running autonomously
@@ -121,6 +127,12 @@ export function ConfirmPrompt({
   useInput((input, _key) => {
     // Ignore empty input and CRLF/LF artifacts (Enter produces \r on Windows, \n on Unix)
     if (!input || input === '\r' || input === '\n') return;
+    // Capital 'Y' (Shift+y) enables YOLO mode — distinct from lowercase '[y]es'.
+    // Checked before toLowerCase() so the two can never collide.
+    if (input === 'Y') {
+      onEnableYolo();
+      return;
+    }
     const ch = input.toLowerCase();
     if (ch === 'y') {
       onDecision('yes');
@@ -170,6 +182,13 @@ export function ConfirmPrompt({
               <Text dimColor>{l.rest}</Text>
             </React.Fragment>
           ))}
+        </Text>
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>
+          {' '}
+          Tip: press <Text bold color="yellow">Y</Text> to enable YOLO mode
+          {destructive ? ' (skips future non-destructive approvals)' : ' (skips future approvals)'}.
         </Text>
       </Box>
     </Box>

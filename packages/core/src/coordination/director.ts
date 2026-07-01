@@ -1073,6 +1073,7 @@ export class Director implements ICoordinator {
       if (entry?.model) {
         config.model = entry.model;
         if (entry.provider) config.provider = entry.provider;
+        if (entry.modelRuntime) config.modelRuntime = entry.modelRuntime;
       }
     }
     // Enforce safety caps BEFORE touching the coordinator — a refused

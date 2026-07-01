@@ -782,10 +782,13 @@ export function formatAllSettingsSummary(values: SettingsPickerValues): string {
  * defaults". Used by {@link resetSettingsFieldValue}.
  */
 export const SETTINGS_DEFAULTS: Readonly<SettingsPickerValues> = Object.freeze({
-  mode: 'off',
+  // Factory defaults mirror the core config defaults: autonomy 'auto'
+  // (self-driving) and yolo on (auto-approve). Live values still come from
+  // config via getSettings(); these are the "reset to default" targets.
+  mode: 'auto',
   delayMs: 0,
   titleAnimation: true,
-  yolo: false,
+  yolo: true,
   streamFleet: true,
   chime: false,
   confirmExit: true,

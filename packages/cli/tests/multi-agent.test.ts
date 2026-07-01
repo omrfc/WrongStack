@@ -913,6 +913,43 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
     await dispose?.();
   });
 
+  it('applies role-specific reasoning runtime from the model matrix', async () => {
+    const deps = depsWithTools();
+    const liveConfig = {
+      provider: 'anthropic',
+      model: 'claude',
+      apiKey: 'fake',
+      modelRuntime: { reasoning: { mode: 'auto', effort: 'high' } },
+      modelMatrix: {
+        'security-reviewer': { modelRuntime: { reasoning: { effort: 'low' } } },
+      },
+    } as never as Config;
+    vi.mocked(deps.configStore.get).mockReturnValue(liveConfig);
+    deps.modelsRegistry = {
+      refresh: vi.fn(async () => ({})),
+      getProvider: vi.fn(async () => undefined),
+      getModel: vi.fn(async () => ({
+        capabilities: {
+          maxContext: 128_000,
+          reasoningConfig: {
+            default: 'enabled',
+            disableSupported: true,
+            effortSupported: true,
+            effortLevels: ['low', 'medium', 'high'],
+            preserveThinking: 'optional',
+          },
+        },
+      })),
+    } as never;
+    const host = new MultiAgentHost(deps);
+    const { agent, dispose } = await host.makeSubagentFactory(liveConfig)(slotCfg);
+
+    const req = await agent.pipelines.request.run({ model: 'claude' } as never);
+
+    expect(req.reasoning).toEqual({ effort: 'low' });
+    await dispose?.();
+  });
+
   // SubagentConfig.allowedCapabilities must reach the subagent's
   // AutoApprovePermissionPolicy via the factory — otherwise widening the
   // allowlist (e.g. /techstack granting fs.write) is silently inert and the

@@ -474,12 +474,12 @@ import { resetSettingsFieldValue, SETTINGS_DEFAULTS } from '../src/components/se
 
 describe('resetSettingsFieldValue', () => {
   it('returns the default value for a boolean field', () => {
-    const r = resetSettingsFieldValue(3); // yolo default = false
+    const r = resetSettingsFieldValue(3); // yolo default = true
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.label).toBe('YOLO mode');
-      expect(r.displayValue).toBe('off');
-      expect(r.patch.yolo).toBe(false);
+      expect(r.displayValue).toBe('on');
+      expect(r.patch.yolo).toBe(true);
     }
   });
 

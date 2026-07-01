@@ -60,7 +60,7 @@ describe('bootConfig', () => {
     const written = JSON.parse(raw);
     expect(written.configScope).toBe('global');
     expect(written.maxConcurrent).toBe(4);
-    expect(written.autonomy.defaultMode).toBe('off');
+    expect(written.autonomy.defaultMode).toBe('auto');
     expect(written.autonomy.autoProceedDelayMs).toBe(45_000);
     expect(written.autonomy.enhanceDelayMs).toBe(60_000);
     expect(written.modelRuntime.reasoning.effort).toBeUndefined();

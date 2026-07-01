@@ -13,6 +13,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import * as nodeFs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { WebSocket } from 'ws';
 import type { WSServerMessage } from '../../src/types.js';
 import {
@@ -230,6 +232,47 @@ describe('handleSkillsCreate', () => {
     const { ws, messages } = openWs();
     await handleSkillsCreate(ws, ctx, { payload: { name: 'ok-name', description: '   ', scope: 'project' } });
     expect(payloadOf(messages, 'skills.created')?.error).toMatch(/Description/);
+  });
+
+  it('creates project skills under .wrongstack/skills', async () => {
+    const tmp = await nodeFs.promises.mkdtemp(path.join(os.tmpdir(), 'skills-create-project-'));
+    try {
+      const projectRoot = path.join(tmp, 'project');
+      const projectSkillsDir = path.join(projectRoot, '.wrongstack', 'skills');
+      const ctx = makeCtx({ projectRoot, projectSkillsDir });
+      const { ws, messages } = openWs();
+      await handleSkillsCreate(ws, ctx, {
+        payload: { name: 'ok-name', description: 'Use when testing project skills.', scope: 'project' },
+      });
+      const skillPath = path.join(projectSkillsDir, 'ok-name', 'SKILL.md');
+      await expect(nodeFs.promises.readFile(skillPath, 'utf8')).resolves.toContain('name: ok-name');
+      expect(payloadOf(messages, 'skills.created')?.skill).toMatchObject({
+        path: skillPath,
+        scope: 'project',
+      });
+    } finally {
+      await nodeFs.promises.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('creates global skills under the user-global skills directory', async () => {
+    const tmp = await nodeFs.promises.mkdtemp(path.join(os.tmpdir(), 'skills-create-global-'));
+    try {
+      const globalSkillsDir = path.join(tmp, '.wrongstack', 'skills');
+      const ctx = makeCtx({ globalSkillsDir });
+      const { ws, messages } = openWs();
+      await handleSkillsCreate(ws, ctx, {
+        payload: { name: 'global-name', description: 'Use when testing global skills.', scope: 'global' },
+      });
+      const skillPath = path.join(globalSkillsDir, 'global-name', 'SKILL.md');
+      await expect(nodeFs.promises.readFile(skillPath, 'utf8')).resolves.toContain('name: global-name');
+      expect(payloadOf(messages, 'skills.created')?.skill).toMatchObject({
+        path: skillPath,
+        scope: 'global',
+      });
+    } finally {
+      await nodeFs.promises.rm(tmp, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1050,6 +1050,10 @@ export async function main(argv: string[]): Promise<number> {
     const { cfg } = resolveProviderCfg(providerId);
     await refreshMaxContext(providerId, modelId, cfg);
   };
+  const refreshRuntimeModelStateFor = async (providerId: string, modelId: string): Promise<void> => {
+    await refreshMaxContextFor(providerId, modelId);
+    await refreshActiveReasoningConfig(providerId, modelId);
+  };
 
   // Cross-provider fallback: switch to the next configured model when the
   // primary is overloaded (429/529/5xx). Registered unconditionally — the
@@ -1060,7 +1064,7 @@ export async function main(argv: string[]): Promise<number> {
     createFallbackModelExtension({
       getConfig: () => config,
       buildProvider: buildProviderForId,
-      onModelSwitch: refreshMaxContextFor,
+      onModelSwitch: refreshRuntimeModelStateFor,
       events,
       logger,
     }),
@@ -1192,7 +1196,12 @@ export async function main(argv: string[]): Promise<number> {
   let autonomyMode: import('./slash-commands/autonomy.js').AutonomyMode = (() => {
     const v = flags['autonomy'];
     if (v === 'auto' || v === 'suggest' || v === 'eternal' || v === 'eternal-parallel') return v;
-    return 'off';
+    // An explicit 'off' (e.g. --no-autonomy, or the non-interactive guard in
+    // boot.ts) is honored as a user/system opt-out. Only when the flag is
+    // genuinely unset do we fall back to the configured default mode (now
+    // 'auto'), so launches that don't pin a mode self-drive by default.
+    if (v === 'off') return 'off';
+    return (config.autonomy?.defaultMode ?? 'off') as import('./slash-commands/autonomy.js').AutonomyMode;
   })();
   autonomyModeRef.current = autonomyMode;
   // Next-task prediction toggle — persisted in config so it survives restarts.
@@ -1701,6 +1710,16 @@ export async function main(argv: string[]): Promise<number> {
   // Mutable coordinator controller — execution.ts fills its callbacks when
   // the AutonomousCoordinator is created lazily. Slash commands read from it.
   const coordinatorController: NonNullable<Parameters<typeof buildBuiltinSlashCommands>[0]['coordinatorController']> = {};
+
+  const setYoloMode = (setTo?: boolean): boolean => {
+    const policy = container.resolve(TOKENS.PermissionPolicy);
+    if (setTo !== undefined) {
+      policy.setYolo?.(setTo);
+      config = patchConfig(config, { yolo: setTo });
+      return setTo;
+    }
+    return policy.getYolo?.() ?? config.yolo ?? false;
+  };
 
   // Registry of the active multi-agent SDD board run. The webui board handler
   // and slash hooks steer the run through this; the run itself is CLI-owned.
@@ -2336,15 +2355,7 @@ export async function main(argv: string[]): Promise<number> {
         allServerPresets: allServers(),
       });
     },
-    onYolo: (setTo?: boolean) => {
-      const policy = container.resolve(TOKENS.PermissionPolicy);
-      if (setTo !== undefined) {
-        policy.setYolo?.(setTo);
-        config = patchConfig(config, { yolo: setTo });
-        return setTo;
-      }
-      return policy.getYolo?.() ?? config.yolo ?? false;
-    },
+    onYolo: setYoloMode,
     onNextPredict: (setTo?: boolean) => {
       if (setTo !== undefined) {
         nextPredictEnabled = setTo;
@@ -2876,10 +2887,8 @@ export async function main(argv: string[]): Promise<number> {
     statuslineHiddenItems,
     setStatuslineHiddenItems,
     saveStatuslineHiddenItems,
-    getYolo: () => {
-      const policy = container.resolve(TOKENS.PermissionPolicy);
-      return policy.getYolo?.() ?? config.yolo ?? false;
-    },
+    getYolo: setYoloMode,
+    onYolo: setYoloMode,
     getAutonomy: () => autonomyMode,
     onAutonomy: (setTo?) => {
       if (setTo !== undefined) {

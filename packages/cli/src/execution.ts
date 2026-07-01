@@ -251,6 +251,8 @@ export interface ExecutionDeps {
   onPanelOpen?: { current: ((action: string) => boolean) | null } | undefined;
   /** Query the live YOLO state from the permission policy. */
   getYolo?: (() => boolean) | undefined;
+  /** Set the live YOLO state from TUI-owned controls such as ConfirmPrompt. */
+  onYolo?: ((setTo?: boolean) => boolean) | undefined;
   /** Query the live autonomy mode. */
   getAutonomy?: (() => import('./slash-commands/autonomy.js').AutonomyMode) | undefined;
   /** Set autonomy mode (used by SIGINT handler to flip back to 'off'). */
@@ -430,6 +432,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     agentsMonitorController,
     onPanelOpen,
     getYolo,
+    onYolo,
     getAutonomy,
     onAutonomy,
     getNextPredict,
@@ -803,6 +806,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           mouse: flags.mouse ? true : undefined,
           yolo: !!config.yolo,
           getYolo,
+          onYolo,
           getAutonomy,
           // Next-task prediction (/next). Host owns the gating: returns [] when
           // the toggle is off or autonomy is self-driving, so the TUI can call

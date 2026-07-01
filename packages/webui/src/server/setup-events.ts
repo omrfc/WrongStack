@@ -9,6 +9,7 @@ import * as path from 'node:path';
 
 /** Metrics for the file watcher that watches status.json files. */
 export interface FileWatcherMetrics {
+  /** Number of status.json filesystem events detected after filename filtering. */
   fileChangesDetected: number;
   filesProcessed: number;
   broadcastsSent: number;
@@ -51,6 +52,23 @@ export interface SetupEventsDeps {
    * from a TUI/REPL), instead of waiting on the registry file-watch/poll.
    */
   onFleetBroadcaster?: ((fn: () => Promise<void>) => void) | undefined;
+}
+
+export function statusProjectHashFromWatchFilename(
+  projectsDir: string,
+  filename: string | Buffer,
+): string | null {
+  const raw = String(filename);
+  const relative = path.isAbsolute(raw) ? path.relative(projectsDir, raw) : raw;
+  const parts = relative.split(/[\\/]+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  if (parts[parts.length - 1] !== 'status.json') return null;
+  return parts[parts.length - 2] ?? null;
+}
+
+function shouldLogWatcherStats(): boolean {
+  const value = process.env['WRONGSTACK_WEBUI_WATCHER_STATS']?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
 }
 
 /**
@@ -715,8 +733,9 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
       return watcherMetrics.totalDebounceDelayMs / watcherMetrics.broadcastsSent;
     };
 
+    const logWatcherMetricsEnabled = shouldLogWatcherStats();
     const logWatcherMetrics = () => {
-      if (!watcherMetrics) return;
+      if (!watcherMetrics || !logWatcherMetricsEnabled) return;
       // Update computed field
       watcherMetrics.averageDebounceDelayMs = getAverageDebounceDelay();
       console.log(
@@ -729,8 +748,12 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
       );
     };
 
-    // Log metrics every 60 seconds
-    const metricsInterval = setInterval(logWatcherMetrics, 60_000);
+    // Log metrics only when explicitly requested. The watcher observes the
+    // whole projects directory recursively, so periodic stats are noisy in the
+    // desktop app when several runtimes are active.
+    const metricsInterval = logWatcherMetricsEnabled
+      ? setInterval(logWatcherMetrics, 60_000)
+      : undefined;
 
     const broadcastStatus = (_projectHash: string, statusData: unknown, actualDelayMs: number) => {
       broadcast(clients, { type: 'client.status_update', payload: statusData });
@@ -789,46 +812,35 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
         // a non-recursive watch on the parent dir does not reliably fire for
         // changes inside subdirectories. filename can be null on some platforms.
         watcher = fsWatch(projectsDir, { persistent: true, recursive: true }, async (eventType, filename) => {
-          if (eventType === 'change') {
-            if (filename == null) return;
-            if (watcherMetrics) watcherMetrics.fileChangesDetected++;
+          if (eventType !== 'change' && eventType !== 'rename') return;
+          if (filename == null) return;
+          const projectHash = statusProjectHashFromWatchFilename(projectsDir, filename);
+          if (!projectHash) return;
 
-            // filename is the path relative to projectsDir, e.g. '<hash>/status.json'
-            const targetFile = path.join(projectsDir, String(filename));
-            if (targetFile.endsWith('status.json')) {
-              // Extract project hash from path: .../projects/<hash>/status.json
-              const projectHash = path.basename(path.dirname(targetFile));
+          if (watcherMetrics) watcherMetrics.fileChangesDetected++;
 
-              // Only process if this is a known project hash
-              if (knownProjectHashes.size > 0 && !knownProjectHashes.has(projectHash)) {
-                return; // Skip unknown project directories
-              }
+          // Only process project hashes this WebUI runtime already knows about
+          // from client.status. This avoids every desktop runtime reacting to
+          // unrelated ~/.wrongstack project churn.
+          if (!knownProjectHashes.has(projectHash)) return;
 
-              if (watcherMetrics) watcherMetrics.filesProcessed++;
+          if (watcherMetrics) watcherMetrics.filesProcessed++;
 
-              try {
-                const content = await fs.readFile(targetFile, 'utf-8');
-                const statusData = JSON.parse(content);
+          try {
+            const targetFile = path.join(projectsDir, projectHash, 'status.json');
+            const content = await fs.readFile(targetFile, 'utf-8');
+            const statusData = JSON.parse(content);
 
-                // Add to known hashes if not present
-                if (statusData.projectHash) {
-                  const hash = String(statusData.projectHash);
-                  if (!knownProjectHashes.has(hash)) {
-                    knownProjectHashes.add(hash);
-                    if (watcherMetrics) watcherMetrics.activeProjects = knownProjectHashes.size;
-                  }
-                }
-
-                // Debounce the broadcast
-                scheduleBroadcast(projectHash, statusData);
-              } catch {
-                // File may not exist, be readable yet, or invalid JSON
-              }
-            }
+            // Debounce the broadcast
+            scheduleBroadcast(projectHash, statusData);
+          } catch {
+            // File may not exist, be readable yet, or invalid JSON
           }
         });
 
-        console.log(`[setup-events] Watching ${projectsDir} for status.json changes (hash-filtered, debounced)`);
+        if (logWatcherMetricsEnabled) {
+          console.log(`[setup-events] Watching ${projectsDir} for status.json changes (hash-filtered, debounced)`);
+        }
       } catch (err) {
         console.error('[setup-events] Failed to start status file watcher:', err);
       }
@@ -852,7 +864,7 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
     // Clean up watcher and timers on shutdown. Registered as a disposer so it
     // actually runs (the previous `process.on('cleanup')` event never fires).
     disposers.push(() => {
-      clearInterval(metricsInterval);
+      if (metricsInterval) clearInterval(metricsInterval);
       logWatcherMetrics(); // Final metrics log on shutdown
 
       // Mark watcher as inactive
@@ -877,7 +889,7 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
 
       if (watcher) {
         watcher.close();
-        console.log('[setup-events] Closed status file watcher');
+        if (logWatcherMetricsEnabled) console.log('[setup-events] Closed status file watcher');
       }
     });
   }

@@ -4,6 +4,7 @@ import {
   resolveReasoningForRequest,
   resolveCacheForRequest,
   resolveParametersForRequest,
+  mergeModelRuntime,
 } from '../../src/execution/model-runtime.js';
 import type { ModelRuntimeConfig } from '../../src/types/config.js';
 import type { Capabilities, ReasoningConfig } from '../../src/types/provider.js';
@@ -93,6 +94,21 @@ describe('resolveModelRuntime', () => {
     const settings: ModelRuntimeConfig = { reasoning: { mode: 'auto', effort: 'high' } };
     const r = resolveModelRuntime(settings, capsOn);
     expect(r.reasoning).toEqual({ effort: 'high' });
+  });
+});
+
+describe('mergeModelRuntime', () => {
+  it('overlays scoped reasoning without dropping cache or parameters', () => {
+    expect(
+      mergeModelRuntime(
+        { reasoning: { mode: 'auto', effort: 'high' }, cache: { ttl: '1h' }, parameters: { user: 'leader' } },
+        { reasoning: { effort: 'low' } },
+      ),
+    ).toEqual({
+      reasoning: { mode: 'auto', effort: 'low' },
+      cache: { ttl: '1h' },
+      parameters: { user: 'leader' },
+    });
   });
 });
 

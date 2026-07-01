@@ -58,6 +58,36 @@ describe('createPrefsSeeding', () => {
     expect(written.autonomy.terminalTitleAnimation).toBe(false);
   });
 
+  it('persists model matrix entries with route-specific runtime overrides', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'wstack-prefs-matrix-'));
+    const globalConfigPath = path.join(dir, 'config.json');
+    writeFileSync(globalConfigPath, JSON.stringify({ version: 1 }), 'utf8');
+
+    const opts = {
+      agent: { ctx: { meta: {} } },
+      globalConfigPath,
+      appConfig: {},
+    } as never;
+
+    const { persistPrefs } = createPrefsSeeding(opts);
+    const modelMatrix = {
+      planner: {
+        fallbackProfile: 'cheap',
+        modelRuntime: {
+          reasoning: { mode: 'on', effort: 'low', preserve: false },
+          cache: { ttl: '5m' },
+          parameters: { user: 'planner' },
+        },
+      },
+    };
+
+    await persistPrefs({ modelMatrix });
+
+    expect((opts as { appConfig: { modelMatrix?: unknown } }).appConfig.modelMatrix).toEqual(modelMatrix);
+    const written = JSON.parse(readFileSync(globalConfigPath, 'utf8'));
+    expect(written.modelMatrix).toEqual(modelMatrix);
+  });
+
   it('persists provider+model to config.json (model.switch path)', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'wstack-prefs-model-'));
     const globalConfigPath = path.join(dir, 'config.json');
@@ -102,6 +132,13 @@ describe('seedConfigToMeta', () => {
         context: { mode: 'deep' },
         features: { tokenSavingMode: 'medium' },
         autonomy: { terminalTitleAnimation: false },
+        modelMatrix: {
+          planner: {
+            modelRuntime: {
+              reasoning: { mode: 'on', effort: 'low', preserve: false },
+            },
+          },
+        },
         modelRuntime: { reasoning: { mode: 'off', effort: 'max', preserve: true }, cache: { ttl: '5m' } },
       }),
       'utf8',
@@ -117,5 +154,12 @@ describe('seedConfigToMeta', () => {
     expect(meta['reasoningEffort']).toBe('max');
     expect(meta['reasoningPreserve']).toBe(true);
     expect(meta['cacheTtl']).toBe('5m');
+    expect(meta['modelMatrix']).toEqual({
+      planner: {
+        modelRuntime: {
+          reasoning: { mode: 'on', effort: 'low', preserve: false },
+        },
+      },
+    });
   });
 });
