@@ -226,6 +226,7 @@ function normalizeWhitespace(text: string): string {
 
 function pushUniqueBounded(list: string[], value: string, max: number): void {
   const normalized = normalizeWhitespace(value);
+  /* v8 ignore next -- unreachable: every caller passes already-normalized non-empty text */
   if (!normalized) return;
   const existing = list.findIndex((item) => item.toLowerCase() === normalized.toLowerCase());
   if (existing >= 0) list.splice(existing, 1);
