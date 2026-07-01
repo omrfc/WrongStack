@@ -12,7 +12,7 @@ WrongStack exposes top-level subcommands via `wstack <subcommand>` (also availab
 | `wstack update` | `update.ts` | Check for WrongStack updates |
 | `wstack sessions` | `sessions-config.ts` | List saved sessions; resume or delete one |
 | `wstack config` | `sessions-config.ts` | Show or edit current config |
-| `wstack rewind` | `rewind.ts` | Rewind active session to a previous turn |
+| `wstack rewind` | `rewind.ts` | Revert a session's file changes checkpoint-by-checkpoint — see [rewind.md](rewind.md) |
 | `wstack replay` | `replay.ts` | Replay session events |
 | `wstack audit` | `audit.ts` | Inspect session/audit data |
 | `wstack tools` | `tools-skills.ts` | List all registered tools |
@@ -29,6 +29,9 @@ WrongStack exposes top-level subcommands via `wstack <subcommand>` (also availab
 | `wstack version` | `version-help.ts` | Show version info |
 | `wstack help` | `version-help.ts` | Show help |
 | `wstack projects` | `projects.ts` | List projects with WrongStack state |
+| `wstack modeldiag` | `modeldiag.ts` | Model diagnostics: key check, capability scan, suggestions, benchmarking — see [modeldiag.md](modeldiag.md) |
+| `wstack quick` | `quick.ts` | Launch straight into the TUI with defaults (handled in `boot()`) — see [quick.md](quick.md) |
+| `wstack mailbox serve` | `mailbox-serve.ts` | HTTP bridge over the project mailbox for external agents — see [mailbox.md](mailbox.md) |
 | `wstack bench` | `bench.ts` | Model-independent agentic benchmarks (Aider polyglot, SWE-bench Verified) — see [bench.md](bench.md) |
 | `wstack --hq` | `hq-server.ts` | Start the HQ command center (single-port HTTP + WebSocket dashboard that aggregates client telemetry and mailbox events) — see [hq.md](hq.md) |
 
