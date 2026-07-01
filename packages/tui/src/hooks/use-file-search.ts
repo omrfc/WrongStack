@@ -10,7 +10,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { useEffect } from 'react';
-import { InputBuilder } from '@wrongstack/core';
+import type { InputBuilder } from '@wrongstack/core';
 import { toErrorMessage } from '@wrongstack/core/utils';
 import type { Action, State } from '../app-reducer.js';
 import { searchFiles } from '../file-search.js';

@@ -148,6 +148,7 @@
 
   .ws-app-root {
     height: 100vh;
+    /* biome-ignore lint/suspicious/noDuplicateProperties: 100vh above is the fallback for browsers without dvh support */
     height: 100dvh;
     max-height: 100dvh;
   }

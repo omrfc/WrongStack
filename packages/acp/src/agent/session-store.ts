@@ -162,7 +162,7 @@ export class ACPSessionStore {
 
   /** Update one entry in the index, adding it if missing. Best-effort. */
   private async updateIndex(id: string, updatedAt: string): Promise<void> {
-    let entries = await this.readIndex();
+    const entries = await this.readIndex();
     if (entries === null) {
       // No index yet — fall back to a full scan to populate it.
       await this.list();

@@ -125,7 +125,7 @@ export function refsToMarkdown(refs: FileReference[]): string {
       continue;
     }
     const lang = languageFromPath(ref.path);
-    const fence = lang ? `\`\`\`${lang}` : '\`\`\`';
+    const fence = lang ? `\`\`\`${lang}` : '```';
     const header = `// ${ref.path}:${ref.startLine}-${ref.endLine}`;
     const body = ref.kind === 'snippet' ? truncateContent(ref.content) : truncateContent(ref.preview);
     blocks.push(`${fence}\n${header}\n${body}\n\`\`\``);

@@ -436,7 +436,7 @@ describe('teardown + H1 pattern', () => {
   it('reload cycle: setup -> teardown -> setup reads fresh counters', async () => {
     const api = makeApi();
     secretScannerPlugin.setup(api as any);
-    let hook = getRegisteredHook(api);
+    const hook = getRegisteredHook(api);
     hook({
       event: 'PreToolUse',
       toolName: 'bash',

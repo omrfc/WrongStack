@@ -46,6 +46,7 @@ import {
   WIDE_SUBAGENT_CAPABILITIES,
   AdaptiveConcurrencyController,
   AgentError,
+  TOKENS,
   ToolValidationError,
 } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
@@ -558,6 +559,8 @@ export class MultiAgentHost {
         this.director.fleet,
         (n: number) => coordinator.setMaxConcurrent(n),
         adaptiveConfig,
+        undefined,
+        this.deps.container.safeResolve(TOKENS.Logger),
       );
     }
 

@@ -147,7 +147,6 @@ function parseUpdateArgs(args: string[]): ParsedUpdateArgs {
     }
     if (arg === '--allow-scripts' || arg === '--lifecycle-scripts') {
       allowScripts = true;
-      continue;
     }
   }
 

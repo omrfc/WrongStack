@@ -104,7 +104,7 @@ export async function runWebUIDispatch(ctx: WebUIDispatchContext): Promise<numbe
 
   const flagValue = (names: string[]): string | undefined => {
     for (const name of names) {
-      if (!Object.prototype.hasOwnProperty.call(flags, name)) continue;
+      if (!Object.hasOwn(flags, name)) continue;
       const value = flags[name];
       if (typeof value === 'string' && value.trim() !== '') return value.trim();
       throw new Error(`--${name} requires a value`);
@@ -113,7 +113,7 @@ export async function runWebUIDispatch(ctx: WebUIDispatchContext): Promise<numbe
   };
   const flagBoolean = (names: string[]): boolean | undefined => {
     for (const name of names) {
-      if (!Object.prototype.hasOwnProperty.call(flags, name)) continue;
+      if (!Object.hasOwn(flags, name)) continue;
       const value = flags[name];
       if (value === undefined) continue;
       if (typeof value === 'boolean') return value;

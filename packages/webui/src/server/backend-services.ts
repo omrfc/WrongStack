@@ -69,7 +69,7 @@ import {
   mailboxSessionTag,
   TOKENS,
   ToolExecutor,
-  AnnotationsStore,
+  type AnnotationsStore,
 } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
 import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';

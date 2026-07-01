@@ -142,7 +142,7 @@ export function injectWsConfig(
   html: string,
   opts: { wsPort: number; publicWsUrl?: string | undefined },
 ): string {
-  let out = injectWsPort(html, opts.wsPort);
+  const out = injectWsPort(html, opts.wsPort);
   if (!opts.publicWsUrl || out.includes('name="wrongstack-ws-url"')) return out;
   const tag = `<meta name="wrongstack-ws-url" content="${escapeHtmlAttr(opts.publicWsUrl)}" />`;
   if (out.includes('</head>')) {

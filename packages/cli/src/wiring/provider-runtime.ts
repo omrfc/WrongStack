@@ -1,5 +1,5 @@
 import type { Config, Provider, ProviderConfig } from '@wrongstack/core';
-import { ProviderRegistry } from '@wrongstack/core';
+import type { ProviderRegistry } from '@wrongstack/core';
 import { makeProviderFromConfig } from '@wrongstack/providers';
 
 /**

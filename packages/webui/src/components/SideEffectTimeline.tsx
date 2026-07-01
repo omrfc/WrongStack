@@ -118,7 +118,7 @@ export function SideEffectTimeline() {
   };
 
   const filtered = useMemo(() => {
-    let result = riskFilter === 'all'
+    const result = riskFilter === 'all'
       ? [...sideEffects]
       : sideEffects.filter((se) => se.risk === riskFilter);
 
