@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Fifteen focused, single-purpose plugins ship in this package and load
+Sixteen focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -36,6 +36,7 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 13 | [`branch-guard`](./src/branch-guard) | `branch_guard_status` | `PreToolUse` (`bash\|git_autocommit`) | Blocks commits, pushes, and merges to protected branches (default: main, master) |
 | 14 | [`diff-summary`](./src/diff-summary) | `diff_summary_status` | `PostToolUse` (`write\|edit`) | Injects compact git diff into LLM context after every write or edit |
 | 15 | [`commit-validator`](./src/commit-validator) | `commit_validator_status` | `PreToolUse` (`bash\|git_autocommit`) | Validates conventional-commit format before git_autocommit or bash git commit runs |
+| 16 | [`format-on-save`](./src/format-on-save) | `format_on_save_status` | `PostToolUse` (`write\|edit`) | Runs `biome format --write` on the file after every write or edit |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -422,6 +423,33 @@ conventional-commit format:
 Standard types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
 `test`, `build`, `ci`, `chore`, `revert`.
 
+### 16. `format-on-save` — automatic biome formatting
+
+**Tools**: `format_on_save_status`
+**Hooks**: `PostToolUse` (matcher `write|edit`)
+
+After every `write` or `edit` completes, runs
+`biome format --write <path>` on the file on disk. Silently reformats —
+no blocking, no warnings, just clean code. If the file changed
+(formatting was applied), injects `additionalContext` so the LLM knows
+the file was reformatted.
+
+```jsonc
+{
+  "extensions": {
+    "format-on-save": {
+      "enabled": true,       // master switch
+      "timeoutMs": 5000      // biome process timeout
+    }
+  }
+}
+```
+
+Biome detection runs once at setup(). If biome is not installed, the
+hook is a silent no-op. Works alongside lint-gate (which lints BEFORE
+the write) and diff-summary (which shows the diff AFTER) — together
+they form a complete write pipeline: lint → write → format → diff.
+
 ## Configuration patterns
 
 There are two surfaces for plugin configuration:
@@ -459,7 +487,7 @@ To disable a single built-in without removing its config:
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
 `todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
-`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`) follow a strict lifecycle to survive hot-reload
+`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's
