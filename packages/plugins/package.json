@@ -1,7 +1,7 @@
 {
   "name": "@wrongstack/plugins",
   "version": "0.277.2",
-  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump, secret-scanner, todo-tracker, token-budget, lint-gate, branch-guard, diff-summary, commit-validator, format-on-save, test-runner-gate, import-organizer, todo-listener, session-recap",
+  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump, secret-scanner, todo-tracker, token-budget, lint-gate, branch-guard, diff-summary, commit-validator, format-on-save, test-runner-gate, import-organizer, todo-listener, session-recap, spec-linker",
   "license": "MIT",
   "author": "ECOSTACK TECHNOLOGY OÜ",
   "type": "module",
@@ -91,6 +91,10 @@
     "./session-recap": {
       "types": "./dist/session-recap.d.ts",
       "import": "./dist/session-recap.js"
+    },
+    "./spec-linker": {
+      "types": "./dist/spec-linker.d.ts",
+      "import": "./dist/spec-linker.js"
     }
   },
   "files": [

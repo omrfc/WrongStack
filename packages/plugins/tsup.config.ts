@@ -23,6 +23,7 @@ export default defineConfig({
     'import-organizer': 'src/import-organizer/index.ts',
     'todo-listener': 'src/todo-listener/index.ts',
     'session-recap': 'src/session-recap/index.ts',
+    'spec-linker': 'src/spec-linker/index.ts',
   },
   format: ['esm'],
   dts: true,

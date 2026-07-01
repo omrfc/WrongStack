@@ -3,10 +3,10 @@
 A bird's-eye view of every first-party plugin in
 [`@wrongstack/plugins`](../packages/plugins/README.md). The catalog
 below groups plugins by what they do, so you can spot overlaps and
-pick the right one for a job without scrolling through 20 entries.
+pick the right one for a job without scrolling through 21 entries.
 
-> **Living document** — last updated when the 20th plugin
-> (`session-recap`) was added. When you add a plugin, update this
+> **Living document** — last updated when the 21st plugin
+> (`spec-linker`) was added. When you add a plugin, update this
 > file in the same commit so it never drifts from
 > `packages/plugins/README.md`.
 
@@ -34,6 +34,7 @@ pick the right one for a job without scrolling through 20 entries.
 | 18 | [`import-organizer`](../packages/plugins/src/import-organizer) | quality | `PostToolUse` (`write\|edit`) | `import_organizer_status` |
 | 19 | [`todo-listener`](../packages/plugins/src/todo-listener) | cross-agent | `PostToolUse` (`todo`) | `todo_listener_status` |
 | 20 | [`session-recap`](../packages/plugins/src/session-recap)   | cross-agent | `Stop` | `session_recap_status` |
+| 21 | [`spec-linker`](../packages/plugins/src/spec-linker)     | quality | `PostToolUse` (`write\|edit`) | `spec_linker_status` |
 
 ---
 
@@ -67,12 +68,14 @@ fire on `write|edit` either *before* (block / warn) or *after*
 | `import-organizer` | `PostToolUse` `write\|edit` | `biome check --write --unsafe` (sort, group, remove unused) | — |
 | `commit-validator` | `PreToolUse` `bash\|git_autocommit` | conventional-commit format gate | `block` / `warn` |
 | `test-runner-gate` | `PostToolUse` `write\|edit` | runs the matching test file | `block` / `injectOnPass` |
+| `spec-linker` | `PostToolUse` `write\|edit` | surfaces unlinked plugin references in markdown files (no rewrite — read-only) | `enabled` / `fileGlobs` / `maxReferences` |
 
 **Stacking** the quality chain on `write|edit`:
 `lint-gate` (PreToolUse, block) → `test-runner-gate` (PostToolUse) →
-`format-on-save` (PostToolUse) → `import-organizer` (PostToolUse).
+`format-on-save` (PostToolUse) → `import-organizer` (PostToolUse) →
+`spec-linker` (PostToolUse, read-only — only injects context).
 This pre-validates → runs tests → auto-fixes formatting → re-sorts
-imports, in that order.
+imports → nudges doc links, in that order.
 
 ### Safety
 
@@ -157,6 +160,7 @@ noticeable per-tool overhead.
 | `write\|edit` | `format-on-save` | `biome format --write` on the file |
 | `write\|edit` | `import-organizer` | `biome check --write --unsafe` (sort, group, remove unused) |
 | `write\|edit` | `test-runner-gate` | Runs the relevant test file |
+| `write\|edit` | `spec-linker` | Surfaces unlinked plugin references in markdown files |
 | `todo` | `todo-listener` | Broadcasts the new list to the mailbox |
 
 ### `Stop` (fires when the agent loop ends)
@@ -204,8 +208,9 @@ consistency.
 | `import-organizer` | yes | invocations, organized/clean/error counts |
 | `todo-listener` | yes | invocations, sent/skipped/errors |
 | `session-recap` | yes | stop invocations, recaps published/errored |
+| `spec-linker` | yes | invocations, unlinked, clean, skipped (non-md) |
 
-**All 20 plugins follow the H1 pattern** — every `setup()` re-zeros
+**All 21 plugins follow the H1 pattern** — every `setup()` re-zeros
 state, every `teardown()` releases it, and every `health()` reports
 it. `/diag plugins` therefore gives a uniform view.
 

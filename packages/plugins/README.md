@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Twenty focused, single-purpose plugins ship in this package and load
+Twenty-one focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -41,6 +41,7 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 18 | [`import-organizer`](./src/import-organizer) | `import_organizer_status` | `PostToolUse` (`write\|edit`) | Runs `biome check --write --unsafe` (or `eslint --fix`) on the file after write or edit, re-sorting imports and applying safe fixes |
 | 19 | [`todo-listener`](./src/todo-listener) | `todo_listener_status` | `PostToolUse` (`todo`) | Broadcasts a status update to the project mailbox whenever the `todo` tool is called, so other agents can see what this one is working on |
 | 20 | [`session-recap`](./src/session-recap) | `session_recap_status` | `Stop` | Posts a one-page session summary (tokens, tool calls, commits, last activity) to the project mailbox when the agent loop ends |
+| 21 | [`spec-linker`](./src/spec-linker) | `spec_linker_status` | `PostToolUse` (`write\|edit`) | Scans markdown files for unlinked plugin references and surfaces them to the LLM via additionalContext |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -646,6 +647,52 @@ context. Increase `includeTranscriptTail` for more history.
 - `api.session.transcriptPath` — when missing the transcript tail
   is empty but the metrics summary still publishes.
 
+### 21 — `spec-linker`
+
+**Tools**: `spec_linker_status`
+**Hooks**: `PostToolUse` (matcher `write|edit`)
+
+Scans markdown files for *unlinked* references to one of the 20
+known plugins and surfaces them to the LLM via
+`additionalContext`. The plugin does NOT modify the file — it
+only injects a low-noise context block listing the unlinked
+references and their canonical paths so the LLM can fix the file
+in a follow-up edit.
+
+**Detection rules**:
+- Source is `.md` or `.mdx` (configurable via `fileGlobs`)
+- The reference matches one of the 20 known plugin names
+  (case-insensitive)
+- It is NOT already wrapped in a markdown link `[name](...)` or
+  inline code `` `name` ``
+- It is NOT a hyphenated/dotted continuation
+  (`secret-scanner-config.json` does not match `secret-scanner`)
+
+```jsonc
+{
+  "extensions": {
+    "spec-linker": {
+      "enabled": true,
+      "fileGlobs": ["**/*.md", "**/*.mdx"],
+      "maxReferences": 8
+    }
+  }
+}
+```
+
+**Injected context** (sample, when 2 unlinked references are found):
+```
+🔗 spec-linker: 2 unlinked plugin reference(s) in 'docs/feature-matrix.md'.
+Consider wrapping them in markdown links to keep the docs navigable:
+- `secret-scanner` → `[secret-scanner](./src/secret-scanner)`
+- `token-budget` → `[token-budget](./src/token-budget)`
+```
+
+**Why read-only**: the file might be referenced elsewhere or
+under review. Surfacing a suggestion lets the LLM (or the user)
+decide whether to fix it, instead of silently rewriting the file
+on every save.
+
 ## Configuration patterns
 
 There are two surfaces for plugin configuration:
@@ -683,7 +730,7 @@ To disable a single built-in without removing its config:
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
 `todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
-`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`, `test-runner-gate`, `import-organizer`, `todo-listener`, `session-recap`) follow a strict lifecycle to survive hot-reload
+`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`, `test-runner-gate`, `import-organizer`, `todo-listener`, `session-recap`, `spec-linker`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's
