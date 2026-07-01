@@ -202,6 +202,7 @@ export const BUILTIN_PLUGIN_FACTORIES: (() => Promise<Plugin>)[] = [
   async () => (await import('@wrongstack/plugins/commit-validator')).default,
   async () => (await import('@wrongstack/plugins/format-on-save')).default,
   async () => (await import('@wrongstack/plugins/test-runner-gate')).default,
+  async () => (await import('@wrongstack/plugins/import-organizer')).default,
   // ── LSP plugin ──────────────────────────────────────────────────────
   async () => (await import('@wrongstack/plug-lsp')).default,
   // ── Telegram plugin ─────────────────────────────────────────────────

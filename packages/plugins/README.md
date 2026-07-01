@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Seventeen focused, single-purpose plugins ship in this package and load
+Eighteen focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -38,6 +38,7 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 15 | [`commit-validator`](./src/commit-validator) | `commit_validator_status` | `PreToolUse` (`bash\|git_autocommit`) | Validates conventional-commit format before git_autocommit or bash git commit runs |
 | 16 | [`format-on-save`](./src/format-on-save) | `format_on_save_status` | `PostToolUse` (`write\|edit`) | Runs `biome format --write` on the file after every write or edit |
 | 17 | [`test-runner-gate`](./src/test-runner-gate) | `test_gate_status` | `PostToolUse` (`write\|edit`) | Runs the relevant test file after every write or edit to a source file |
+| 18 | [`import-organizer`](./src/import-organizer) | `import_organizer_status` | `PostToolUse` (`write\|edit`) | Runs `biome check --write --unsafe` (or `eslint --fix`) on the file after write or edit, re-sorting imports and applying safe fixes |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -483,6 +484,46 @@ the LLM knows immediately what broke.
 Patterns use `{name}` (basename), `{path}` (path-no-ext), `{dir}` (dirname).
 Skips test files themselves, tool errors, and missing test files (silent).
 
+### 18 — `import-organizer`
+
+**Tools**: `import_organizer_status`
+**Hooks**: `PostToolUse` (matcher `write|edit`)
+
+After every `write` or `edit`, runs `biome check --write --unsafe`
+(or `eslint --fix` if biome is not installed) on the just-saved file.
+The `--unsafe` flag enables auto-organizing imports: re-sorts them
+alphabetically within import groups, merges duplicate imports from
+the same module, and removes unused ones. Other safe fixes (formatting,
+style) are applied alongside.
+
+The hook runs **after** the tool completes (PostToolUse) and reads the
+file from disk — so `write` tool's `content` parameter and `edit` tool's
+post-edit disk state are both handled correctly. If the file no longer
+exists at hook time (e.g. immediately deleted), the hook silently skips.
+
+The hook is **idempotent**: running biome twice on the same file produces
+the same result. Lint issues that biome cannot auto-fix are reported in
+`additionalContext` so the LLM knows to clean them up manually.
+
+```jsonc
+{
+  "extensions": {
+    "import-organizer": {
+      "enabled": true,
+      "command": "npx @biomejs/biome check --write --unsafe",
+      "fallbackCommand": "npx eslint --fix",
+      "timeoutMs": 10000
+    }
+  }
+}
+```
+
+Use the `--unsafe` flag with care: it enables rules that can change
+runtime behavior (e.g. `useImportType` may force `import type` for
+type-only imports, which is a no-op at runtime but can break tooling
+that introspects import statements). If you prefer the safe-only mode,
+omit `--unsafe`.
+
 ## Configuration patterns
 
 There are two surfaces for plugin configuration:
@@ -520,7 +561,7 @@ To disable a single built-in without removing its config:
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
 `todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
-`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`, `test-runner-gate`) follow a strict lifecycle to survive hot-reload
+`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`, `test-runner-gate`, `import-organizer`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's

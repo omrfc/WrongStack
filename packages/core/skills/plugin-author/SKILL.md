@@ -40,6 +40,7 @@ There are currently **17 official plugins** in the suite:
 | `commit-validator` | `commit_validator_status` | `PreToolUse` (`bash\|git_autocommit`) | ✅ teardown+health |
 | `format-on-save` | `format_on_save_status` | `PostToolUse` (`write\|edit`) | ✅ teardown+health |
 | `test-runner-gate` | `test_gate_status` | `PostToolUse` (`write\|edit`) | ✅ teardown+health |
+| `import-organizer` | `import_organizer_status` | `PostToolUse` (`write\|edit`) | ✅ teardown+health |
 
 ## Rules
 

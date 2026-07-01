@@ -1,7 +1,7 @@
 /**
  * @wrongstack/plugins — Official WrongStack Plugin Suite
  *
- * Exported plugins (17 total):
+ * Exported plugins (18 total):
  *  1. auto-doc         — Auto-generates JSDoc/TSDoc (dryRun for preview)
  *  2. git-autocommit  — AI-powered commit messages (git_autocommit/status_summary removed)
  *  3. shell-check     — Runs shellcheck on files or directories (merged)
@@ -28,6 +28,9 @@
  *                        on the file after every write or edit
  * 17. test-runner-gate — Post-tool hook that runs the relevant test
  *                        file after every write or edit to a source file
+ * 18. import-organizer — Post-tool hook that runs biome check --write --unsafe
+ *                        on the file after write or edit, re-sorting imports
+ *                        and applying safe fixes (falls back to eslint --fix)
  *
  * Removed (use the equivalent built-in tools instead — see
  * `DEPRECATED_PLUGIN_NAMES` in `packages/cli/src/wiring/plugins.ts`
@@ -63,3 +66,4 @@ export { default as diffSummaryPlugin } from './diff-summary/index.js';
 export { default as commitValidatorPlugin } from './commit-validator/index.js';
 export { default as formatOnSavePlugin } from './format-on-save/index.js';
 export { default as testRunnerGatePlugin } from './test-runner-gate/index.js';
+export { default as importOrganizerPlugin } from './import-organizer/index.js';
