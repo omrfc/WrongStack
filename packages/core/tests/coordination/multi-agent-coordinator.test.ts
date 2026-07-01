@@ -141,4 +141,57 @@ describe('DefaultMultiAgentCoordinator', () => {
     coord.completeTask({ subagentId: 'agent1', taskId: 'task1', status: 'success', iterations: 1 });
     expect(warnings.filter((w) => w.type === 'inFlight_underflow')).toHaveLength(0);
   });
+
+  describe('public API: setters + results + awaitTasks', () => {
+    it('setRunner wires a runner that drives dispatch to completion', async () => {
+      const coord = new DefaultMultiAgentCoordinator(makeConfig());
+      coord.setRunner((async (task: { id: string }) => ({
+        result: `done:${task.id}`, iterations: 1, toolCalls: 0,
+      })) as never);
+      await coord.spawn({ id: 'a1', name: 'A1' });
+      await coord.assign({ id: 't1' });
+      await new Promise((r) => setTimeout(r, 30));
+      expect(coord.results().some((r) => r.taskId === 't1' && r.result === 'done:t1')).toBe(true);
+    });
+
+    it('setFleetBus routes lifecycle events to the fleet bus', async () => {
+      const coord = new DefaultMultiAgentCoordinator(makeConfig());
+      const emitted: string[] = [];
+      coord.setFleetBus({ emit: (e: { type: string }) => emitted.push(e.type) } as never);
+      await coord.spawn({ id: 'a1', name: 'A1' });
+      expect(emitted).toContain('subagent.assigned');
+    });
+
+    it('setMaxConcurrent accepts a valid cap and rejects an invalid one', () => {
+      const coord = new DefaultMultiAgentCoordinator(makeConfig({ maxConcurrent: 2 }));
+      expect(() => coord.setMaxConcurrent(8)).not.toThrow();
+      expect(() => coord.setMaxConcurrent(0)).toThrow(/maxConcurrent/);
+      expect(() => coord.setMaxConcurrent(Number.NaN)).toThrow(/maxConcurrent/);
+    });
+
+    it('results() exposes completed task results', async () => {
+      const coord = new DefaultMultiAgentCoordinator(makeConfig());
+      await coord.spawn({ id: 'a1', name: 'A1' });
+      coord.completeTask({ subagentId: 'a1', taskId: 't1', status: 'success', result: 'x', iterations: 1, toolCalls: 0, durationMs: 5 });
+      expect(coord.results().some((r) => r.taskId === 't1')).toBe(true);
+    });
+
+    it('awaitTasks returns a cached result immediately and polls a pending one', async () => {
+      const coord = new DefaultMultiAgentCoordinator(makeConfig());
+      await coord.spawn({ id: 'a1', name: 'A1' });
+      coord.completeTask({ subagentId: 'a1', taskId: 'cached', status: 'success', result: 'c', iterations: 1, toolCalls: 0, durationMs: 1 });
+      const cached = await coord.awaitTasks(['cached']);
+      expect(cached[0]?.taskId).toBe('cached');
+
+      const pollP = coord.awaitTasks(['pending']);
+      coord.completeTask({ subagentId: 'a1', taskId: 'pending', status: 'success', result: 'p', iterations: 1, toolCalls: 0, durationMs: 1 });
+      const polled = await pollP;
+      expect(polled[0]?.taskId).toBe('pending');
+    });
+
+    it('awaitTasks rejects on timeout for a never-completing task', async () => {
+      const coord = new DefaultMultiAgentCoordinator(makeConfig({ timeoutMs: 20 }));
+      await expect(coord.awaitTasks(['never'])).rejects.toThrow(/timed out/);
+    });
+  });
 });
