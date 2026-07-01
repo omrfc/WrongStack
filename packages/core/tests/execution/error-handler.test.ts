@@ -126,25 +126,46 @@ describe('recovery strategies', () => {
     expect(res).toBeNull();
   });
 
-  it('rate_limit_backoff waits then asks the agent to retry', { timeout: 10_000 }, async () => {
-    const eh = new DefaultErrorHandler(buildRecoveryStrategies());
-    const err = new ProviderError('rate limited', 429, true, 'test', {
-      body: { retryAfterMs: 1100 },
-    });
-    const start = Date.now();
-    const res = await eh.recover(err, makeCtx());
-    const elapsed = Date.now() - start;
-    expect(res).toEqual({ action: 'retry', reason: 'rate_limit_backoff' });
-    expect(elapsed).toBeGreaterThanOrEqual(1000);
+  // Fake timers, not wall-clock asserts: real setTimeout can fire ~1ms early
+  // (observed 999ms for the 1000ms clamp under coverage instrumentation).
+  it('rate_limit_backoff waits then asks the agent to retry', async () => {
+    vi.useFakeTimers();
+    try {
+      const eh = new DefaultErrorHandler(buildRecoveryStrategies());
+      const err = new ProviderError('rate limited', 429, true, 'test', {
+        body: { retryAfterMs: 1100 },
+      });
+      let res: unknown;
+      const done = eh.recover(err, makeCtx()).then((r) => {
+        res = r;
+      });
+      await vi.advanceTimersByTimeAsync(1099);
+      expect(res).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      expect(res).toEqual({ action: 'retry', reason: 'rate_limit_backoff' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('rate_limit_backoff clamps suggested wait to 1s minimum', { timeout: 10_000 }, async () => {
-    const eh = new DefaultErrorHandler(buildRecoveryStrategies());
-    const err = new ProviderError('slow down', 429, true, 'test', { body: { retryAfterMs: 10 } });
-    const start = Date.now();
-    await eh.recover(err, makeCtx());
-    const elapsed = Date.now() - start;
-    expect(elapsed).toBeGreaterThanOrEqual(1000);
+  it('rate_limit_backoff clamps suggested wait to 1s minimum', async () => {
+    vi.useFakeTimers();
+    try {
+      const eh = new DefaultErrorHandler(buildRecoveryStrategies());
+      const err = new ProviderError('slow down', 429, true, 'test', { body: { retryAfterMs: 10 } });
+      let res: unknown;
+      const done = eh.recover(err, makeCtx()).then((r) => {
+        res = r;
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(res).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      expect(res).toEqual({ action: 'retry', reason: 'rate_limit_backoff' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('downgrades on 529 (overloaded), not just 5xx', async () => {
