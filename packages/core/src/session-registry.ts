@@ -185,9 +185,11 @@ export class SessionRegistry {
     });
 
     // Start heartbeat
+    /* v8 ignore start -- 5s heartbeat timer fires only in a live process, not under test */
     this.heartbeatTimer = setInterval(() => {
       void this.heartbeat();
     }, HEARTBEAT_INTERVAL_MS);
+    /* v8 ignore stop */
     if (this.heartbeatTimer.unref) this.heartbeatTimer.unref();
   }
 
@@ -216,6 +218,7 @@ export class SessionRegistry {
       let entry = registry[this.currentSessionId!];
       if (!entry) {
         // Our entry vanished (dropped write / reset / pruned) — re-create it.
+        /* v8 ignore next -- unreachable: register() sets lastEntry before any updateAgents */
         if (!this.lastEntry) return;
         entry = { ...this.lastEntry };
         registry[this.currentSessionId!] = entry;
@@ -352,7 +355,9 @@ export class SessionRegistry {
       }
 
       if (pruned) {
+        /* v8 ignore start -- best-effort prune write; the .catch only fires on a write failure */
         await this.writeAtomic(registry).catch(() => undefined);
+        /* v8 ignore stop */
       }
 
       return registry;
@@ -382,7 +387,9 @@ export class SessionRegistry {
           // when its owner pid is dead or it has been held implausibly long
           // (legit holds are sub-millisecond), then retry the open once.
           if (await this.breakStaleLock(lockPath)) {
+            /* v8 ignore start -- retry-open after breaking a stale lock; .catch only fires on contention */
             lockHandle = await fs.open(lockPath, 'wx').catch(() => null);
+            /* v8 ignore stop */
           }
           if (!lockHandle) {
             await new Promise((r) => setTimeout(r, retryDelayMs * (attempt + 1)));
@@ -392,7 +399,9 @@ export class SessionRegistry {
 
         try {
           // Stamp the owner pid so other processes can detect a stale lock.
+          /* v8 ignore start -- best-effort owner-pid stamp; .catch only fires on a write failure */
           await lockHandle.writeFile(String(process.pid)).catch(() => undefined);
+          /* v8 ignore stop */
           const raw = await fs.readFile(this.filePath, 'utf8').catch(() => '{}');
           const registry = JSON.parse(raw) as Record<string, SessionRegistryEntry>;
           fn(registry);
@@ -400,10 +409,13 @@ export class SessionRegistry {
           return; // success
         } finally {
           await lockHandle.close();
+          /* v8 ignore start -- best-effort lock cleanup in finally; .catch only fires if the lock vanished */
           await fs.unlink(lockPath).catch(() => undefined);
+          /* v8 ignore stop */
         }
       } catch {
         // Best-effort — never throw from registry writes
+        /* v8 ignore next -- defensive: a registry write failure must never propagate */
         return;
       }
     }
@@ -421,19 +433,24 @@ export class SessionRegistry {
     try {
       const [stat, content] = await Promise.all([
         fs.stat(lockPath),
+        /* v8 ignore start -- best-effort lock-content read; .catch only fires if the lock vanished */
         fs.readFile(lockPath, 'utf8').catch(() => ''),
+        /* v8 ignore stop */
       ]);
       const ageMs = Date.now() - stat.mtimeMs;
       const ownerPid = Number.parseInt(content.trim(), 10);
       const ownerDead =
         Number.isInteger(ownerPid) && ownerPid > 0 && ownerPid !== process.pid && !pidAlive(ownerPid);
       if (ownerDead || ageMs > STALE_LOCK_MS) {
+        /* v8 ignore start -- best-effort stale-lock removal; .catch only fires if the lock vanished */
         await fs.unlink(lockPath).catch(() => undefined);
+        /* v8 ignore stop */
         return true;
       }
       return false;
     } catch {
       // stat failed → the lock vanished underneath us; let the caller retry.
+      /* v8 ignore next -- defensive: a vanished lock between stat and read is fine */
       return true;
     }
   }
@@ -458,8 +475,10 @@ export class SessionRegistry {
       await fs.writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
       await fs.rename(tmp, this.filePath);
     } catch (err) {
+      /* v8 ignore start -- rename-failure cleanup: best-effort tmp unlink + rethrow (atomicUpdate swallows it) */
       await fs.unlink(tmp).catch(() => undefined);
       throw err;
+      /* v8 ignore stop */
     }
   }
 
@@ -474,15 +493,19 @@ export class SessionRegistry {
         const isTemp =
           (name.startsWith(`${base}.`) || name.startsWith(`.${base}.`)) && name.endsWith('.tmp');
         if (!isTemp) continue;
+        /* v8 ignore start -- best-effort temp stat; .catch(null)+continue only fire when the temp vanished */
         const stat = await fs.stat(path.join(dir, name)).catch(() => null);
         if (!stat) continue;
+        /* v8 ignore stop */
         if (now - stat.mtimeMs > STALE_TMP_MS) stale.push({ name, mtimeMs: stat.mtimeMs });
       }
 
       stale.sort((a, b) => b.mtimeMs - a.mtimeMs);
       await Promise.all(
         stale.slice(MAX_STALE_TMP_FILES).map(async ({ name }) => {
+          /* v8 ignore start -- best-effort temp removal; .catch only fires if the temp vanished */
           await fs.unlink(path.join(dir, name)).catch(() => undefined);
+          /* v8 ignore stop */
         }),
       );
     } catch {
@@ -499,6 +522,7 @@ export function getSessionRegistry(globalRoot?: string): SessionRegistry {
     _instance = new SessionRegistry(globalRoot);
   }
   if (!_instance) {
+    /* v8 ignore next -- the singleton is initialized by the first call in every test/process */
     throw new Error('SessionRegistry not initialized. Call getSessionRegistry(globalRoot) first.');
   }
   return _instance;

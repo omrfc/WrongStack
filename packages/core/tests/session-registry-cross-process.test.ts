@@ -422,3 +422,160 @@ describe('SessionRegistry singleton', () => {
     expect(typeof hasSessionRegistry()).toBe('boolean');
   });
 });
+
+// ── Lifecycle edges (coverage) ────────────────────────────────────────
+
+describe('SessionRegistry lifecycle edges', () => {
+  it('unregister removes the entry', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    await reg.register({
+      sessionId: 'sess-u', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+      workingDir: '/ws', pid: 7001, startedAt: new Date().toISOString(),
+    });
+    expect(await reg.list()).toHaveLength(1);
+    await reg.unregister();
+    expect(await reg.list()).toHaveLength(0);
+  });
+
+  it('unregister / markClosing / updateAgents before register are no-ops', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    await expect(reg.unregister()).resolves.not.toThrow();
+    await expect(reg.markClosing()).resolves.not.toThrow();
+    await expect(reg.updateAgents([makeAgent()])).resolves.not.toThrow();
+  });
+
+  it('markClosing sets status=closing and clears the heartbeat timer', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    await reg.register({
+      sessionId: 'sess-c', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+      workingDir: '/ws', pid: 7002, startedAt: new Date().toISOString(),
+    });
+    await reg.markClosing();
+    expect((await reg.get('sess-c'))?.status).toBe('closing');
+  });
+
+  it('markClosing is a no-op when the entry has vanished from the file', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    await reg.register({
+      sessionId: 'sess-c2', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+      workingDir: '/ws', pid: 7003, startedAt: new Date().toISOString(),
+    });
+    // Wipe the on-disk entry so markClosing's atomicUpdate sees no entry.
+    await fs.writeFile(path.join(root, 'session-registry.json'), '{}');
+    await expect(reg.markClosing()).resolves.not.toThrow();
+  });
+
+  it('registryPath exposes the registry file path', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    expect(reg.registryPath).toBe(path.join(root, 'session-registry.json'));
+  });
+
+  it('heartbeat recomputes status=idle when no agent is running', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    await reg.register({
+      sessionId: 'sess-hb-idle', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+      workingDir: '/ws', pid: 7004, startedAt: new Date().toISOString(),
+      agents: [makeAgent({ id: 'leader', status: 'idle' })],
+    });
+    await forceHeartbeat(reg);
+    expect((await reg.get('sess-hb-idle'))?.status).toBe('idle');
+  });
+
+  it('heartbeat recomputes status=active when an agent is running', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    await reg.register({
+      sessionId: 'sess-hb-active', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+      workingDir: '/ws', pid: 7005, startedAt: new Date().toISOString(),
+      agents: [makeAgent({ id: 'leader', status: 'running' })],
+    });
+    await forceHeartbeat(reg);
+    expect((await reg.get('sess-hb-active'))?.status).toBe('active');
+  });
+
+  it('heartbeat does not revert a closing status', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    await reg.register({
+      sessionId: 'sess-hb-close', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+      workingDir: '/ws', pid: 7006, startedAt: new Date().toISOString(),
+      agents: [makeAgent({ id: 'leader', status: 'running' })],
+    });
+    await reg.markClosing();
+    await forceHeartbeat(reg);
+    expect((await reg.get('sess-hb-close'))?.status).toBe('closing');
+  });
+
+  it('prunes a closing entry past its grace window', async () => {
+    const root = await freshRoot();
+    const registryPath = path.join(root, 'session-registry.json');
+    const old = new Date(Date.now() - 60_000).toISOString();
+    await fs.writeFile(
+      registryPath,
+      JSON.stringify({
+        'sess-old': {
+          sessionId: 'sess-old', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+          workingDir: '/ws', pid: process.pid, status: 'closing', startedAt: old,
+          lastHeartbeatAt: old, agentCount: 0, agents: [],
+        },
+      }, null, 2),
+    );
+    const reg = new SessionRegistry(root);
+    const list = await reg.list();
+    expect(list.find((s) => s.sessionId === 'sess-old')).toBeUndefined();
+  });
+
+  it('marks a long-stale entry (kept under 5min) as stale without deleting', async () => {
+    const root = await freshRoot();
+    const registryPath = path.join(root, 'session-registry.json');
+    const startedOld = new Date(Date.now() - 3 * 60_000).toISOString(); // 3 min ago (< 5 min keep)
+    const heartbeatOld = new Date(Date.now() - 120_000).toISOString(); // 2 min ago (> stale timeout)
+    await fs.writeFile(
+      registryPath,
+      JSON.stringify({
+        'sess-stale-kept': {
+          sessionId: 'sess-stale-kept', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+          workingDir: '/ws', pid: await deadPid(), status: 'active', startedAt: startedOld,
+          lastHeartbeatAt: heartbeatOld, agentCount: 0, agents: [],
+        },
+      }, null, 2),
+    );
+    const reg = new SessionRegistry(root);
+    const entry = await reg.get('sess-stale-kept');
+    expect(entry?.status).toBe('stale'); // kept (started < 5 min ago), just marked stale
+  });
+
+  it('register prunes a prior dead+stale entry from a different session', async () => {
+    const root = await freshRoot();
+    const registryPath = path.join(root, 'session-registry.json');
+    const reg = new SessionRegistry(root);
+    const dead = await deadPid();
+    await reg.register({
+      sessionId: 'sess-a', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+      workingDir: '/ws', pid: dead, startedAt: new Date().toISOString(),
+    });
+    // Age sess-a's heartbeat past the stale timeout.
+    const data = JSON.parse(await fs.readFile(registryPath, 'utf8')) as Record<string, { lastHeartbeatAt: string }>;
+    data['sess-a']!.lastHeartbeatAt = new Date(Date.now() - 120_000).toISOString();
+    await fs.writeFile(registryPath, JSON.stringify(data, null, 2));
+    // Registering a different session prunes the dead+stale sess-a.
+    await reg.register({
+      sessionId: 'sess-b', projectSlug: 'ws', projectRoot: '/ws', projectName: 'WS',
+      workingDir: '/ws', pid: process.pid, startedAt: new Date().toISOString(),
+    });
+    expect(await reg.get('sess-a')).toBeUndefined();
+  });
+
+  it('heartbeat before register is a no-op', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+    await forceHeartbeat(reg); // currentSessionId null → early return
+    expect(await reg.list()).toEqual([]);
+  });
+});
