@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { reducer } from '../src/app.js';
+import type { State } from '../src/app-state.js';
 
 // Minimal state carrying just the fields the scroll reducer cases touch — the
 // scroll cases only read/write scrollOffset/totalLines/viewportRows/pendingNewLines.
-// Mirrors reducer.test.ts: tests aren't typechecked, so a partial literal is fine.
-function scrollState(over: Partial<Record<string, number>> = {}) {
+function scrollState(over: Partial<Record<string, number>> = {}): State {
   return {
     scrollOffset: 0,
     totalLines: 0,
     viewportRows: 0,
     pendingNewLines: 0,
     ...over,
-  };
+  } as unknown as State;
 }
 
 describe('TUI scroll reducer', () => {

@@ -76,7 +76,7 @@ function initialState(over: Partial<State> = {}): State {
     pendingNewLines: 0,
     debugStreamStats: null,
     ...over,
-  };
+  } as unknown as State;
 }
 
 function projectItem(key: string, over: Partial<ProjectPickerItem> = {}): ProjectPickerItem {

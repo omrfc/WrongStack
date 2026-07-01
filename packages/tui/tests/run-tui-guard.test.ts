@@ -24,7 +24,7 @@ describe('runTui non-TTY guard', () => {
         attachments: {} as never,
         events: {} as never,
         model: 'm',
-      });
+      } as never);
       expect(code).toBe(2);
       expect(stderrWrites.join('')).toMatch(/--tui requires an interactive terminal/);
     } finally {

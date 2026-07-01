@@ -97,7 +97,7 @@ describe('token-saving tier in settings picker', () => {
         debugStream: false,
         statuslineMode: 'detailed' as const,
         configScope: 'global',
-      },
+      } as Parameters<typeof reducer>[1],
     );
     expect(s.settingsPicker.tokenSavingTier).toBe('minimal');
   });
@@ -111,7 +111,7 @@ describe('token-saving tier in settings picker', () => {
     for (let i = 0; i < TOKEN_SAVING_TIERS.length; i++) {
       expect(s.settingsPicker.tokenSavingTier).toBe(tier);
       s = reducer(s, { type: 'settingsValueChange', delta: 1 });
-      tier = TOKEN_SAVING_TIERS[(i + 1) % TOKEN_SAVING_TIERS.length];
+      tier = TOKEN_SAVING_TIERS[(i + 1) % TOKEN_SAVING_TIERS.length]!;
       expect(s.settingsPicker.tokenSavingTier).toBe(tier);
     }
   });
@@ -125,7 +125,7 @@ describe('token-saving tier in settings picker', () => {
     for (let i = TOKEN_SAVING_TIERS.length - 1; i >= 0; i--) {
       expect(s.settingsPicker.tokenSavingTier).toBe(tier);
       s = reducer(s, { type: 'settingsValueChange', delta: -1 });
-      tier = TOKEN_SAVING_TIERS[(i - 1 + TOKEN_SAVING_TIERS.length) % TOKEN_SAVING_TIERS.length];
+      tier = TOKEN_SAVING_TIERS[(i - 1 + TOKEN_SAVING_TIERS.length) % TOKEN_SAVING_TIERS.length]!;
       expect(s.settingsPicker.tokenSavingTier).toBe(tier);
     }
   });

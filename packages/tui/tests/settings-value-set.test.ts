@@ -3,7 +3,6 @@ import {
   resolveSettingsFieldValue,
   getSettingsFieldValue,
   SETTINGS_FIELD_LABELS,
-  type SettingsPickerPatch,
   type SettingsPickerValues,
 } from '../src/components/settings-picker.js';
 

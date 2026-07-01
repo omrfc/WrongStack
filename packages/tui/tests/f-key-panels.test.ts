@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { F_KEY_PANEL_ENTRIES, actionForFKeyPanel } from '../src/f-key-panels.js';
+import type { StatuslineItem } from '../src/components/statusline-picker.js';
 
 const entry = (key: number) => {
   const found = F_KEY_PANEL_ENTRIES.find((candidate) => candidate.key === key);
@@ -25,7 +26,7 @@ describe('actionForFKeyPanel', () => {
   });
 
   it('copies hidden statusline items instead of reusing the caller array', () => {
-    const hidden = ['todos'];
+    const hidden: StatuslineItem[] = ['todos'];
     const action = actionForFKeyPanel(entry(12), hidden);
     hidden.push('cost');
 

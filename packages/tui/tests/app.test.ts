@@ -138,7 +138,8 @@ describe('PR 0 — App baseline integration test', () => {
     // live subscriptions to the events bus are wired up.  The frame is
     // therefore minimal — often just a newline — but it MUST be a string;
     // undefined/null indicates a render crash.
-    expect(initialFrame.length).toBeGreaterThanOrEqual(0);
+    const frame = initialFrame ?? '';
+    expect(frame.length).toBeGreaterThanOrEqual(0);
 
     // ── Assertion 3: Synthetic keystroke reaches the app ──────────
     // Write a character via the mock stdin and verify the app does not

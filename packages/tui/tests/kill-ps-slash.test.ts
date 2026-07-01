@@ -43,6 +43,12 @@ beforeEach(() => {
   for (const fn of Object.values(fakeRegistry)) (fn as ReturnType<typeof vi.fn>).mockClear?.();
 });
 
+function messageOf(res: Awaited<ReturnType<ReturnType<typeof createKillSlashCommand>['run']>>): string {
+  expect(res).toBeTruthy();
+  expect(res && typeof res === 'object' && typeof res.message === 'string').toBe(true);
+  return (res as { message: string }).message;
+}
+
 // ── /kill ────────────────────────────────────────────────────────────────────
 
 describe('createKillSlashCommand', () => {
@@ -53,8 +59,8 @@ describe('createKillSlashCommand', () => {
   it('list (no args) renders breaker + "no processes" when empty', async () => {
     const cmd = createKillSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toContain('No active processes');
-    expect(res.message).toContain('Circuit breaker');
+    expect(messageOf(res)).toContain('No active processes');
+    expect(messageOf(res)).toContain('Circuit breaker');
   });
 
   it('list with active processes renders pid/name/cmd lines', async () => {
@@ -63,8 +69,8 @@ describe('createKillSlashCommand', () => {
     ];
     const cmd = createKillSlashCommand();
     const res = await cmd.run('list');
-    expect(res.message).toContain('1234');
-    expect(res.message).toContain('bash');
+    expect(messageOf(res)).toContain('1234');
+    expect(messageOf(res)).toContain('bash');
   });
 
   it('list truncates very long commands', async () => {
@@ -73,7 +79,7 @@ describe('createKillSlashCommand', () => {
     ];
     const cmd = createKillSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toContain('…');
+    expect(messageOf(res)).toContain('…');
   });
 
   it('list shows [killed] tag for killed entries', async () => {
@@ -82,14 +88,14 @@ describe('createKillSlashCommand', () => {
     ];
     const cmd = createKillSlashCommand();
     const res = await cmd.run('list');
-    expect(res.message).toContain('[killed]');
+    expect(messageOf(res)).toContain('[killed]');
   });
 
   it('breaker half-open state shown in renderList', async () => {
     registryState.breaker.state = 'half-open';
     const cmd = createKillSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toContain('half-open');
+    expect(messageOf(res)).toContain('half-open');
   });
 
   it('breaker open state with cooldown shown', async () => {
@@ -97,7 +103,7 @@ describe('createKillSlashCommand', () => {
     registryState.breaker.cooldownRemainingMs = 15000;
     const cmd = createKillSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toMatch(/open \(cooldown 15s/);
+    expect(messageOf(res)).toMatch(/open \(cooldown 15s/);
   });
 
   it('breaker open with null cooldown shows em-dash', async () => {
@@ -105,13 +111,13 @@ describe('createKillSlashCommand', () => {
     registryState.breaker.cooldownRemainingMs = null;
     const cmd = createKillSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toMatch(/open \(cooldown —/);
+    expect(messageOf(res)).toMatch(/open \(cooldown —/);
   });
 
   it('all reports "no processes" when registry empty', async () => {
     const cmd = createKillSlashCommand();
     const res = await cmd.run('all');
-    expect(res.message).toContain('No processes to kill');
+    expect(messageOf(res)).toContain('No processes to kill');
   });
 
   it('all kills tracked processes and lists pids', async () => {
@@ -121,22 +127,22 @@ describe('createKillSlashCommand', () => {
     ];
     const cmd = createKillSlashCommand();
     const res = await cmd.run('all');
-    expect(res.message).toMatch(/Killed 2 processes: 11, 22/);
+    expect(messageOf(res)).toMatch(/Killed 2 processes: 11, 22/);
   });
 
   it('force opens breaker and force-kills (empty case)', async () => {
     const cmd = createKillSlashCommand();
     const res = await cmd.run('force');
     expect(fakeRegistry.forceBreakerOpen).toHaveBeenCalled();
-    expect(res.message).toContain('Circuit breaker forced open');
+    expect(messageOf(res)).toContain('Circuit breaker forced open');
   });
 
   it('force opens breaker and force-kills (one process)', async () => {
     registryState.procs = [{ pid: 7, name: 'x', command: 'x', startedAt: 0, killed: false }];
     const cmd = createKillSlashCommand();
     const res = await cmd.run('force');
-    expect(res.message).toContain('Force-killed 1 process');
-    expect(res.message).toContain('7');
+    expect(messageOf(res)).toContain('Force-killed 1 process');
+    expect(messageOf(res)).toContain('7');
   });
 
   it('reset re-closes the breaker', async () => {
@@ -144,27 +150,27 @@ describe('createKillSlashCommand', () => {
     const cmd = createKillSlashCommand();
     const res = await cmd.run('reset');
     expect(fakeRegistry.forceBreakerReset).toHaveBeenCalled();
-    expect(res.message).toContain('reset to closed');
+    expect(messageOf(res)).toContain('reset to closed');
   });
 
   it('kill by pid reports success on hit', async () => {
     registryState.procs = [{ pid: 42, name: 'a', command: '', startedAt: 0, killed: false }];
     const cmd = createKillSlashCommand();
     const res = await cmd.run('42');
-    expect(res.message).toBe('Killed process 42.');
+    expect(messageOf(res)).toBe('Killed process 42.');
   });
 
   it('kill by pid reports not found on miss', async () => {
     const cmd = createKillSlashCommand();
     const res = await cmd.run('9999');
-    expect(res.message).toContain('not found');
+    expect(messageOf(res)).toContain('not found');
   });
 
   it('unknown sub returns usage', async () => {
     const cmd = createKillSlashCommand();
     const res = await cmd.run('wat');
-    expect(res.message).toContain('Unknown subcommand');
-    expect(res.message).toContain('Usage');
+    expect(messageOf(res)).toContain('Unknown subcommand');
+    expect(messageOf(res)).toContain('Usage');
   });
 });
 
@@ -178,7 +184,7 @@ describe('createPsSlashCommand', () => {
   it('reports "No active processes" on empty list', async () => {
     const cmd = createPsSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toBe('No active processes.');
+    expect(messageOf(res)).toBe('No active processes.');
   });
 
   it('renders process table when entries exist', async () => {
@@ -187,9 +193,9 @@ describe('createPsSlashCommand', () => {
     ];
     const cmd = createPsSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toContain('Active processes (1)');
-    expect(res.message).toContain('echo hi');
-    expect(res.message).toContain('🟢 closed');
+    expect(messageOf(res)).toContain('Active processes (1)');
+    expect(messageOf(res)).toContain('echo hi');
+    expect(messageOf(res)).toContain('🟢 closed');
   });
 
   it('shows half-open breaker label', async () => {
@@ -197,7 +203,7 @@ describe('createPsSlashCommand', () => {
     registryState.procs = [{ pid: 1, name: 's', command: 'c', startedAt: 0, killed: false }];
     const cmd = createPsSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toContain('🟡 half-open');
+    expect(messageOf(res)).toContain('🟡 half-open');
   });
 
   it('shows open breaker label', async () => {
@@ -205,7 +211,7 @@ describe('createPsSlashCommand', () => {
     registryState.procs = [{ pid: 1, name: 's', command: 'c', startedAt: 0, killed: false }];
     const cmd = createPsSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toContain('🔴 open');
+    expect(messageOf(res)).toContain('🔴 open');
   });
 
   it('truncates command longer than 80 chars', async () => {
@@ -214,13 +220,13 @@ describe('createPsSlashCommand', () => {
     ];
     const cmd = createPsSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toContain('…');
+    expect(messageOf(res)).toContain('…');
   });
 
   it('marks killed entries', async () => {
     registryState.procs = [{ pid: 1, name: 's', command: 'c', startedAt: 0, killed: true }];
     const cmd = createPsSlashCommand();
     const res = await cmd.run('');
-    expect(res.message).toContain('[killed]');
+    expect(messageOf(res)).toContain('[killed]');
   });
 });

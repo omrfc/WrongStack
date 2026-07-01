@@ -16,9 +16,10 @@ import {
 import { bucketActivity, sparkline } from '../src/components/fleet-monitor.js';
 
 function entry(over: Partial<FleetEntry> & Pick<FleetEntry, 'id' | 'status'>): FleetEntry {
+  const { id, status, ...rest } = over;
   return {
-    name: over.id,
-    status: over.status,
+    id,
+    name: id,
     streamingText: '',
     iterations: 0,
     toolCalls: 0,
@@ -27,7 +28,8 @@ function entry(over: Partial<FleetEntry> & Pick<FleetEntry, 'id' | 'status'>): F
     cost: 0,
     startedAt: 0,
     lastEventAt: 0,
-    ...over,
+    ...rest,
+    status,
   } as FleetEntry;
 }
 

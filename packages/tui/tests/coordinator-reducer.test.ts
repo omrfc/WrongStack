@@ -26,7 +26,50 @@ function minimalState(coordinator: State['coordinator'] = minimalCoordinatorStat
     leftSidebarOpen: false,
     fileExplorerWidth: 30,
     rightSidebarOpen: false,
-    settingsPicker: { open: false, cursor: 0, scroll: 0 },
+    settingsPicker: {
+      open: false,
+      field: 0,
+      mode: 'off' as const,
+      delayMs: 0,
+      titleAnimation: false,
+      yolo: false,
+      streamFleet: true,
+      chime: false,
+      confirmExit: false,
+      nextPrediction: false,
+      featureMcp: false,
+      featurePlugins: false,
+      featureMemory: false,
+      featureSkills: false,
+      featureModelsRegistry: false,
+      tokenSavingTier: 'off' as const,
+      allowOutsideProjectRoot: true,
+      contextAutoCompact: true,
+      contextStrategy: 'hybrid' as const,
+      contextMode: 'balanced' as const,
+      maxConcurrent: 4,
+      logLevel: 'info' as const,
+      auditLevel: 'standard' as const,
+      indexOnStart: false,
+      multiDiffSummaryThreshold: 0,
+      maxIterations: 100,
+      autoProceedMaxIterations: 0,
+      enhanceDelayMs: 4000,
+      enhanceEnabled: true,
+      enhanceLanguage: 'original' as const,
+      debugStream: false,
+      statuslineMode: 'detailed' as const,
+      reasoningMode: 'auto' as const,
+      reasoningEffort: 'medium' as const,
+      reasoningPreserve: false,
+      thinkingWord: 'Thinking',
+      thinkingWordEditing: false,
+      thinkingWordDraft: '',
+      cacheTtl: 'default' as const,
+      configScope: 'global' as const,
+      filter: '',
+      lastSettingsField: 0,
+    },
     paletteOpen: false,
     shortcutsOpen: false,
     searchOpen: false,
@@ -83,7 +126,7 @@ function minimalState(coordinator: State['coordinator'] = minimalCoordinatorStat
     interruptMenu: null,
     run: null,
     trace: null,
-  };
+  } as unknown as State;
 }
 
 describe('TUI reducer — coordinatorEvent', () => {
@@ -91,7 +134,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState();
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'goal:added', text: 'Test goal', count: 1 },
+      event: { type: 'goal:added', text: 'Test goal' },
     });
     expect(out.coordinator.timeline).toHaveLength(1);
     expect(out.coordinator.timeline[0]!.icon).toBe('🎯');
@@ -104,7 +147,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState();
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'goal:completed', text: 'Goal done', count: 1 },
+      event: { type: 'goal:completed', text: 'Goal done' },
     });
     expect(out.coordinator.timeline[0]!.icon).toBe('✅');
     expect(out.coordinator.timeline[0]!.kind).toBe('goal');
@@ -114,7 +157,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState();
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'goal:failed', text: 'Goal failed', count: 1 },
+      event: { type: 'goal:failed', text: 'Goal failed' },
     });
     expect(out.coordinator.timeline[0]!.icon).toBe('❌');
     expect(out.coordinator.timeline[0]!.kind).toBe('goal');
@@ -124,7 +167,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState();
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'task:ready', text: 'Task ready', count: 1 },
+      event: { type: 'task:ready', text: 'Task ready' },
     });
     expect(out.coordinator.timeline[0]!.icon).toBe('⚡');
     expect(out.coordinator.timeline[0]!.kind).toBe('task');
@@ -134,7 +177,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState();
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'task:completed', text: 'Task done', count: 1 },
+      event: { type: 'task:completed', text: 'Task done' },
     });
     expect(out.coordinator.timeline[0]!.icon).toBe('✓');
     expect(out.coordinator.timeline[0]!.kind).toBe('task');
@@ -144,7 +187,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState(minimalCoordinatorState({ knowledgeCount: 5 }));
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'knowledge:added', text: 'New fact', count: 1 },
+      event: { type: 'knowledge:added', text: 'New fact' },
     });
     expect(out.coordinator.timeline[0]!.icon).toBe('💡');
     expect(out.coordinator.timeline[0]!.kind).toBe('knowledge');
@@ -155,7 +198,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState();
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'consensus:reached', text: 'Approved', count: 1 },
+      event: { type: 'consensus:reached', text: 'Approved' },
     });
     expect(out.coordinator.timeline[0]!.icon).toBe('🤝');
     expect(out.coordinator.timeline[0]!.kind).toBe('consensus');
@@ -165,7 +208,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState();
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'deadlock:detected', text: 'Deadlock', count: 1 },
+      event: { type: 'deadlock:detected', text: 'Deadlock' },
     });
     expect(out.coordinator.timeline[0]!.icon).toBe('⚠️');
     expect(out.coordinator.timeline[0]!.kind).toBe('deadlock');
@@ -179,7 +222,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     );
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'goal:added', text: 'Second', count: 1 },
+      event: { type: 'goal:added', text: 'Second' },
     });
     expect(out.coordinator.timeline).toHaveLength(2);
     expect(out.coordinator.timeline[0]!.text).toBe('Second');
@@ -197,7 +240,7 @@ describe('TUI reducer — coordinatorEvent', () => {
     const state = minimalState(minimalCoordinatorState({ timeline }));
     const out = reducer(state, {
       type: 'coordinatorEvent',
-      event: { type: 'goal:added', text: 'New entry', count: 1 },
+      event: { type: 'goal:added', text: 'New entry' },
     });
     expect(out.coordinator.timeline).toHaveLength(50);
     expect(out.coordinator.timeline[0]!.text).toBe('New entry');
@@ -206,8 +249,12 @@ describe('TUI reducer — coordinatorEvent', () => {
 
   it('falls back to event.type as text when text is missing', () => {
     const state = minimalState();
-    // @ts-expect-error — testing missing text field
-    const out = reducer(state, { type: 'coordinatorEvent', event: { type: 'goal:added' } });
+    const out = reducer(state, {
+      type: 'coordinatorEvent',
+      event: { type: 'goal:added' } as Parameters<typeof reducer>[1] extends { event: infer Event }
+        ? Event
+        : never,
+    });
     expect(out.coordinator.timeline[0]!.text).toBe('goal:added');
   });
 });

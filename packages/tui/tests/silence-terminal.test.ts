@@ -130,7 +130,10 @@ describe('silenceTerminal', () => {
   it('stderr no-op preserves callback contract (buffer + cb)', () => {
     silenceTerminal();
     const cb = vi.fn();
-    process.stderr.write(Buffer.from('hello'), cb as never as (err?: Error) => void);
+    (process.stderr.write as (chunk: Uint8Array, cb: (err?: Error) => void) => boolean)(
+      Buffer.from('hello'),
+      cb,
+    );
     expect(cb).toHaveBeenCalledTimes(1);
   });
 

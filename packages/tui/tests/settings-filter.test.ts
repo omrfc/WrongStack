@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
-import { SettingsPicker, SETTINGS_FIELD_COUNT } from '../src/components/settings-picker.js';
+import { SettingsPicker } from '../src/components/settings-picker.js';
 
 // ── Minimal props factory ──────────────────────────────────────────────
 // SettingsPicker has 30+ props. This factory covers every required field

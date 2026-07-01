@@ -6,9 +6,10 @@ import {
   selectedSlashCommandLine,
 } from '../src/app.js';
 import { SETTINGS_FIELD_COUNT } from '../src/components/settings-picker.js';
+import type { State } from '../src/app-state.js';
 
-function initial() {
-  return {
+function initial(over: Partial<State> = {}): State {
+  const state = {
     entries: [],
     buffer: '',
     cursor: 0,
@@ -35,7 +36,9 @@ function initial() {
       step: 'provider' as const,
       providerOptions: [],
       modelOptions: [],
+      filteredOptions: [],
       selected: 0,
+      searchQuery: '',
     },
     confirm: null,
     enhance: null,
@@ -78,11 +81,12 @@ function initial() {
       allowOutsideProjectRoot: true,
       contextAutoCompact: true,
       contextStrategy: 'hybrid' as const,
-      contextMode: 'full' as const,
+      contextMode: 'balanced' as const,
       maxConcurrent: 4,
       logLevel: 'info' as const,
       auditLevel: 'standard' as const,
       indexOnStart: false,
+      multiDiffSummaryThreshold: 0,
       maxIterations: 100,
       autoProceedMaxIterations: 0,
       enhanceDelayMs: 4000,
@@ -94,8 +98,12 @@ function initial() {
       reasoningEffort: 'medium' as const,
       reasoningPreserve: false,
       thinkingWord: 'thinking',
+      thinkingWordEditing: false,
+      thinkingWordDraft: '',
       cacheTtl: 'default' as const,
       configScope: 'global' as const,
+      filter: '',
+      lastSettingsField: 0,
     },
     statuslinePicker: { open: false, field: 0, hiddenItems: [], visibleChips: [] },
     projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '' },
@@ -104,7 +112,9 @@ function initial() {
     sddBoard: null,
     worktreeMonitorOpen: false,
     coordinator: { goals: [], timeline: [], knowledgeCount: 0, monitorOpen: false, healthy: false },
+    ...over,
   };
+  return state as unknown as State;
 }
 
 function sampleSnapshot(over: Record<string, unknown> = {}) {
@@ -538,6 +548,7 @@ describe('TUI reducer', () => {
       logLevel: 'info',
       auditLevel: 'standard',
       indexOnStart: true,
+      multiDiffSummaryThreshold: 5,
       maxIterations: 500,
       autoProceedMaxIterations: 50,
       enhanceDelayMs: 60_000,
@@ -618,11 +629,17 @@ describe('TUI reducer', () => {
     const resolve = () => {};
     s = reducer(s, {
       type: 'enhanceOpen',
-      info: { original: 'fix the bug', refined: 'Fix the null deref in auth.ts', resolve },
+      info: {
+        original: 'fix the bug',
+        refined: 'Fix the null deref in auth.ts',
+        english: 'Fix the null deref in auth.ts',
+        resolve,
+      },
     });
     expect(s.enhance).toEqual({
       original: 'fix the bug',
       refined: 'Fix the null deref in auth.ts',
+      english: 'Fix the null deref in auth.ts',
       resolve,
     });
     s = reducer(s, { type: 'enhanceClose' });
@@ -841,8 +858,8 @@ describe('selectedSlashCommandLine', () => {
         open: true,
         selected: 1,
         matches: [
-          { name: 'help', description: 'Help', isBuiltin: true },
-          { name: 'init', description: 'Init', isBuiltin: true },
+          { name: 'help', description: 'Help', category: 'App', isBuiltin: true },
+          { name: 'init', description: 'Init', category: 'App', isBuiltin: true },
         ],
       }),
     ).toBe('/init');
@@ -886,6 +903,7 @@ describe('settings picker reducer', () => {
         logLevel: 'info' as const,
         auditLevel: 'standard' as const,
         indexOnStart: true,
+        multiDiffSummaryThreshold: 5,
         maxIterations: 500,
         autoProceedMaxIterations: 50,
         enhanceDelayMs: 60_000,
@@ -908,7 +926,7 @@ describe('settings picker reducer', () => {
   // cycles can dispatch the open action without re-stating 30+ fields.
   // (The reducer ignores the action's `field` — it reads the previous
   // runtime value to preserve the last-visited row.)
-  const settingsOpenPayload = (over: Record<string, unknown> = {}) => ({
+  const settingsOpenPayload = (over: Record<string, unknown> = {}): Parameters<typeof reducer>[1] => ({
     type: 'settingsOpen' as const,
     mode: 'off',
     delayMs: 0,
@@ -948,7 +966,7 @@ describe('settings picker reducer', () => {
     cacheTtl: 'default' as const,
     configScope: 'global' as const,
     ...over,
-  });
+  }) as Parameters<typeof reducer>[1];
 
   it('opens with the supplied mode + delay and focuses the first field', () => {
     const s = reducer(base(), {
@@ -975,6 +993,7 @@ describe('settings picker reducer', () => {
       logLevel: 'info',
       auditLevel: 'standard',
       indexOnStart: true,
+      multiDiffSummaryThreshold: 5,
       maxIterations: 500,
       autoProceedMaxIterations: 50,
       enhanceDelayMs: 60_000,
@@ -988,7 +1007,7 @@ describe('settings picker reducer', () => {
       debugStream: false,
       statuslineMode: 'detailed' as const,
       configScope: 'global',
-    });
+    } as Parameters<typeof reducer>[1]);
     expect(s.settingsPicker).toMatchObject({ open: true, field: 0, mode: 'auto', delayMs: 30_000 });
   });
 
@@ -1333,7 +1352,7 @@ describe('autoPhase board reducer', () => {
       s as never as {
         autoPhase: { phases: Record<string, { activeTasks?: Array<{ taskId: string; agent?: string }> }> };
       }
-    ).autoPhase.phases.p1.activeTasks;
+    ).autoPhase.phases['p1']!.activeTasks;
     expect(active).toEqual([{ taskId: 't1', title: 'Build login', agent: 'Einstein' }]);
   });
 
@@ -1360,7 +1379,7 @@ describe('autoPhase board reducer', () => {
       s as never as {
         autoPhase: { phases: Record<string, { completedTasks: number; activeTasks?: unknown[] }> };
       }
-    ).autoPhase.phases.p1;
+    ).autoPhase.phases['p1']!;
     expect(phase.completedTasks).toBe(1);
     expect(phase.activeTasks).toHaveLength(1);
   });
@@ -1384,7 +1403,7 @@ describe('autoPhase board reducer', () => {
     } as never);
     const active = (
       s as never as { autoPhase: { phases: Record<string, { activeTasks?: unknown[] }> } }
-    ).autoPhase.phases.p1.activeTasks;
+    ).autoPhase.phases['p1']!.activeTasks;
     expect(active).toEqual([]);
   });
 });

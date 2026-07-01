@@ -5,6 +5,7 @@ import { snapshotTokenCounter } from '../src/hooks/use-token-counter-refresh.js'
 function fakeTokenCounter(): TokenCounter {
   return {
     account: () => undefined,
+    setCurrentRequestTokens: () => undefined,
     currentRequestTokens: () => ({ input: 123, cacheRead: 45 }),
     total: () => ({ input: 1234, output: 567, cacheRead: 89, cacheWrite: 10 }),
     estimateCost: () => ({ input: 0.0123, output: 0.0456, total: 0.0579, currency: 'USD' }),
