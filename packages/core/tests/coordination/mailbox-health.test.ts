@@ -19,15 +19,20 @@
  * child process.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  MAILBOX_HEALTH_DEFAULT_FROM,
+  MAILBOX_HEALTH_DEFAULT_INTERVAL_MS,
+  MailboxHealthWatchdog,
   buildDownAlert,
   buildRecoveryAlert,
   validateWatchdogOptions,
   type DownAlertInput,
+  type MailboxHealthEvent,
   type RecoveryAlertInput,
   type WatchdogConfig,
 } from '../../src/coordination/mailbox-health.js';
+import type { GlobalMailbox } from '../../src/coordination/global-mailbox.js';
 
 const downFixture: DownAlertInput = {
   from: 'mailbox-bridge-watchdog',
@@ -170,5 +175,208 @@ describe('validateWatchdogOptions', () => {
       .toThrow(/failureThreshold must be a positive integer/);
     expect(() => validateWatchdogOptions({ ...validConfig, failureThreshold: 1.5 }))
       .toThrow(/failureThreshold must be a positive integer/);
+  });
+});
+
+// ── Live probing path ─────────────────────────────────────────────────────
+// The original tests above pin the pure builders + validation. These exercise
+// the Watchdog's timer-driven probe/record lifecycle with fake timers + a
+// stubbed fetch + a fake mailbox.
+
+function makeMailbox(send?: (m: unknown) => Promise<void>): GlobalMailbox {
+  return { send: send ?? (vi.fn(async () => undefined) as never) } as unknown as GlobalMailbox;
+}
+
+let fetchMock: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+const flush = () => vi.advanceTimersByTimeAsync(0);
+
+describe('MailboxHealthWatchdog lifecycle', () => {
+  it('starts, probes immediately, emits started/stopped, strips trailing slash', async () => {
+    fetchMock.mockResolvedValue({ ok: true } as Response);
+    const events: MailboxHealthEvent[] = [];
+    const wd = new MailboxHealthWatchdog({
+      mailbox: makeMailbox(),
+      url: 'http://127.0.0.1:7788/',
+      probeIntervalMs: 1000,
+      probeTimeoutMs: 100,
+      failureThreshold: 2,
+      onAlert: (e) => events.push(e),
+    });
+    await wd.start();
+    await flush();
+    expect(events[0]).toMatchObject({ kind: 'started', intervalMs: 1000 });
+    expect(wd.isRunning()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:7788/healthz', expect.anything());
+    await wd.stop();
+    expect(events.at(-1)).toMatchObject({ kind: 'stopped' });
+    expect(wd.isRunning()).toBe(false);
+  });
+
+  it('applies documented defaults', () => {
+    fetchMock.mockResolvedValue({ ok: true } as Response);
+    const wd = new MailboxHealthWatchdog({ mailbox: makeMailbox(), url: 'http://x' });
+    expect((wd as unknown as { intervalMs: number }).intervalMs).toBe(MAILBOX_HEALTH_DEFAULT_INTERVAL_MS);
+    expect((wd as unknown as { from: string }).from).toBe(MAILBOX_HEALTH_DEFAULT_FROM);
+  });
+
+  it('start is idempotent and stays stopped after stop (aborted guard)', async () => {
+    fetchMock.mockResolvedValue({ ok: true } as Response);
+    const wd = new MailboxHealthWatchdog({ mailbox: makeMailbox(), url: 'http://x', probeIntervalMs: 1000, probeTimeoutMs: 100 });
+    await wd.start();
+    const timerBefore = (wd as unknown as { timer: NodeJS.Timeout }).timer;
+    await wd.start(); // no-op (timer already set)
+    expect((wd as unknown as { timer: NodeJS.Timeout }).timer).toBe(timerBefore);
+    await wd.stop();
+    await wd.start(); // aborted -> no-op
+    expect(wd.isRunning()).toBe(false);
+  });
+
+  it('stop is a no-op when not running', async () => {
+    const wd = new MailboxHealthWatchdog({ mailbox: makeMailbox(), url: 'http://x', probeIntervalMs: 1000, probeTimeoutMs: 100 });
+    await wd.stop();
+    expect(wd.isRunning()).toBe(false);
+  });
+});
+
+describe('MailboxHealthWatchdog probing', () => {
+  it('posts a down alert after the failure threshold, then a recovery', async () => {
+    const send = vi.fn(async () => undefined);
+    fetchMock.mockResolvedValue({ ok: false } as Response); // unhealthy
+    const wd = new MailboxHealthWatchdog({
+      mailbox: makeMailbox(send),
+      url: 'http://x',
+      probeIntervalMs: 1000,
+      probeTimeoutMs: 100,
+      failureThreshold: 2,
+    });
+    await wd.start();
+    await flush(); // first probe: cf=1 (below threshold)
+    expect(wd.currentFailureStreak).toBe(1);
+    expect(send).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000); // second probe: cf=2 -> alert
+    expect(wd.isBridgeDown()).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1); // postDown
+    await vi.advanceTimersByTimeAsync(1000); // third failure while alerting -> no re-post
+    expect(send).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockResolvedValue({ ok: true } as Response);
+    await vi.advanceTimersByTimeAsync(1000); // success -> recovery
+    expect(wd.isBridgeDown()).toBe(false);
+    expect(send).toHaveBeenCalledTimes(2); // postRecovery
+    await wd.stop();
+  });
+
+  it('treats a thrown fetch as a probe failure', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'));
+    const events: MailboxHealthEvent[] = [];
+    const wd = new MailboxHealthWatchdog({
+      mailbox: makeMailbox(),
+      url: 'http://x',
+      probeIntervalMs: 1000,
+      probeTimeoutMs: 100,
+      failureThreshold: 5,
+      onAlert: (e) => events.push(e),
+    });
+    await wd.start();
+    await flush();
+    expect(
+      events.some((e) => e.kind === 'probe-failed' && (e as { error?: string }).error === 'network down'),
+    ).toBe(true);
+    expect(wd.currentFailureStreak).toBe(1);
+    await wd.stop();
+  });
+
+  it('fires the per-probe abort timeout when fetch hangs', async () => {
+    let resolveFetch: ((v: Response) => void) | undefined;
+    fetchMock.mockReturnValue(
+      new Promise<Response>((r) => {
+        resolveFetch = r;
+      }),
+    );
+    const wd = new MailboxHealthWatchdog({
+      mailbox: makeMailbox(),
+      url: 'http://x',
+      probeIntervalMs: 1000,
+      probeTimeoutMs: 100,
+      failureThreshold: 5,
+    });
+    await wd.start();
+    await flush(); // tick waiting on the hung fetch
+    await vi.advanceTimersByTimeAsync(100); // past the per-probe timeout -> abort backstop fires
+    resolveFetch?.({ ok: true } as Response); // unstick the probe
+    await flush();
+    await wd.stop();
+  });
+
+  it('skips a probe when the previous one is still in flight', async () => {
+    let resolveFetch: ((v: Response) => void) | undefined;
+    fetchMock.mockReturnValue(
+      new Promise<Response>((r) => {
+        resolveFetch = r;
+      }),
+    );
+    const wd = new MailboxHealthWatchdog({
+      mailbox: makeMailbox(),
+      url: 'http://x',
+      probeIntervalMs: 1000,
+      probeTimeoutMs: 100,
+    });
+    const tick = (wd as unknown as { tick: () => Promise<void> }).tick.bind(wd);
+    const p1 = tick(); // inFlight = true
+    const p2 = tick(); // inFlight -> returns immediately
+    expect(await p2).toBeUndefined();
+    resolveFetch?.({ ok: true } as Response);
+    await p1;
+  });
+
+  it('swallows a rejecting mailbox.send (best-effort post + recovery)', async () => {
+    const send = vi.fn(async () => {
+      throw new Error('mailbox down');
+    });
+    fetchMock.mockResolvedValue({ ok: false } as Response);
+    const wd = new MailboxHealthWatchdog({
+      mailbox: makeMailbox(send),
+      url: 'http://x',
+      probeIntervalMs: 1000,
+      probeTimeoutMs: 100,
+      failureThreshold: 1,
+    });
+    await wd.start();
+    await flush(); // first failure -> alert -> postDown rejects -> .catch swallows
+    expect(wd.isBridgeDown()).toBe(true);
+    fetchMock.mockResolvedValue({ ok: true } as Response);
+    await vi.advanceTimersByTimeAsync(1000); // recovery -> postRecovery rejects -> .catch
+    expect(wd.isBridgeDown()).toBe(false);
+    await wd.stop();
+  });
+
+  it('swallows a throwing onAlert observer', async () => {
+    fetchMock.mockResolvedValue({ ok: false } as Response);
+    const wd = new MailboxHealthWatchdog({
+      mailbox: makeMailbox(),
+      url: 'http://x',
+      probeIntervalMs: 1000,
+      probeTimeoutMs: 100,
+      failureThreshold: 5,
+      onAlert: () => {
+        throw new Error('observer boom');
+      },
+    });
+    await wd.start();
+    await flush(); // emit() catches the throwing observer
+    expect(wd.currentFailureStreak).toBe(1);
+    await wd.stop();
   });
 });
