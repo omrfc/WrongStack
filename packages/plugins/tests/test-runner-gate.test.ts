@@ -2,7 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // Mock execSync and fs before importing the plugin.
 const mockExecSync = vi.fn((cmd: string): string => {
-  if (cmd.includes('--reporter=json')) {
+  if (cmd.includes('--version')) return '1.0.0\n'; // runner detected
+  if (cmd.includes('--reporter=json') || cmd.includes('--json') || cmd.includes('--reporter json')) {
     // Simulate test failure
     return JSON.stringify({
       numTotalTests: 3,
@@ -241,5 +242,92 @@ describe('teardown + H1 pattern', () => {
   it('teardown is safe before setup (defensive)', () => {
     const api = makeApi();
     expect(() => testRunnerGatePlugin.teardown!(api as never)).not.toThrow();
+  });
+});
+
+describe('runner detection + config', () => {
+  it('reports detected runner name in status', async () => {
+    const api = makeApi();
+    testRunnerGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.runner).toBe('vitest'); // auto-detected (first candidate)
+  });
+
+  it('respects explicit runner config', async () => {
+    const api = makeApi({ extensions: { 'test-runner-gate': { runner: 'jest' } } });
+    testRunnerGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.runner).toBe('jest');
+  });
+
+  it('reports "none" when no runner found', async () => {
+    // Override mock to fail all --version checks
+    mockExecSync.mockImplementation((cmd: string): string => {
+      if (cmd.includes('--version')) throw new Error('not found');
+      if (cmd.includes('--reporter=json') || cmd.includes('--json') || cmd.includes('--reporter json')) {
+        return JSON.stringify({ numTotalTests: 1, numPassedTests: 1, numFailedTests: 0, success: true, testResults: [] });
+      }
+      return '';
+    });
+
+    const api = makeApi();
+    testRunnerGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.runner).toBe('none');
+
+    // Restore
+    mockExecSync.mockImplementation((cmd: string): string => {
+      if (cmd.includes('--version')) return '1.0.0\n';
+      if (cmd.includes('--reporter=json') || cmd.includes('--json') || cmd.includes('--reporter json')) {
+        return JSON.stringify({
+          numTotalTests: 3, numPassedTests: 2, numFailedTests: 1, success: false,
+          testResults: [{ assertionResults: [{ status: 'failed', title: 'x', fullName: 'x', failureMessages: ['err'] }] }],
+        });
+      }
+      return '';
+    });
+  });
+
+  it('uses custom command when provided', async () => {
+    const api = makeApi({ extensions: { 'test-runner-gate': { command: 'pnpm test' } } });
+    testRunnerGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.command).toBe('pnpm test');
+  });
+
+  it('uses runner default command when command is empty', async () => {
+    const api = makeApi();
+    testRunnerGatePlugin.setup(api as never);
+    const status = await getStatusTool(api).execute({});
+    expect(status.command).toBe('npx vitest run');
+  });
+
+  it('is a no-op when runner not found and write occurs', () => {
+    mockExecSync.mockImplementation((cmd: string): string => {
+      if (cmd.includes('--version')) throw new Error('not found');
+      return '';
+    });
+
+    const api = makeApi();
+    testRunnerGatePlugin.setup(api as never);
+    const hook = getHook(api);
+    const result = hook({
+      toolName: 'write',
+      toolInput: { path: 'src/foo.ts', content: 'x' },
+      toolResult: { content: 'ok', isError: false },
+    });
+    expect(result).toBeUndefined();
+
+    // Restore
+    mockExecSync.mockImplementation((cmd: string): string => {
+      if (cmd.includes('--version')) return '1.0.0\n';
+      if (cmd.includes('--reporter=json') || cmd.includes('--json') || cmd.includes('--reporter json')) {
+        return JSON.stringify({
+          numTotalTests: 3, numPassedTests: 2, numFailedTests: 1, success: false,
+          testResults: [{ assertionResults: [{ status: 'failed', title: 'x', fullName: 'x', failureMessages: ['err'] }] }],
+        });
+      }
+      return '';
+    });
   });
 });

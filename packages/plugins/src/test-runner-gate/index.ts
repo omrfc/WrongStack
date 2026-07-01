@@ -69,8 +69,11 @@ const state = {
 // Config
 // ---------------------------------------------------------------------------
 
+type Runner = 'vitest' | 'jest' | 'mocha' | 'auto';
+
 interface TestGateConfig {
   enabled: boolean;
+  runner: Runner;
   command: string;
   timeoutMs: number;
   testFilePatterns: string[];
@@ -79,7 +82,8 @@ interface TestGateConfig {
 
 const DEFAULTS: TestGateConfig = {
   enabled: true,
-  command: 'npx vitest run',
+  runner: 'auto',
+  command: '',
   timeoutMs: 30_000,
   testFilePatterns: [
     'src/{name}.test.ts',
@@ -92,8 +96,13 @@ const DEFAULTS: TestGateConfig = {
 function readConfig(raw: unknown): TestGateConfig {
   if (!raw || typeof raw !== 'object') return { ...DEFAULTS };
   const r = raw as Record<string, unknown>;
+  const runner: Runner =
+    r['runner'] === 'vitest' || r['runner'] === 'jest' || r['runner'] === 'mocha'
+      ? r['runner']
+      : 'auto';
   return {
     enabled: r['enabled'] !== false,
+    runner,
     command: typeof r['command'] === 'string' ? r['command'] : DEFAULTS.command,
     timeoutMs: typeof r['timeoutMs'] === 'number' && r['timeoutMs'] > 0 ? r['timeoutMs'] : DEFAULTS.timeoutMs,
     testFilePatterns: Array.isArray(r['testFilePatterns']) && (r['testFilePatterns'] as unknown[]).length > 0
@@ -163,6 +172,61 @@ function findTestFile(sourcePath: string, patterns: string[]): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Runner detection
+// ---------------------------------------------------------------------------
+
+interface RunnerConfig {
+  /** The resolved runner name. */
+  name: 'vitest' | 'jest' | 'mocha';
+  /** Full command prefix (without test file). */
+  command: string;
+  /** JSON output flag(s) appended after the test file. */
+  jsonFlags: string;
+}
+
+/**
+ * Detect which test runner is available. "auto" tries vitest, then
+ * jest, then mocha. Returns the resolved runner + command prefix.
+ * Uses `npx <runner> --version` to check availability.
+ */
+function detectRunner(requested: Runner): RunnerConfig | null {
+  const candidates: RunnerConfig[] = [
+    { name: 'vitest', command: 'npx vitest run', jsonFlags: '--reporter=json' },
+    { name: 'jest', command: 'npx jest', jsonFlags: '--json' },
+    { name: 'mocha', command: 'npx mocha', jsonFlags: '--reporter json' },
+  ];
+
+  // If a specific runner is requested, try only that one.
+  if (requested !== 'auto') {
+    const match = candidates.find((c) => c.name === requested);
+    if (!match) return null;
+    try {
+      execSync(`npx ${match.name} --version`, {
+        encoding: 'utf-8', timeout: 5_000, cwd: process.cwd(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return match;
+    } catch {
+      return null;
+    }
+  }
+
+  // Auto: try each in order.
+  for (const candidate of candidates) {
+    try {
+      execSync(`npx ${candidate.name} --version`, {
+        encoding: 'utf-8', timeout: 5_000, cwd: process.cwd(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return candidate;
+    } catch {
+      // not available
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Test runner
 // ---------------------------------------------------------------------------
 
@@ -181,10 +245,13 @@ interface TestRunResult {
  */
 function runTests(
   testFile: string,
-  command: string,
+  runner: RunnerConfig,
+  customCommand: string,
   timeoutMs: number,
 ): TestRunResult | null {
-  const fullCommand = `${command} "${testFile}" --reporter=json`;
+  // Use custom command if provided, otherwise use the runner's default.
+  const baseCommand = customCommand || runner.command;
+  const fullCommand = `${baseCommand} "${testFile}" ${runner.jsonFlags}`;
   let stdout = '';
   try {
     stdout = execSync(fullCommand, {
@@ -266,10 +333,16 @@ const plugin: Plugin = {
         default: true,
         description: 'Master switch.',
       },
+      runner: {
+        type: 'string',
+        enum: ['vitest', 'jest', 'mocha', 'auto'],
+        default: 'auto',
+        description: 'Which test runner to use. "auto" tries vitest first, then jest, then mocha.',
+      },
       command: {
         type: 'string',
-        default: 'npx vitest run',
-        description: 'Base test command. The test file path is appended automatically.',
+        default: '',
+        description: 'Custom command prefix (overrides the runner default). Empty = use runner default.',
       },
       timeoutMs: {
         type: 'number',
@@ -304,12 +377,22 @@ const plugin: Plugin = {
 
     const cfg = readConfig(api.config.extensions?.['test-runner-gate']);
 
+    // Detect runner at setup time.
+    const runner = detectRunner(cfg.runner);
+    if (!runner) {
+      api.log.warn('test-runner-gate: no test runner found (vitest, jest, mocha) — hook will be a no-op', {
+        requested: cfg.runner,
+      });
+    } else {
+      api.log.info('test-runner-gate: detected runner', { name: runner.name });
+    }
+
     const hook = (input: {
       toolName?: string | undefined;
       toolInput?: unknown;
       toolResult?: { content: string; isError: boolean } | undefined;
     }): { additionalContext?: string | undefined } | void => {
-      if (!cfg.enabled) return;
+      if (!cfg.enabled || !runner) return;
 
       // Skip if the write/edit itself errored.
       if (input.toolResult?.isError) return;
@@ -333,7 +416,7 @@ const plugin: Plugin = {
       }
 
       // Run the tests.
-      const result = runTests(testFile, cfg.command, cfg.timeoutMs);
+      const result = runTests(testFile, runner, cfg.command, cfg.timeoutMs);
       if (!result) {
         state.errorCount += 1;
         return; // runner failed — silent
@@ -393,7 +476,8 @@ const plugin: Plugin = {
         return {
           ok: true,
           enabled: cfg.enabled,
-          command: cfg.command,
+          runner: runner?.name ?? 'none',
+          command: cfg.command || runner?.command || '',
           timeoutMs: cfg.timeoutMs,
           testFilePatterns: cfg.testFilePatterns,
           injectOnPass: cfg.injectOnPass,
