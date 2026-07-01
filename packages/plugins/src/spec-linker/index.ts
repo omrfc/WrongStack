@@ -15,10 +15,14 @@
  *
  * Detection rules:
  *  - Source is `.md` or `.mdx` (markdown)
- *  - The reference matches one of the 20 known plugin names exactly
+ *  - The reference matches one of the known plugin names exactly
  *    (case-insensitive, word-boundary)
  *  - It is not already wrapped in a markdown link `[name](` or
  *    inline code `` `name` ``
+ *
+ * The plugin catalog is sourced from `../catalog.js` (single source
+ * of truth — adding a new plugin to the catalog table there is
+ * enough for this plugin to start detecting it).
  *
  * Config (`config.extensions['spec-linker']`):
  *
@@ -35,6 +39,7 @@
 import type { Plugin } from '@wrongstack/core';
 import { existsSync, statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import { PLUGIN_CATALOG, PLUGIN_NAMES } from '../catalog.js';
 
 // ---------------------------------------------------------------------------
 // Module-scope state (H1 audit pattern)
@@ -96,39 +101,6 @@ function readConfig(raw: unknown): SpecLinkerConfig {
         : DEFAULTS.maxReferences,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Reference catalog
-// ---------------------------------------------------------------------------
-
-/**
- * Canonical mapping of plugin name → relative path in this package.
- * Kept in sync with packages/plugins/src/index.ts.
- */
-const PLUGIN_CATALOG: Record<string, string> = {
-  'auto-doc': './src/auto-doc',
-  'git-autocommit': './src/git-autocommit',
-  'shell-check': './src/shell-check',
-  'cost-tracker': './src/cost-tracker',
-  'file-watcher': './src/file-watcher',
-  cron: './src/cron',
-  'template-engine': './src/template-engine',
-  'semver-bump': './src/semver-bump',
-  'secret-scanner': './src/secret-scanner',
-  'todo-tracker': './src/todo-tracker',
-  'token-budget': './src/token-budget',
-  'lint-gate': './src/lint-gate',
-  'branch-guard': './src/branch-guard',
-  'diff-summary': './src/diff-summary',
-  'commit-validator': './src/commit-validator',
-  'format-on-save': './src/format-on-save',
-  'test-runner-gate': './src/test-runner-gate',
-  'import-organizer': './src/import-organizer',
-  'todo-listener': './src/todo-listener',
-  'session-recap': './src/session-recap',
-};
-
-const PLUGIN_NAMES = Object.keys(PLUGIN_CATALOG);
 
 // ---------------------------------------------------------------------------
 // Detection helpers
@@ -273,7 +245,7 @@ const plugin: Plugin = {
         return;
       }
 
-      const unlinked = findUnlinkedReferences(content.split('\n'), PLUGIN_NAMES);
+      const unlinked = findUnlinkedReferences(content.split('\n'), [...PLUGIN_NAMES]);
       if (unlinked.length === 0) {
         state.cleanCount += 1;
         return;
@@ -284,7 +256,7 @@ const plugin: Plugin = {
       const overflow = unlinked.length - limited.length;
 
       const lines = limited
-        .map((name) => `- \`${name}\` → \`[${name}](${PLUGIN_CATALOG[name]})\``)
+        .map((name) => `- \`${name}\` → \`[${name}](${PLUGIN_CATALOG.get(name) ?? `./src/${name}`})\``)
         .join('\n');
       const overflowNote = overflow > 0 ? `\n- …and ${overflow} more` : '';
 
