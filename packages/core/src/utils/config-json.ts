@@ -99,6 +99,7 @@ export function isJsonObject(value: unknown): value is JsonObject {
 
 function lastPathSegment(path: JsonPath): JsonPathSegment {
   const segment = path[path.length - 1];
+  /* v8 ignore next -- defensive: callers guard path.length === 0 before here */
   if (segment === undefined) throw new Error('Invalid empty JSON path');
   return segment;
 }
@@ -108,6 +109,7 @@ function ensureJsonParent(root: JsonObject, path: JsonPath): JsonObject | unknow
   for (let i = 0; i < path.length - 1; i += 1) {
     const segment = path[i];
     const nextSegment = path[i + 1];
+    /* v8 ignore next -- defensive: sparse-array paths are never produced by callers */
     if (segment === undefined) throw new Error('Invalid empty JSON path segment');
     const nextContainer = typeof nextSegment === 'number' ? [] : {};
 
