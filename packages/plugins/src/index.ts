@@ -1,7 +1,7 @@
 /**
  * @wrongstack/plugins — Official WrongStack Plugin Suite
  *
- * Exported plugins (16 total):
+ * Exported plugins (17 total):
  *  1. auto-doc         — Auto-generates JSDoc/TSDoc (dryRun for preview)
  *  2. git-autocommit  — AI-powered commit messages (git_autocommit/status_summary removed)
  *  3. shell-check     — Runs shellcheck on files or directories (merged)
@@ -26,6 +26,8 @@
  *                        format before git_autocommit or bash git commit runs
  * 16. format-on-save   — Post-tool hook that runs biome format --write
  *                        on the file after every write or edit
+ * 17. test-runner-gate — Post-tool hook that runs the relevant test
+ *                        file after every write or edit to a source file
  *
  * Removed (use the equivalent built-in tools instead — see
  * `DEPRECATED_PLUGIN_NAMES` in `packages/cli/src/wiring/plugins.ts`
