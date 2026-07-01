@@ -224,7 +224,7 @@ describe('import-organizer plugin', () => {
   describe('PostToolUse hook behavior', () => {
     function getHook(api: PluginAPI) {
       const call = vi.mocked(api.registerHook).mock.calls[0];
-      if (!call || !call[2]) throw new Error('hook not registered');
+      if (!call?.[2]) throw new Error('hook not registered');
       return call[2] as (input: {
         toolName?: string | undefined;
         toolInput?: unknown;
@@ -420,7 +420,7 @@ describe('import-organizer plugin', () => {
   describe('status tool', () => {
     function getStatusTool(api: PluginAPI): RegisteredTool {
       const call = vi.mocked(api.tools.register).mock.calls[0];
-      if (!call || !call[0]) throw new Error('status tool not registered');
+      if (!call?.[0]) throw new Error('status tool not registered');
       return call[0];
     }
 

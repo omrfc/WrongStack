@@ -18,12 +18,6 @@ import todoListenerPlugin from '../src/todo-listener/index.js';
 // Types + helpers
 // ---------------------------------------------------------------------------
 
-interface TodoItem {
-  id: string;
-  content: string;
-  status: 'pending' | 'in_progress' | 'completed';
-}
-
 interface PluginAPI {
   tools: { register: ReturnType<typeof vi.fn> };
   slashCommands: { register: ReturnType<typeof vi.fn> };
@@ -69,7 +63,7 @@ function createMockAPI(opts: { withMailbox?: boolean } = {}): PluginAPI {
 
 function getHook(api: PluginAPI) {
   const call = vi.mocked(api.registerHook).mock.calls[0];
-  if (!call || !call[2]) throw new Error('hook not registered');
+  if (!call?.[2]) throw new Error('hook not registered');
   return call[2] as (input: {
     toolName?: string | undefined;
     toolInput?: unknown;
@@ -336,7 +330,7 @@ describe('todo-listener plugin', () => {
   describe('status tool', () => {
     function getStatusTool(api: PluginAPI): { execute: () => Promise<unknown> } {
       const call = vi.mocked(api.tools.register).mock.calls[0];
-      if (!call || !call[0]) throw new Error('status tool not registered');
+      if (!call?.[0]) throw new Error('status tool not registered');
       return call[0] as { execute: () => Promise<unknown> };
     }
 

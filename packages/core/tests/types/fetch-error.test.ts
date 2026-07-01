@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   FetchError,
   WrongStackError,
-  ERROR_CODES,
   isFetchError,
 } from '../../src/types/errors.js';
 

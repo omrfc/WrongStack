@@ -11,21 +11,19 @@
  * behind four focused entry points.
  */
 import * as path from 'node:path';
-import type { Config, Context, EventBus, Logger, ModelsRegistry, DefaultTokenCounter } from '@wrongstack/core';
-import { DEFAULT_CONTEXT_WINDOW_MODE_ID } from '@wrongstack/core';
+import type { Config, ModelsRegistry } from '@wrongstack/core';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { verifyClient as verifyWsClient } from './ws-auth.js';
-import { broadcast, buildWebUIAccessUrl, envFlag, errMessage, resolveAuthToken } from './ws-utils.js';
+import { buildWebUIAccessUrl, envFlag, errMessage, resolveAuthToken } from './ws-utils.js';
 import { findFreePort } from './port-utils.js';
 import { openBrowser } from './open-browser.js';
 import { createHttpServer } from './http-server.js';
-import { registerInstance, unregisterInstance } from './instance-registry.js';
+import { registerInstance } from './instance-registry.js';
 import { registerShutdownHandlers } from './lifecycle.js';
 import { setupEvents, type FileWatcherMetrics } from './setup-events.js';
-import { resolveSessionLoggingConfig, createSessionEventBridge } from '@wrongstack/core';
 import { getCostRates } from './usage-cost.js';
 import { resolveProviderModelMetadata } from './model-catalog.js';
-import type { ConnectedClient, WebUIOptions } from './types.js';
+import type { ConnectedClient } from './types.js';
 import { toErrorMessage } from '@wrongstack/core/utils';
 
 // ── Port resolution ─────────────────────────────────────────────────────

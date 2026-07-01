@@ -170,7 +170,7 @@ export async function recordOverrides(
   if (!active) return undefined;
   const merged: DesignOverrides = { ...(active.overrides ?? {}) };
   for (const [k, v] of Object.entries(patch)) {
-    if (v && v.trim()) merged[k] = v.trim();
+    if (v?.trim()) merged[k] = v.trim();
     else delete merged[k]; // empty value clears an override
   }
   try {

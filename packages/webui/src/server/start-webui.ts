@@ -16,93 +16,23 @@ import {
   registerShutdown,
 } from './server-runtime.js';
 import { createPreContextServices } from './pre-context-services.js';
-import * as fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import {
-  Agent,
-  AgentStatusTracker,
-  AnnotationsStore,
-  AutoCompactionMiddleware,
-  applyToolDescriptionModes,
-  applyToolResultRenderModes,
-  atomicWrite,
-  type BrainArbiter,
-  type BrainAutoRisk,
-  BrainMonitor,
-  CollaborationBus,
-  Context,
-  cleanupStaleSddWorktrees,
-  collabInjectMiddleware,
-  collabPauseMiddleware,
-  createAutonomyBrain,
   createDefaultPipelines,
   createSessionEventBridge,
-  createStrategyCompactor,
-  createTieredBrainArbiter,
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
-  DEFAULT_SESSION_PRUNE_DAYS,
-  DEFAULT_TOOLS_CONFIG,
-  DefaultBrainArbiter,
-  DefaultMemoryStore,
-  DefaultModelsRegistry,
-  DefaultModeStore,
-  DefaultPromptLoader,
-  DefaultSessionReader,
-  DefaultSessionStore,
-  DefaultSkillLoader,
-  DefaultSystemPromptBuilder,
-  DefaultTokenCounter,
-  EventBus,
-  enhanceUserPrompt,
-  estimateRequestTokensCalibrated,
   expectDefined,
-  FleetNotifier,
-  GlobalMailbox,
-  gatedEnhancerReasoning,
-  getSessionRegistry,
-  installDesignStudioMiddleware,
-  mailboxSessionTag,
-  makeMailboxTool,
-  makeMailInboxTool,
-  makeMailSendTool,
-  ObservableBrainArbiter,
-  PromptUsageStore,
-  type Provider,
   type ProviderConfig,
-  ProviderRegistry,
-  recentTextTurns,
-  resolveContextWindowPolicy,
-  resolveProjectDir,
-  resolveProviderModelList,
   resolveSessionLoggingConfig,
-  TOKENS,
-  ToolRegistry,
   watchProviderConfig,
 } from '@wrongstack/core';
-import { readLiveLock } from '@wrongstack/core/coordination';
-import { ToolExecutor } from '@wrongstack/core/execution';
-import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
-import { SkillInstaller } from '@wrongstack/core/skills';
-import { projectHash, toErrorMessage, wstackGlobalRoot } from '@wrongstack/core/utils';
-import { MCPRegistry } from '@wrongstack/mcp';
-import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
-import { createDefaultContainer, makeLightSubagentFactory } from '@wrongstack/runtime';
+import { toErrorMessage } from '@wrongstack/core/utils';
+import { makeProviderFromConfig } from '@wrongstack/providers';
 import {
-  builtinToolsPack,
-  configureExecPolicy,
   ensureSessionShell,
-  forgetTool,
-  relatedMemoryTool,
-  rememberTool,
-  searchMemoryTool,
 } from '@wrongstack/tools';
-import { WebSocket, WebSocketServer } from 'ws';
-import { type AutoPhaseRouteHandlers, handleAutoPhaseRoute } from './autophase-routes.js';
-import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
 import { bootConfig, patchConfig } from './boot.js';
 import { createAgentServices } from './backend-services.js';
-import { seedContextMeta } from './context-meta.js';
 import { createConnectionHandler } from './connection-handler.js';
 import { createMessageDispatcher } from './message-dispatcher.js';
 import type { PendingConfirm } from './pending-confirms.js';
@@ -113,139 +43,26 @@ import {
   type PrefHelperDeps,
   type ConfigWriteLockHolder,
 } from './pref-helpers.js';
-import { resolveSetupProvider } from './setup-screen.js';
-import { type BrainRouteHandlers, handleBrainRoute } from './brain-routes.js';
-import { setupWebUICodebaseIndexing } from './codebase-indexing.js';
-import { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
-import { createToolLspCompletionSource, handleCompletionRequest } from './completion-handlers.js';
-import { createCustomModeStore } from './custom-context-modes.js';
-import {
-  handleDesignList,
-  handleDesignMaterialize,
-  handleDesignSet,
-  handleDesignState,
-  handleDesignUse,
-  handleDesignVerify,
-} from './design-handlers.js';
-import { discoverMailboxBridgeForWebui } from './discover-mailbox-bridge.js';
 import { createEternalSubscription } from './eternal-iteration-broadcast.js';
-import {
-  handleFilesList,
-  handleFilesRead,
-  handleFilesTree,
-  handleFilesWrite,
-} from './file-handlers.js';
-import { handleGitChanges, handleGitDiff, handleGitInfo } from './git-handlers.js';
-import { handleGoalGet } from './goal-handlers.js';
-import {
-  handleWorklistMessage,
-  type WorklistContext,
-  type WorklistMessage,
-} from './handlers/index.js';
-import { createHttpServer } from './http-server.js';
-import { registerInstance, unregisterInstance } from './instance-registry.js';
-import { registerShutdownHandlers } from './lifecycle.js';
-import {
-  handleMailboxAgents,
-  handleMailboxClear,
-  handleMailboxMessages,
-  handleMailboxPurge,
-} from './mailbox-handlers.js';
-import { handleMailboxRoute, type MailboxRouteHandlers } from './mailbox-routes.js';
-import {
-  handleMcpAdd,
-  handleMcpDisable,
-  handleMcpDiscover,
-  handleMcpEnable,
-  handleMcpList,
-  handleMcpRemove,
-  handleMcpRestart,
-  handleMcpSleep,
-  handleMcpUpdate,
-  handleMcpWake,
-} from './mcp-handlers.js';
-import { handleMcpRoute, type McpRouteHandlers } from './mcp-routes.js';
-import { handleMemoryForget, handleMemoryList, handleMemoryRemember } from './memory-handlers.js';
-import { createModeHandlers } from './mode-handlers.js';
-import { handleModeRoute, type ModeRouteHandlers } from './mode-routes.js';
-import { openBrowser } from './open-browser.js';
-import { findFreePort } from './port-utils.js';
-import { handlePrefsRoute, type PrefsRouteHandlers } from './prefs-routes.js';
-import { handleProcessKill, handleProcessKillAll, handleProcessList } from './process-handlers.js';
-import { createProjectHandlers } from './project-handlers.js';
-import { handleProjectRoute, type ProjectRouteHandlers } from './project-routes.js';
+import { unregisterInstance } from './instance-registry.js';
 import {
   ensureProjectDataDir,
   generateProjectSlug,
   loadManifest,
   saveManifest,
 } from './projects-manifest.js';
-import {
-  handlePromptsContent,
-  handlePromptsCreate,
-  handlePromptsFavorite,
-  handlePromptsList,
-  handlePromptsRecent,
-  handlePromptsSearch,
-  handlePromptsUsed,
-} from './prompts-handlers.js';
-import { createProviderHandlers, projectSavedProviders } from './provider-handlers.js';
-import { maskedKey, normalizeKeys } from './provider-keys.js';
-import { handleProviderRoute, type ProviderRouteHandlers } from './provider-routes.js';
+import { projectSavedProviders } from './provider-handlers.js';
 import {
   buildRoutes,
   type WebuiCallbacks,
   type WebuiDeps,
   type WebuiMutableState,
 } from './routes.js';
-import { handleSddBoardRoute, type SddBoardRouteHandlers } from './sdd-board-routes.js';
-import { SddBoardWebSocketHandler } from './sdd-board-ws-handler.js';
-import { handleSddWizardRoute, type SddWizardRouteHandlers } from './sdd-wizard-routes.js';
-import { buildSddWizardDeps } from './sdd-wizard-wiring.js';
-import { SddWizardWebSocketHandler } from './sdd-wizard-ws-handler.js';
-import { createSessionHandlers } from './session-handlers.js';
-import { handleSessionRoute, type SessionRouteHandlers } from './session-routes.js';
-import { type FileWatcherMetrics, setupEvents } from './setup-events.js';
-import { handleShellGitRoute, type ShellGitRouteHandlers } from './shell-git-routes.js';
-import { handleShellOpen, type ShellOpenRequest, type ShellOpenResult } from './shell-open.js';
-import {
-  handleSkillsContent,
-  handleSkillsCreate,
-  handleSkillsEdit,
-  handleSkillsExport,
-  handleSkillsInstall,
-  handleSkillsList,
-  handleSkillsUninstall,
-  handleSkillsUpdate,
-} from './skills-handlers.js';
-import { handleSpecsRoute, type SpecsRouteHandlers } from './specs-routes.js';
-import { SpecsWebSocketHandler } from './specs-ws-handler.js';
-import { TerminalWebSocketHandler } from './terminal-ws-handler.js';
-import { computeUsageCost, getCostRates } from './usage-cost.js';
-import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
-import { verifyClient as verifyWsClient } from './ws-auth.js';
-import {
-  validateAutonomySwitchPayload,
-  validateBrainAskPayload,
-  validateBrainRiskPayload,
-  validateGitDiffPayload,
-  validateMailboxAgentsPayload,
-  validateMailboxMessagesPayload,
-  validateMailboxPurgePayload,
-  validateModelSwitchPayload,
-  validatePrefsUpdatePayload,
-  validateShellOpenPayload,
-} from './ws-payload-validation.js';
+import type { FileWatcherMetrics } from './setup-events.js';
 import {
   broadcast,
-  buildWebUIAccessUrl,
-  envFlag,
-  errMessage,
-  resolveAuthToken,
-  send,
-  sendResult,
 } from './ws-utils.js';
-import type { ConnectedClient, WebUIOptions, WSClientMessage } from './types.js';
+import type { WebUIOptions } from './types.js';
 
 export async function startWebUI(
   opts: WebUIOptions & {
@@ -350,7 +167,6 @@ export async function startWebUI(
   let sessionStore = preContext.sessionStore;
   let session = preContext.session;
   let sessionStartedAt = preContext.sessionStartedAt;
-  const statusTracker = preContext.statusTracker;
   let modeId = preContext.modeId;
   const needsSetup = preContext.needsSetup;
 
@@ -485,8 +301,6 @@ export async function startWebUI(
   };
 
   // Event arming + WS error handlers live in ./server-runtime.ts (Phase 1e).
-  const disposeEvents: (() => void) | null = null;
-  const fleetBroadcast: (() => Promise<void>) | null = null;
   const eventArming = armEvents(wssPrimary, wssSecondary, wsHost, wsPort, {
     events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths,
   }, watcherMetricsRef);

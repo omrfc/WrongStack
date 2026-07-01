@@ -33,7 +33,7 @@ import { execFileSync } from 'node:child_process';
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');
 const log = (...a) => { if (VERBOSE) console.error('[mailbox-guard]', ...a); };
 
-const MAILBOX_BRIDGE_FILES = [
+const _MAILBOX_BRIDGE_FILES = [
   'packages/cli/src/subcommands/handlers/mailbox-serve.ts',
   'packages/cli/src/subcommands/index.ts',
   'packages/core/src/coordination/mailbox-types.ts',
@@ -183,7 +183,7 @@ async function checkSourceLiterals() {
     } catch {
       // fall back to HEAD content
     }
-    if (!content || !content.includes(literal)) {
+    if (!content?.includes(literal)) {
       fail(`missing source literal "${literal}" in ${file}`);
     }
   }
@@ -196,7 +196,7 @@ async function checkSubcommandWiring() {
     const fs = await import('node:fs/promises');
     content = await fs.readFile(REQUIRED_SUBCOMMAND_WIRING.file, 'utf-8');
   }
-  if (!content || !content.includes(REQUIRED_SUBCOMMAND_WIRING.marker)) {
+  if (!content?.includes(REQUIRED_SUBCOMMAND_WIRING.marker)) {
     fail(`missing "${REQUIRED_SUBCOMMAND_WIRING.marker}" wiring in ${REQUIRED_SUBCOMMAND_WIRING.file} — subcommand will not be registered`);
   }
 }

@@ -105,7 +105,7 @@ export function makeSkillTool(skillLoader: SkillLoader): Tool<SkillToolInput, Sk
       // Loading a specific resource takes precedence; skip the (potentially large)
       // full listing in that case to keep the response focused.
       let loadedResource: LoadedResource | undefined;
-      if (input.resource && input.resource.trim()) {
+      if (input.resource?.trim()) {
         loadedResource = await loadResource(dir, input.resource.trim());
       }
 

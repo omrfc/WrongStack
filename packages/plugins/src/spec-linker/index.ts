@@ -240,6 +240,7 @@ function wrapLineReferences(line: string): string {
     const re = new RegExp(`(^|[^\\w-])(${escapeRegExp(name)})(?![\\w-])`, 'gi');
     let m: RegExpExecArray | null;
     re.lastIndex = 0;
+    // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic RegExp.exec loop
     while ((m = re.exec(line)) !== null) {
       const leadingLen = m[1]!.length;
       const nameStart = m.index + leadingLen;

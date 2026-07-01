@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
 import { useLocalPrefs } from '@/stores/local-prefs';
 import {
-  type Activity,
   type DockSection,
   resetUiNavigationToHome,
   useChatStore,

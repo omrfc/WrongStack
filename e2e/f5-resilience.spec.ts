@@ -68,7 +68,6 @@ test.describe('F5 resilience — round-trip via /refresh-debug', () => {
     // it round-trips through the verifier view. We use evaluate rather
     // than clicking ActivityBar tabs so the test stays deterministic.
     await page.evaluate(() => {
-      const raw = localStorage.getItem('wrongstack-ui');
       const next = { state: { currentView: 'sessions' }, version: 5 };
       // Stamp the v5 shape that the ui-store migrate accepts.
       localStorage.setItem('wrongstack-ui', JSON.stringify(next));

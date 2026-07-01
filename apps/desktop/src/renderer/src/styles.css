@@ -449,6 +449,7 @@ button {
   color: var(--muted);
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: base icon sizing lives in the icon section; the earlier scoped rules rely on specificity, not order */
 .svg-icon {
   width: 15px;
   height: 15px;
@@ -1464,6 +1465,7 @@ button {
   font: 12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: base dot sizing lives with the status section; the earlier scoped rule relies on specificity, not order */
 .status-dot {
   width: 8px;
   height: 8px;

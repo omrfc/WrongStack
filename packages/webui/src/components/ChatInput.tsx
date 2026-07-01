@@ -75,7 +75,7 @@ export function ChatInput({
   const [atMention, setAtMention] = useState<FileMentionState | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRefs = useFileReferenceStore((s) => s.refs);
-  const { addRef, removeRef, clearRefs } = useFileReferenceStore.getState();
+  const { removeRef, clearRefs } = useFileReferenceStore.getState();
   const hasFileRefs = fileRefs.length > 0;
   const {
     draggingOver,

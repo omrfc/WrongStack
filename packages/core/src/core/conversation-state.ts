@@ -100,7 +100,7 @@ export class ConversationState {
   appendBlockToLastUserMessage(block: ContentBlock): boolean {
     const arr = this.ctx.messages;
     const last = arr[arr.length - 1];
-    if (!last || last.role !== 'user') return false;
+    if (last?.role !== 'user') return false;
     const content: ContentBlock[] =
       typeof last.content === 'string'
         ? [{ type: 'text', text: last.content }, block]

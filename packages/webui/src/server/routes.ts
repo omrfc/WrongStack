@@ -48,14 +48,12 @@ import {
 } from '@wrongstack/core';
 import type {
   AutoCompactionMiddleware,
-  BrainArbiter,
   BrainAutoRisk,
   Compactor,
   ConfigStore,
   DefaultTokenCounter,
   Logger,
   SecretVault,
-  TokenCounter,
 } from '@wrongstack/core';
 import type { SessionStore } from '@wrongstack/core';
 type Session = Awaited<ReturnType<SessionStore['create']>>;
@@ -106,7 +104,6 @@ import type { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
 import type { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
 import type { TerminalWebSocketHandler } from './terminal-ws-handler.js';
 import { broadcast, errMessage, send, sendResult } from './ws-utils.js';
-import { computeUsageCost, getCostRates } from './usage-cost.js';
 import { createProviderHandlers, projectSavedProviders } from './provider-handlers.js';
 import { createModeHandlers } from './mode-handlers.js';
 import { createProjectHandlers } from './project-handlers.js';

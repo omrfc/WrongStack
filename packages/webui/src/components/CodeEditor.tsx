@@ -1,7 +1,6 @@
 import { useFileStore } from '@/stores/file-store';
 import { useConfigStore } from '@/stores/config-store';
 import { useFileReferenceStore } from '@/stores/file-reference-store';
-import { useUIStore } from '@/stores/ui-store';
 import {
   COMPLETION_CACHE_TTL_MS,
   COMPLETION_DOCUMENT_CHARS,

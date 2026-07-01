@@ -169,6 +169,7 @@ function findMatches(text: string): string[] {
   const found = new Set<string>();
   COMBINED_REGEX.lastIndex = 0;
   let m: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic RegExp.exec loop
   while ((m = COMBINED_REGEX.exec(text)) !== null) {
     // Determine which capture group matched by scanning for the first
     // defined group beyond group 0. The combined regex has one
@@ -309,7 +310,7 @@ function readConfig(raw: unknown): SecretScannerConfig {
     matcher: typeof r['matcher'] === 'string' ? r['matcher'] : DEFAULTS.matcher,
     postToolUseMatcher: typeof r['postToolUseMatcher'] === 'string' ? r['postToolUseMatcher'] : DEFAULTS.postToolUseMatcher,
     mode,
-    enabled: r['enabled'] === false ? false : true,
+    enabled: r['enabled'] !== false,
     customPatterns,
   };
 }

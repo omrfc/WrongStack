@@ -39,8 +39,8 @@ function writeTool(): Tool {
 function mkCtx(): Context {
   // Minimal Context — only the fields the permission policy touches.
   return {
-    hasRead: (p: string) => false,
-    hasWritten: (p: string) => false,
+    hasRead: (_p: string) => false,
+    hasWritten: (_p: string) => false,
   } as unknown as Context;
 }
 

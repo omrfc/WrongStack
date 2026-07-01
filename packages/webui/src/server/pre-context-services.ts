@@ -26,7 +26,6 @@ import type { Config, Logger } from '@wrongstack/core';
 import {
   AgentStatusTracker,
   AnnotationsStore,
-  DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DEFAULT_SESSION_PRUNE_DAYS,
   DefaultMemoryStore,
   DefaultModelsRegistry,
@@ -134,7 +133,7 @@ export interface PreContextServices {
 export async function createPreContextServices(
   input: PreContextServicesInput,
 ): Promise<PreContextServices> {
-  const { config, wpaths, logger, opts, globalConfigPath, projectRoot, workingDir, needsProvider } = input;
+  const { config, wpaths, logger, opts, projectRoot, workingDir, needsProvider } = input;
 
   // ── ModelsRegistry ──
   const modelsRegistry =

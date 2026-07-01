@@ -890,7 +890,7 @@ export class SddParallelRun {
       disabledTools: ['delegate'],
       ...(model ? { model } : {}),
       ...(provider ? { provider } : {}),
-      ...(fallbackModels && fallbackModels.length ? { fallbackModels } : {}),
+      ...(fallbackModels?.length ? { fallbackModels } : {}),
     });
     if (!spawnResult.subagentId) {
       throw new SddError({

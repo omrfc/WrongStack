@@ -43,7 +43,7 @@ describe('DefaultSessionStore.searchEvents — streaming walker', () => {
   }
 
   /** Build a complete minimal session_start line. */
-  function sessionStart(id: string, ts: string): SessionEvent {
+  function sessionStart(_id: string, ts: string): SessionEvent {
     return {
       type: 'session_start',
       ts,

@@ -44,7 +44,6 @@ import type {
   AgentPipelines,
   Container,
   SessionReader,
-  SecretVault,
 } from '@wrongstack/core';
 /** Session shape returned by `SessionStore.create()`. */
 type Session = Awaited<ReturnType<SessionStore['create']>>;
@@ -54,7 +53,6 @@ import {
   BrainMonitor,
   CollaborationBus as CollaborationBusCtor,
   DEFAULT_TOOLS_CONFIG,
-  createDefaultPipelines,
   createStrategyCompactor,
   collabInjectMiddleware,
   collabPauseMiddleware,
@@ -170,10 +168,6 @@ export async function createAgentServices(input: AgentServicesInput): Promise<Ag
     providerRegistry,
     modelsRegistry,
     events,
-    mcpRegistry,
-    skillLoader,
-    skillInstaller,
-    tokenCounter,
     modelCapabilitiesRef,
   } = input;
 

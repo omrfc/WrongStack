@@ -1370,7 +1370,7 @@ export function SettingsPicker({
             // Find the `rows` entry for this field index.
             const rowIdx = fieldRowIndex[fieldIdx] ?? -1;
             const row = rows[rowIdx];
-            if (!row || !row.label) return null;
+            if (!row?.label) return null;
             const selected = fieldIdx === field;
             const labelStr = row.label;
             const segments = highlightSegments(labelStr);

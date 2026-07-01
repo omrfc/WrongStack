@@ -431,7 +431,6 @@ export function PromptLibraryModal() {
                   </button>
                 </div>
                 {draft.vars.map((v, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: editor rows are positional
                   <div key={i} className="space-y-1 rounded border border-border/60 p-1.5">
                     <div className="flex gap-1">
                       <input

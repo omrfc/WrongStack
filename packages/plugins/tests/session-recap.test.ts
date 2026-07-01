@@ -67,7 +67,7 @@ function createMockAPI(opts: { withMailbox?: boolean; withTranscript?: boolean }
 /** Capture the hook function registered for a given event name. */
 function getHook(api: PluginAPI, eventName: string) {
   const call = vi.mocked(api.registerHook).mock.calls.find((c) => c?.[0] === eventName);
-  if (!call || !call[2]) throw new Error(`hook not registered for event ${eventName}`);
+  if (!call?.[2]) throw new Error(`hook not registered for event ${eventName}`);
   return call[2] as (input: { cwd?: string; sessionId?: string }) => Promise<unknown>;
 }
 
@@ -290,7 +290,7 @@ describe('session-recap plugin', () => {
   describe('status tool', () => {
     function getStatusTool(api: PluginAPI): { execute: () => Promise<unknown> } {
       const call = vi.mocked(api.tools.register).mock.calls[0];
-      if (!call || !call[0]) throw new Error('status tool not registered');
+      if (!call?.[0]) throw new Error('status tool not registered');
       return call[0] as { execute: () => Promise<unknown> };
     }
 
