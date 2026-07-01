@@ -14,14 +14,16 @@ const SHORTCUTS: Array<{ section: string; items: Shortcut[] }> = [
       { keys: ['Ctrl', 'K'], description: 'Open command palette' },
       { keys: ['?'], description: 'Show this shortcuts overlay' },
       { keys: ['Ctrl', '\\'], description: 'Toggle sidebar' },
-      { keys: ['Ctrl', '1-9'], description: 'Open side panel (Session, Agents, History, Files, Changes, Projects, Mailbox, Skills, Office Map)' },
+      { keys: ['Ctrl', '1-8'], description: 'Open side panel (Session, Agents, History, Files, Changes, Mailbox, Skills, Office Map)' },
+      { keys: ['Ctrl', '0'], description: 'Open Design Studio side panel' },
+      { keys: ['Ctrl', 'Shift', 'W'], description: 'Open Worktrees side panel' },
       { keys: ['Ctrl', '/'], description: 'Focus the message input' },
     ],
   },
   {
     section: 'TUI Panel Parity',
     items: [
-      { keys: ['F1'], description: 'Project switcher' },
+      { keys: ['F1'], description: 'Session panel' },
       { keys: ['F2'], description: 'Fleet monitor overlay' },
       { keys: ['F3'], description: 'Agents monitor overlay' },
       { keys: ['F4'], description: 'Worktree monitor' },
@@ -120,7 +122,7 @@ export function ShortcutsOverlay() {
       <div
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl rounded-xl border bg-popover shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+        className="w-full max-w-2xl rounded-xl border bg-popover shadow-2xl overflow-hidden flex flex-col max-h-[80dvh]"
       >
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <div className="flex items-center gap-2">

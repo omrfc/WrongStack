@@ -11,7 +11,7 @@ import { Check, LayoutGrid, Loader2, Palette } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
-import { useUIStore } from '@/stores/ui-store';
+import { showPanel } from '@/lib/view-navigation';
 
 interface KitSummary {
   id: string;
@@ -49,7 +49,6 @@ function Swatches({ tokens, label }: { tokens: Record<string, string>; label: st
 
 export function DesignStudioPanel({ className }: { className?: string }) {
   const { client } = useWebSocket();
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
   const [kits, setKits] = useState<KitSummary[]>([]);
   const [activeKit, setActiveKit] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,7 +89,7 @@ export function DesignStudioPanel({ className }: { className?: string }) {
   const sortedKits = useMemo(() => [...kits].sort((a, b) => a.name.localeCompare(b.name)), [kits]);
 
   return (
-    <div className={cn('flex flex-col h-full', className)}>
+    <div className={cn('flex h-full min-h-0 min-w-0 flex-col', className)}>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
         <Palette className="w-4 h-4 text-muted-foreground" />
         <span className="text-xs text-muted-foreground flex-1">
@@ -98,7 +97,7 @@ export function DesignStudioPanel({ className }: { className?: string }) {
         </span>
         <button
           type="button"
-          onClick={() => setCurrentView('design-gallery')}
+          onClick={() => showPanel('design')}
           className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-border/60 hover:bg-muted"
           title="Open live preview gallery"
         >
@@ -118,7 +117,7 @@ export function DesignStudioPanel({ className }: { className?: string }) {
         </select>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2 space-y-2">
         {loading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground p-3">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading kits…

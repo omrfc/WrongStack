@@ -1,3 +1,4 @@
+import { spawn as spawnChild } from 'node:child_process';
 import { createRequire } from 'node:module';
 import type { WebSocket } from 'ws';
 import type { Logger } from '@wrongstack/core';
@@ -8,6 +9,7 @@ import type { WSServerMessage } from '../types.js';
 type IncomingMessage = { type: string; payload?: unknown };
 type PtyExit = { exitCode: number; signal?: number | undefined };
 interface PtyProcess {
+  readonly pid?: number | undefined;
   write(data: string): void;
   resize(cols: number, rows: number): void;
   kill(): void;
@@ -23,11 +25,13 @@ interface NodePtyApi {
       cols: number;
       rows: number;
       cwd: string;
-      env: Record<string, string>;
+      env: Record<string, string | undefined>;
+      useConptyDll?: boolean | undefined;
     },
   ): PtyProcess;
 }
 type LoadNodePty = () => NodePtyApi | null;
+type KillProcessTree = (pid: number) => void;
 
 /** Hard cap on concurrent PTYs per connected client — a runaway-spawn backstop. */
 const MAX_SESSIONS_PER_CLIENT = 8;
@@ -57,6 +61,7 @@ export class TerminalWebSocketHandler {
     private readonly getCwd: () => string,
     private readonly logger: Logger,
     private readonly loadNodePty: LoadNodePty = defaultLoadNodePty,
+    private readonly killProcessTree: KillProcessTree = defaultKillProcessTree,
   ) {}
 
   addClient(ws: WebSocket): void {
@@ -133,10 +138,13 @@ export class TerminalWebSocketHandler {
         cols: clampDim(payload.cols, DEFAULT_COLS),
         rows: clampDim(payload.rows, DEFAULT_ROWS),
         cwd: this.getCwd(),
-        env: process.env as Record<string, string>,
+        env: process.env,
+        ...windowsPtyOptions(),
       });
     } catch (err) {
+      const msg = `Integrated terminal failed to start: ${toErrorMessage(err)}`;
       this.logger.warn?.(`terminal spawn failed: ${toErrorMessage(err)}`);
+      this.send(ws, { type: 'terminal.output', payload: { id: payload.id, data: `${msg}\r\n` } });
       this.send(ws, { type: 'terminal.exit', payload: { id: payload.id, exitCode: -1 } });
       return;
     }
@@ -175,24 +183,46 @@ export class TerminalWebSocketHandler {
     const pty = map?.get(id);
     if (!pty) return;
     map?.delete(id);
-    try {
-      pty.kill();
-    } catch {
-      /* already dead */
-    }
+    this.killPty(pty, 'terminal close');
   }
 
   private disposeClient(ws: WebSocket): void {
     const map = this.sessions.get(ws);
     if (!map) return;
     for (const pty of map.values()) {
-      try {
-        pty.kill();
-      } catch {
-        /* already dead */
-      }
+      this.killPty(pty, 'terminal client dispose');
     }
     this.sessions.delete(ws);
+  }
+
+  private killPty(pty: PtyProcess, reason: string): void {
+    if (process.platform === 'win32' && isPositivePid(pty.pid)) {
+      this.killWindowsProcessTree(pty, reason);
+      return;
+    }
+    try {
+      pty.kill();
+    } catch (err) {
+      this.logger.warn?.(`${reason} failed: ${toErrorMessage(err)}`);
+    }
+  }
+
+  private killWindowsProcessTree(pty: PtyProcess, reason: string): void {
+    try {
+      this.killProcessTree(pty.pid as number);
+      // Give an interactive shell a chance to exit cleanly if taskkill races
+      // with ConPTY setup. Avoid node-pty.kill() here: on Windows it forks
+      // conpty_console_list_agent, which can emit noisy AttachConsole failures
+      // when the WebUI server is hosted by Electron.
+      try {
+        pty.write('\x03');
+        pty.write('exit\r');
+      } catch {
+        /* process tree kill is already in flight */
+      }
+    } catch (err) {
+      this.logger.warn?.(`${reason} taskkill failed: ${toErrorMessage(err)}`);
+    }
   }
 
   private send(ws: WebSocket, msg: WSServerMessage): void {
@@ -220,6 +250,24 @@ function isStr(v: unknown): v is string {
 
 function numOrUndef(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function windowsPtyOptions(): { useConptyDll?: boolean | undefined } {
+  if (process.platform !== 'win32') return {};
+  if (process.env.WRONGSTACK_TERMINAL_USE_CONPTY_DLL !== '1') return {};
+  return { useConptyDll: true };
+}
+
+function defaultKillProcessTree(pid: number): void {
+  const child = spawnChild('taskkill', ['/PID', String(pid), '/T', '/F'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.once('error', () => undefined);
+}
+
+function isPositivePid(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) > 0;
 }
 
 /** Clamp a terminal dimension into a sane range; fall back to a default. */

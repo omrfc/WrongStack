@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePasteDrop } from '../../src/components/ChatInput/use-paste-drop.js';
+import { useFileReferenceStore } from '../../src/stores/file-reference-store.js';
 
 // Mock autoFenceCode so we can control when code-fencing triggers
 vi.mock('../../src/components/ChatInput/code-detect.js', () => ({
@@ -36,7 +37,6 @@ function makeHookOptions(overrides: { input?: string; selectionStart?: number } 
       input: overrides.input ?? '',
       textareaRef: textareaRef as React.RefObject<HTMLTextAreaElement | null>,
       setInput,
-      setAtMention,
     },
   };
 }
@@ -44,13 +44,14 @@ function makeHookOptions(overrides: { input?: string; selectionStart?: number } 
 describe('usePasteDrop', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useFileReferenceStore.setState({ refs: [] });
   });
 
   describe('initial state', () => {
     it('returns null pasteHint and false draggingOver initially', () => {
-      const { textareaRef, setInput, setAtMention } = makeHookOptions();
+      const { textareaRef, setInput } = makeHookOptions();
       const { result } = renderHook(() =>
-        usePasteDrop({ input: '', textareaRef, setInput, setAtMention }),
+        usePasteDrop({ input: '', textareaRef, setInput }),
       );
 
       expect(result.current.pasteHint).toBeNull();
@@ -123,8 +124,8 @@ describe('usePasteDrop', () => {
       expect(result.current.draggingOver).toBe(false);
     });
 
-    it('onDrop inserts @filename tokens and opens atMention for last file', () => {
-      const { options, setInput, setAtMention, _textarea } = makeHookOptions({ input: 'hello', selectionStart: 5 });
+    it('onDrop adds dropped files as reference chips (no text insertion)', () => {
+      const { options, setInput } = makeHookOptions({ input: 'hello', selectionStart: 5 });
 
       const { result } = renderHook(() => usePasteDrop(options));
 
@@ -137,11 +138,11 @@ describe('usePasteDrop', () => {
       act(() => result.current.onDrop(event));
 
       expect(event.preventDefault).toHaveBeenCalled();
-      expect(setInput).toHaveBeenCalledTimes(1);
-      const inserted = setInput.mock.calls[0][0] as string;
-      expect(inserted).toContain('@test.ts');
-      // setAtMention called via requestAnimationFrame — verify queued
-      expect(setAtMention).not.toHaveBeenCalled();
+      // Drop no longer edits the textarea text — the file becomes a chip.
+      expect(setInput).not.toHaveBeenCalled();
+      const refs = useFileReferenceStore.getState().refs;
+      expect(refs).toHaveLength(1);
+      expect(refs[0]).toMatchObject({ kind: 'file', path: 'test.ts' });
     });
 
     it('onDrop with an image file attaches it instead of inserting an @mention', async () => {

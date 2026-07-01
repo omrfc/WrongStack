@@ -121,12 +121,17 @@
   }
 
   html {
+    height: 100%;
+    min-height: 0;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
 
   body {
     @apply bg-background text-foreground;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
     font-family: var(--font-sans);
     font-feature-settings: 'liga' 1, 'calt' 1, 'ss03' 1;
   }
@@ -137,6 +142,46 @@
     z-index: 1;
     isolation: isolate;
     height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .ws-app-root {
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+
+  .ws-desktop-shell .ws-shortcut-hints {
+    display: none;
+  }
+
+  .ws-desktop-shell .ws-chat-input-wrap {
+    padding: 0.75rem 1rem;
+  }
+
+  .ws-desktop-shell .ws-workspace-dock-wrap {
+    max-height: 24dvh;
+    padding: 0.375rem 0.75rem 0;
+  }
+
+  .ws-desktop-shell [data-terminal-dock] {
+    border-top-color: hsl(var(--border) / 0.8);
+  }
+
+  .ws-desktop-shell .ws-terminal-desktop .xterm {
+    padding-top: 0;
+  }
+
+  @media (max-height: 760px) {
+    .ws-desktop-shell .ws-workspace-dock-wrap {
+      max-height: 18dvh;
+    }
+
+    .ws-desktop-shell .ws-chat-input-wrap {
+      padding-top: 0.5rem;
+      padding-bottom: 0.5rem;
+    }
   }
 
   /* Blueprint grid — a faint engineering substrate that fades from the top.

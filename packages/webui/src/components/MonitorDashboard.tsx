@@ -237,7 +237,7 @@ export function MonitorDashboard(): React.ReactElement {
   const lastUpdatedText = useMemo(() => fmtElapsed(lastUpdated), [lastUpdated, now]);
 
   return (
-    <div className="h-full flex flex-col overflow-y-auto">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       {/* Header */}
       <div className="shrink-0 border-b bg-card px-4 py-3">
         <div className="flex items-center justify-between">
@@ -252,7 +252,7 @@ export function MonitorDashboard(): React.ReactElement {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 space-y-6">
         {/* Client Counts */}
         <section className="space-y-3">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">

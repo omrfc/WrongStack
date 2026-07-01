@@ -30,19 +30,26 @@ export interface MailboxHandlerDeps {
 export async function handleMailboxMessages(
   ws: WebSocket,
   deps: MailboxHandlerDeps,
-  payload: { limit?: number; incompleteOnly?: boolean } | undefined,
+  payload: { limit?: number; agentId?: string; unreadOnly?: boolean; incompleteOnly?: boolean } | undefined,
 ): Promise<void> {
   try {
     const dir = resolveProjectDir(deps.projectRoot, deps.globalRoot);
     const mb = new GlobalMailbox(dir);
+    const limit = payload?.limit ?? 30;
+    const unreadForAgent = payload?.unreadOnly === true && payload.agentId !== undefined;
     const messages = await mb.query({
-      limit: payload?.limit ?? 30,
+      limit: payload?.unreadOnly === true && payload.agentId === undefined ? Math.max(limit * 5, 100) : limit,
+      to: payload?.agentId,
+      unreadBy: unreadForAgent ? payload.agentId : undefined,
       incompleteOnly: payload?.incompleteOnly ?? false,
     });
+    const visibleMessages = payload?.unreadOnly === true && payload.agentId === undefined
+      ? messages.filter((m) => Object.keys(m.readBy).length === 0).slice(0, limit)
+      : messages;
     send(ws, {
       type: 'mailbox.messages',
       payload: {
-        messages: messages.map((m) => ({
+        messages: visibleMessages.map((m) => ({
           id: m.id, from: m.from, to: m.to, type: m.type,
           subject: m.subject, body: m.body, priority: m.priority,
           readBy: m.readBy, readByCount: Object.keys(m.readBy).length,

@@ -16,12 +16,12 @@ export function SddActivityFeed({
   now: number;
 }): React.ReactElement {
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-xs font-semibold text-foreground">
         <Activity className="h-3.5 w-3.5 text-orange-500 dark:text-orange-400" />
         Activity
       </div>
-      <div className="flex-1 space-y-1 overflow-auto p-2">
+      <div className="min-h-0 min-w-0 flex-1 space-y-1 overflow-auto p-2">
         {feed.length === 0 ? (
           <p className="px-1 pt-4 text-center text-[11px] text-muted-foreground">
             Nothing yet — events appear here as agents pick up and finish tasks.

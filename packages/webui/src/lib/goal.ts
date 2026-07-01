@@ -33,6 +33,29 @@ export interface GoalState {
 }
 
 /**
+ * Type guard for a journal entry. The server sends journal rows on every
+ * iteration, and GoalPanel renders `entry.iteration` as both the React
+ * `key` and the row label (`#{entry.iteration}`). If a malformed row
+ * slips through with `iteration === undefined` or a non-number, React
+ * warns about non-unique keys and the UI shows `#{undefined}`.
+ *
+ * Drop the entry rather than guess. The required `iteration` field is
+ * validated strictly; optional string/number fields are accepted only
+ * when their type matches the `GoalJournalEntry` contract.
+ */
+function isGoalJournalEntry(x: unknown): x is GoalJournalEntry {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return false;
+  const e = x as Record<string, unknown>;
+  if (typeof e.iteration !== 'number' || !Number.isFinite(e.iteration)) return false;
+  if (e.task !== undefined && typeof e.task !== 'string') return false;
+  if (e.status !== undefined && typeof e.status !== 'string') return false;
+  if (e.progress !== undefined && (typeof e.progress !== 'number' || !Number.isFinite(e.progress))) return false;
+  if (e.progressNote !== undefined && typeof e.progressNote !== 'string') return false;
+  if (e.timestamp !== undefined && typeof e.timestamp !== 'string') return false;
+  return true;
+}
+
+/**
  * Formats raw goal JSON from the server into a GoalState.
  * Gracefully handles missing / partial data.
  */
@@ -62,7 +85,9 @@ export function parseGoalState(raw: Record<string, unknown> | null): GoalState |
             : (d as GoalDeliverable),
         )
       : undefined,
-    journal: Array.isArray(raw.journal) ? (raw.journal as GoalJournalEntry[]) : undefined,
+    journal: Array.isArray(raw.journal)
+      ? (raw.journal as unknown[]).filter(isGoalJournalEntry)
+      : undefined,
     lastTask: typeof raw.lastTask === 'string' ? raw.lastTask : undefined,
     lastStatus: typeof raw.lastStatus === 'string' ? raw.lastStatus : undefined,
   };

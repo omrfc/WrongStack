@@ -54,20 +54,33 @@ describe('WebUI WebSocket payload validation', () => {
   describe('validateMailboxMessagesPayload', () => {
     it('accepts undefined or valid mailbox query options', () => {
       expect(validateMailboxMessagesPayload(undefined)).toEqual({ ok: true, value: undefined });
-      expect(validateMailboxMessagesPayload({ limit: 10, agentId: 'leader', unreadOnly: true })).toEqual({
+      expect(
+        validateMailboxMessagesPayload({
+          limit: 10,
+          agentId: 'leader',
+          unreadOnly: true,
+          incompleteOnly: true,
+        }),
+      ).toEqual({
         ok: true,
-        value: { limit: 10, agentId: 'leader', unreadOnly: true },
+        value: { limit: 10, agentId: 'leader', unreadOnly: true, incompleteOnly: true },
       });
     });
 
-    it.each([null, [], 'x', { limit: 0 }, { limit: Number.NaN }, { agentId: 1 }, { unreadOnly: 'yes' }])(
-      'rejects invalid mailbox.messages payload %#',
-      (payload) => {
-        const result = validateMailboxMessagesPayload(payload);
-        expect(result.ok).toBe(false);
-        if (!result.ok) expect(result.message).toContain('mailbox.messages');
-      },
-    );
+    it.each([
+      null,
+      [],
+      'x',
+      { limit: 0 },
+      { limit: Number.NaN },
+      { agentId: 1 },
+      { unreadOnly: 'yes' },
+      { incompleteOnly: 'yes' },
+    ])('rejects invalid mailbox.messages payload %#', (payload) => {
+      const result = validateMailboxMessagesPayload(payload);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message).toContain('mailbox.messages');
+    });
   });
 
   describe('validateMailboxAgentsPayload', () => {

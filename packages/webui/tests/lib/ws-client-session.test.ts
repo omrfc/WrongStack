@@ -40,16 +40,6 @@ describe('WrongStackWebSocketClient session transitions', () => {
     expect(flush).not.toHaveBeenCalled();
   });
 
-  it('drops pending streams for project switches', () => {
-    const flush = vi.fn();
-    const client = new WrongStackWebSocketClient('ws://127.0.0.1:3457');
-    streamCoalescer.push('assistant_1', 'stale assistant text', flush);
-
-    client.send({ type: 'projects.select', payload: { root: '/tmp/other' } });
-    streamCoalescer.flushAll();
-
-    expect(flush).not.toHaveBeenCalled();
-  });
 });
 
 describe('WrongStackWebSocketClient auth bootstrap', () => {

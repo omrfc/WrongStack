@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Fake node-pty ────────────────────────────────────────────────────────────
 interface FakePty {
+  pid?: number | undefined;
   write: ReturnType<typeof vi.fn>;
   resize: ReturnType<typeof vi.fn>;
   kill: ReturnType<typeof vi.fn>;
@@ -16,6 +17,7 @@ const { spawned, spawnMock } = vi.hoisted(() => {
     let dataCb: ((d: string) => void) | null = null;
     let exitCb: ((e: { exitCode: number; signal?: number }) => void) | null = null;
     const pty: FakePty = {
+      pid: undefined,
       write: vi.fn(),
       resize: vi.fn(),
       kill: vi.fn(),
@@ -23,6 +25,9 @@ const { spawned, spawnMock } = vi.hoisted(() => {
       emitExit: (code, signal) => exitCb?.({ exitCode: code, signal }),
     };
     const handle = {
+      get pid() {
+        return pty.pid;
+      },
       onData: (cb: (d: string) => void) => {
         dataCb = cb;
       },
@@ -68,6 +73,7 @@ describe('TerminalWebSocketHandler', () => {
     spawned.length = 0;
     spawnMock.mockClear();
     logger.warn.mockClear();
+    delete process.env.WRONGSTACK_TERMINAL_USE_CONPTY_DLL;
   });
 
   it('terminal.create spawns a pty in the given cwd and streams output', () => {
@@ -80,6 +86,7 @@ describe('TerminalWebSocketHandler', () => {
     ).toBe(true);
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({ cwd: '/my/cwd', cols: 100, rows: 30 });
+    expect(spawnMock.mock.calls[0]?.[2]).not.toHaveProperty('useConptyDll');
 
     spawned[0]?.emitData('hello');
     expect(ws.sent).toContainEqual({
@@ -95,6 +102,19 @@ describe('TerminalWebSocketHandler', () => {
     h.handleMessage(ws, { type: 'terminal.create', payload: { id: 't1' } });
     h.handleMessage(ws, { type: 'terminal.create', payload: { id: 't1' } });
     expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('can opt into node-pty useConptyDll on Windows', () => {
+    process.env.WRONGSTACK_TERMINAL_USE_CONPTY_DLL = '1';
+    const h = new TerminalWebSocketHandler(() => '/c', logger, loadFakeNodePty);
+    const ws = makeWs();
+    h.addClient(ws);
+    h.handleMessage(ws, { type: 'terminal.create', payload: { id: 't1' } });
+    if (process.platform === 'win32') {
+      expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({ useConptyDll: true });
+    } else {
+      expect(spawnMock.mock.calls[0]?.[2]).not.toHaveProperty('useConptyDll');
+    }
   });
 
   it('terminal.input writes to the pty', () => {
@@ -124,6 +144,37 @@ describe('TerminalWebSocketHandler', () => {
     expect(spawned[0]?.kill).toHaveBeenCalledTimes(1);
   });
 
+  it('terminal.close logs kill errors without throwing', () => {
+    const h = new TerminalWebSocketHandler(() => '/c', logger, loadFakeNodePty);
+    const ws = makeWs();
+    h.addClient(ws);
+    h.handleMessage(ws, { type: 'terminal.create', payload: { id: 't1' } });
+    spawned[0]?.kill.mockImplementationOnce(() => {
+      throw new Error('AttachConsole failed');
+    });
+    expect(() =>
+      h.handleMessage(ws, { type: 'terminal.close', payload: { id: 't1' } }),
+    ).not.toThrow();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('terminal close failed: AttachConsole failed'),
+    );
+  });
+
+  it('terminal.close uses taskkill on Windows when the pty pid is available', () => {
+    if (process.platform !== 'win32') return;
+    const killProcessTree = vi.fn();
+    const h = new TerminalWebSocketHandler(() => '/c', logger, loadFakeNodePty, killProcessTree);
+    const ws = makeWs();
+    h.addClient(ws);
+    h.handleMessage(ws, { type: 'terminal.create', payload: { id: 't1' } });
+    if (spawned[0]) spawned[0].pid = 4242;
+    h.handleMessage(ws, { type: 'terminal.close', payload: { id: 't1' } });
+    expect(killProcessTree).toHaveBeenCalledWith(4242);
+    expect(spawned[0]?.kill).not.toHaveBeenCalled();
+    expect(spawned[0]?.write).toHaveBeenCalledWith('\x03');
+    expect(spawned[0]?.write).toHaveBeenCalledWith('exit\r');
+  });
+
   it('pty exit notifies the client', () => {
     const h = new TerminalWebSocketHandler(() => '/c', logger, loadFakeNodePty);
     const ws = makeWs();
@@ -145,6 +196,20 @@ describe('TerminalWebSocketHandler', () => {
     ws.fire('close');
     expect(spawned[0]?.kill).toHaveBeenCalled();
     expect(spawned[1]?.kill).toHaveBeenCalled();
+  });
+
+  it('client disconnect logs kill errors without throwing', () => {
+    const h = new TerminalWebSocketHandler(() => '/c', logger, loadFakeNodePty);
+    const ws = makeWs();
+    h.addClient(ws);
+    h.handleMessage(ws, { type: 'terminal.create', payload: { id: 't1' } });
+    spawned[0]?.kill.mockImplementationOnce(() => {
+      throw new Error('AttachConsole failed');
+    });
+    expect(() => ws.fire('close')).not.toThrow();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('terminal client dispose failed: AttachConsole failed'),
+    );
   });
 
   it('ignores malformed payloads without throwing', () => {
@@ -192,6 +257,24 @@ describe('TerminalWebSocketHandler', () => {
       payload: {
         id: 't1',
         data: expect.stringContaining('optional dependency node-pty is not installed'),
+      },
+    });
+    expect(ws.sent).toContainEqual({ type: 'terminal.exit', payload: { id: 't1', exitCode: -1 } });
+  });
+
+  it('reports terminal spawn failures to the client', () => {
+    spawnMock.mockImplementationOnce(() => {
+      throw new Error('AttachConsole failed');
+    });
+    const h = new TerminalWebSocketHandler(() => '/c', logger, loadFakeNodePty);
+    const ws = makeWs();
+    h.addClient(ws);
+    expect(h.handleMessage(ws, { type: 'terminal.create', payload: { id: 't1' } })).toBe(true);
+    expect(ws.sent).toContainEqual({
+      type: 'terminal.output',
+      payload: {
+        id: 't1',
+        data: expect.stringContaining('Integrated terminal failed to start: AttachConsole failed'),
       },
     });
     expect(ws.sent).toContainEqual({ type: 'terminal.exit', payload: { id: 't1', exitCode: -1 } });

@@ -126,6 +126,7 @@ require `Authorization: Bearer <token>`. All responses are JSON.
 |--------|------|-------|
 | POST | `/mailbox/send` | `GlobalMailbox.send` |
 | POST | `/mailbox/query` | `GlobalMailbox.query` |
+| POST | `/mailbox/check` | convenience inbox check: direct/base/broadcast query plus optional read/completion batch ack |
 | POST | `/mailbox/ack` | `GlobalMailbox.ack` |
 | POST | `/mailbox/ack-many` | `GlobalMailbox.ackMany` (batch under one lock + rewrite) |
 | POST | `/mailbox/unread-count` | `GlobalMailbox.unreadCount` |

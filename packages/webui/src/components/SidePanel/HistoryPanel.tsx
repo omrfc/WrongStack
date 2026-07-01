@@ -7,14 +7,14 @@
 import { LayoutGrid } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { useConfigStore, useHistoryStore, useSessionStore, useUIStore } from '@/stores';
+import { showPanel } from '@/lib/view-navigation';
+import { useConfigStore, useHistoryStore, useSessionStore } from '@/stores';
 import { SessionList } from './SessionList';
 
 export function HistoryPanel() {
   const wsConnected = useConfigStore((s) => s.wsConnected);
   const { entries, loading, error } = useHistoryStore();
   const { listSessions, resumeSession, deleteSession } = useWebSocket();
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
   const activeSessionId = useSessionStore((s) => s.session?.id);
 
   const [query, setQuery] = useState('');
@@ -28,7 +28,7 @@ export function HistoryPanel() {
   }, [wsConnected, activeSessionId, listSessions]);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <SessionList
         historyQuery={query}
         setHistoryQuery={setQuery}
@@ -43,7 +43,7 @@ export function HistoryPanel() {
       <div className="border-t px-3 py-2 shrink-0">
         <button
           type="button"
-          onClick={() => setCurrentView('sessions')}
+          onClick={() => showPanel('history')}
           className="w-full flex items-center justify-center gap-1.5 h-7 rounded-md border border-border text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         >
           <LayoutGrid className="h-3 w-3" />

@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/components/Toaster';
 import { useProviderModels } from '@/hooks/useProviderModels';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { showPanel } from '@/lib/view-navigation';
 import { useConfigStore, useUIStore } from '@/stores';
 import { useLocalPrefs } from '@/stores/local-prefs';
 import type { WSServerMessage } from '@/types';
@@ -52,7 +53,6 @@ interface CatalogModel {
 }
 
 export function SettingsPanel() {
-  const { setCurrentView } = useUIStore();
   const { provider, model: activeModel, setProvider, setModel, setConfig, wsConnected, wsUrl } = useConfigStore();
   const { theme, setTheme } = useTheme();
   const ws = useWebSocket();
@@ -322,18 +322,18 @@ export function SettingsPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b bg-card shrink-0">
         <h1 className="text-lg font-semibold">Settings</h1>
-        <Button variant="ghost" size="icon" onClick={() => setCurrentView('chat')}>
+        <Button variant="ghost" size="icon" onClick={() => showPanel('chat')}>
           <X className="h-4 w-4" />
         </Button>
       </header>
 
       {/* Content */}
-      <ScrollArea className="flex-1">
-        <div className="p-6 max-w-2xl mx-auto">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto max-w-2xl p-6">
           <Tabs defaultValue="provider">
             <TabsList className="w-full justify-start mb-6 grid grid-cols-6">
               <TabsTrigger value="provider" className="gap-1 text-xs">

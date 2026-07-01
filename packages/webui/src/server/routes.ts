@@ -128,6 +128,10 @@ import type { SddWizardRouteHandlers } from './sdd-wizard-routes.js';
 import { patchConfig } from './boot.js';
 import type { ConnectedClient } from './types.js';
 import type { CustomModeStore } from './custom-context-modes.js';
+import { resolveYoloEligiblePendingConfirms, type PendingConfirm } from './pending-confirms.js';
+import { resolveProviderCatalogForModels, resolveProviderModelMetadata } from './model-catalog.js';
+
+type ProviderModelDescriptor = ReturnType<typeof resolveProviderModelList>[number];
 
 /**
  * Mutable session-scoped state. Handlers always read LIVE values through
@@ -156,13 +160,42 @@ export interface WebuiMutableState {
   setConfigWriteLock(next: Promise<void>): void;
   /**
    * Abort and clear any in-flight agent run. Routes shouldn't normally
-   * touch runLock directly — `projects.select` is the main caller. The
+   * touch runLock directly. The
    * refactor moves that into the projectHandlers setter chain so the
    * route layer just calls a single hook.
    */
   abortRunLock: () => void;
   /** Read-only reference to the live WS clients map. */
   getClients(): Map<WebSocket, ConnectedClient>;
+}
+
+async function enrichProviderModelDescriptors(
+  modelsRegistry: ModelsRegistry,
+  providerId: string,
+  cfg: ProviderConfig | undefined,
+  models: ProviderModelDescriptor[],
+): Promise<ProviderModelDescriptor[]> {
+  return Promise.all(
+    models.map(async (model) => {
+      if (model.contextWindow && model.capabilities.length > 0) return model;
+      const resolved = await resolveProviderModelMetadata(
+        modelsRegistry,
+        providerId,
+        model.id,
+        cfg,
+      ).catch(() => undefined);
+      if (!resolved) return model;
+      const capabilities = new Set(model.capabilities);
+      if (resolved.capabilities.tools) capabilities.add('tools');
+      if (resolved.capabilities.reasoning) capabilities.add('reasoning');
+      if (resolved.capabilities.vision) capabilities.add('vision');
+      return {
+        ...model,
+        contextWindow: model.contextWindow || resolved.capabilities.maxContext || undefined,
+        capabilities: [...capabilities],
+      };
+    }),
+  );
 }
 
 /**
@@ -185,6 +218,7 @@ export interface WebuiDeps {
   configStore: ConfigStore;
   tokenCounter: DefaultTokenCounter;
   permissionPolicy: PermissionPolicy;
+  pendingConfirms: Map<string, PendingConfirm>;
   pipelines: AgentPipelines;
   logger: Logger;
   memoryStore: DefaultMemoryStore;
@@ -240,7 +274,11 @@ export interface WebuiCallbacks {
     contextMode: string;
   }>;
   /** Re-build the AutoCompaction middleware denominator on model switch. */
-  updateAutoCompactionMaxContext: (newProvider: Provider) => Promise<void>;
+  updateAutoCompactionMaxContext: (
+    newProvider: Provider,
+    providerId?: string,
+    providerCfg?: ProviderConfig | undefined,
+  ) => Promise<void>;
   /** Unified, serialized, decrypt→mutate→encrypt→write helper for globalConfigPath. */
   updateGlobalConfig: (
     mutate: (config: Record<string, unknown>) => void,
@@ -327,13 +365,22 @@ export function buildRoutes(
       // reply (possibly empty) — the switcher lazy-loads every saved provider.
       const saved = await providerHandlers.loadConfigProviders();
       const cfg = saved[providerId];
-      const catalogId = cfg?.type && cfg.type !== providerId ? cfg.type : providerId;
-      const provider = await deps.modelsRegistry.getProvider(catalogId);
+      const provider = await resolveProviderCatalogForModels(
+        deps.modelsRegistry,
+        providerId,
+        cfg,
+      );
+      const models = await enrichProviderModelDescriptors(
+        deps.modelsRegistry,
+        providerId,
+        cfg,
+        resolveProviderModelList(cfg?.models, provider),
+      );
       send(ws, {
         type: 'provider.models',
         payload: {
           provider: providerId,
-          models: resolveProviderModelList(cfg?.models, provider),
+          models,
         },
       });
     },
@@ -364,7 +411,7 @@ export function buildRoutes(
         // backend threshold triggers (warn/soft/hard) use the correct denominator.
         // sessionStartPayload is called below (after this block) and uses
         // the new provider for its modelsRegistry lookup.
-        await cb.updateAutoCompactionMaxContext(newProv);
+        await cb.updateAutoCompactionMaxContext(newProv, newProvider, providerCfg);
 
         // Persist to global config file via the unified config mutation helper.
         await cb.updateGlobalConfig((config) => {
@@ -409,9 +456,12 @@ export function buildRoutes(
         // rewrite, so this trims wasted thinking on reasoning models; resolves
         // to undefined → no reasoning field, as before.
         const cfg = state.getConfig();
-        const resolved = await deps.modelsRegistry
-          .getModel(cfg.provider ?? '', cfg.model ?? '')
-          .catch(() => undefined);
+        const resolved = await resolveProviderModelMetadata(
+          deps.modelsRegistry,
+          cfg.provider ?? '',
+          cfg.model ?? '',
+          cfg.providers?.[cfg.provider ?? ''],
+        ).catch(() => undefined);
         const reasoning = gatedEnhancerReasoning(resolved?.capabilities?.reasoningConfig as never);
         const result = await enhanceUserPrompt({
           provider: deps.context.provider,
@@ -538,6 +588,7 @@ export function buildRoutes(
       // reference resolved from the container at startup.
       if (typeof payload['yolo'] === 'boolean') {
         (deps.permissionPolicy as { setYolo?: (v: boolean) => void }).setYolo?.(payload['yolo']);
+        if (payload['yolo'] === true) resolveYoloEligiblePendingConfirms(deps.pendingConfirms);
       }
       // Also update config.features for feature flags that affect tool/skill
       // initialisation (these were read at startup but can be changed at runtime

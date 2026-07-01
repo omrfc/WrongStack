@@ -361,6 +361,8 @@ export class ToolExecutor {
             toolName: tool.name,
             input: use.input,
             suggestedPattern,
+            decisionSource: decision.source,
+            riskTier: decision.riskTier ?? tool.riskTier,
           };
           return { result: pending, tool, durationMs: Date.now() - start };
         }

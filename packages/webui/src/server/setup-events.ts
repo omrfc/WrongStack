@@ -1,6 +1,7 @@
 import type { EventBus, Context, SessionEventBridge, WstackPaths } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
 import type { ConnectedClient, WSServerMessage } from './types.js';
+import type { PendingConfirm } from './pending-confirms.js';
 
 import * as fs from 'node:fs/promises';
 import { watch as fsWatch } from 'node:fs';
@@ -26,7 +27,7 @@ export interface SetupEventsDeps {
   clients: Map<WebSocket, ConnectedClient>;
   config: { tools?: { maxIterations?: number | undefined } };
   context: Context;
-  pendingConfirms: Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>;
+  pendingConfirms: Map<string, PendingConfirm>;
   /** Optional global config dir (~/.wrongstack) — enables SessionRegistry poll for fleet view. */
   globalConfigPath?: string | undefined;
   /**
@@ -321,8 +322,12 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
 
   events.on('tool.confirm_needed', (e) => {
     const id = e.toolUseId ?? `confirm_${Date.now()}`;
-    pendingConfirms.set(id, e.resolve);
-    broadcast(clients, { type: 'tool.confirm_needed', payload: sessionPayload({ sessionId: e.sessionId, id, toolName: e.tool?.name ?? 'unknown', input: e.input, suggestedPattern: e.suggestedPattern }) });
+    pendingConfirms.set(id, {
+      resolve: e.resolve,
+      decisionSource: e.decisionSource,
+      riskTier: e.riskTier,
+    });
+    broadcast(clients, { type: 'tool.confirm_needed', payload: sessionPayload({ sessionId: e.sessionId, id, toolName: e.tool?.name ?? 'unknown', input: e.input, suggestedPattern: e.suggestedPattern, decisionSource: e.decisionSource, riskTier: e.riskTier }) });
   });
 
   events.on('error', (e) => {

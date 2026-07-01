@@ -28,7 +28,7 @@ export interface AgentTimelineEntry {
   /** ISO 8601 timestamp. */
   ts: string;
   /** Content type. */
-  kind: 'text' | 'tool_use' | 'tool_result' | 'error' | 'status' | 'system';
+  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'error' | 'status' | 'system';
   /** The message content (text, tool summary, error message, status text). */
   content: string;
   /** Iteration index within the subagent's run. */
@@ -273,8 +273,8 @@ export class AgentMonitorService {
           subagentId,
           agentName: session.agentName,
           ts: new Date().toISOString(),
-          kind: 'text',
-          content: `🧠 ${text}`,
+          kind: 'thinking',
+          content: text,
           iteration,
         });
         break;
@@ -288,7 +288,7 @@ export class AgentMonitorService {
           agentName: session.agentName,
           ts: new Date().toISOString(),
           kind: 'tool_use',
-          content: `🔧 ${name}()`,
+          content: this._formatToolUse(name, payload.input),
           iteration: (payload.iteration as number) ?? 0,
           toolName: name,
         });
@@ -298,16 +298,18 @@ export class AgentMonitorService {
         const name = payload.name as string | undefined;
         const ok = payload.ok as boolean | undefined;
         const durationMs = payload.durationMs as number | undefined;
+        const output = typeof payload.output === 'string' ? payload.output : '';
+        const outputBytes = typeof payload.outputBytes === 'number' ? payload.outputBytes : undefined;
         if (!name) return;
-        const statusIcon = ok ? '✅' : '❌';
         const duration = durationMs !== undefined ? ` (${durationMs}ms)` : '';
+        const state = ok ? 'Completed' : 'Failed';
         this._addEntry(subagentId, {
           id: this._uid(),
           subagentId,
           agentName: session.agentName,
           ts: new Date().toISOString(),
           kind: 'tool_result',
-          content: `${statusIcon} ${name}${duration}`,
+          content: this._formatToolResult(`${state} ${name}${duration}`, output, outputBytes),
           iteration: (payload.iteration as number) ?? 0,
           toolName: name,
           toolOk: ok,
@@ -354,7 +356,7 @@ export class AgentMonitorService {
       subagentId: entry.subagentId,
       agentName: entry.agentName,
       content: entry.content,
-      kind: entry.kind === 'tool_result' ? 'tool_use' : entry.kind === 'system' ? 'status' : entry.kind,
+      kind: entry.kind,
       iteration: entry.iteration,
       ts: entry.ts,
       toolName: entry.toolName,
@@ -375,6 +377,34 @@ export class AgentMonitorService {
 
   private _uid(): string {
     return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private _formatToolUse(name: string, input: unknown): string {
+    if (input === undefined) return `${name}()`;
+    const body = this._stringifyForTimeline(input);
+    return body ? `${name}\n${body}` : `${name}()`;
+  }
+
+  private _formatToolResult(summary: string, output: string, outputBytes: number | undefined): string {
+    if (!output) return summary;
+    const suffix = outputBytes && Buffer.byteLength(output, 'utf8') < outputBytes
+      ? `\n\n... ${outputBytes.toLocaleString()} bytes total`
+      : '';
+    return `${summary}\n${output}${suffix}`;
+  }
+
+  private _stringifyForTimeline(value: unknown): string {
+    try {
+      if (typeof value === 'string') return this._capTimelineText(value);
+      return this._capTimelineText(JSON.stringify(value, null, 2));
+    } catch {
+      return this._capTimelineText(String(value));
+    }
+  }
+
+  private _capTimelineText(text: string, max = 20_000): string {
+    if (text.length <= max) return text;
+    return `${text.slice(0, max - 1)}…`;
   }
 }
 

@@ -216,7 +216,8 @@ export interface WSToolConfirmNeeded {
     toolName: string;
     input: unknown;
     suggestedPattern: string;
-    resolve: (decision: 'yes' | 'no' | 'always' | 'deny') => void;
+    decisionSource?: string | undefined;
+    riskTier?: 'safe' | 'standard' | 'destructive' | undefined;
   };
 }
 
@@ -898,7 +899,7 @@ export interface WSAgentTimelineMessage {
     subagentId: string;
     agentName: string;
     content: string;
-    kind: 'text' | 'tool_use' | 'error' | 'status';
+    kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'error' | 'status' | 'system';
     iteration: number;
     ts: string;
     toolName?: string | undefined;
@@ -1236,7 +1237,7 @@ export type WSClientMessage =
   | WSCollabResume
   | WSCollabGrantControl
   | WSCollabInjectTool
-  | { type: 'mailbox.messages'; payload: { limit?: number | undefined; incompleteOnly?: boolean | undefined } }
+  | { type: 'mailbox.messages'; payload: { limit?: number | undefined; agentId?: string | undefined; unreadOnly?: boolean | undefined; incompleteOnly?: boolean | undefined } }
   | { type: 'mailbox.agents'; payload: { onlineOnly?: boolean | undefined } | Record<string, never> }
   | { type: 'mailbox.clear' }
   | { type: 'mailbox.purge'; payload?: { completedMaxAgeMs?: number; incompleteMaxAgeMs?: number } | undefined }

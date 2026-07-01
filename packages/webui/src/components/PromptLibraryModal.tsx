@@ -260,11 +260,11 @@ export function PromptLibraryModal() {
       onClick={() => setOpen(false)}
     >
       <div
-        className="flex h-[80vh] w-full max-w-4xl overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
+        className="flex h-[80dvh] min-h-0 min-w-0 w-full max-w-4xl overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Left: search + categories + results */}
-        <div className="flex w-1/2 flex-col border-r border-border">
+        <div className="flex min-h-0 min-w-0 w-1/2 flex-col border-r border-border">
           <div className="border-b border-border p-3">
             <input
               ref={searchRef}
@@ -330,7 +330,7 @@ export function PromptLibraryModal() {
               ))}
             </div>
           </div>
-          <div className="flex-1 overflow-auto">
+          <div className="min-h-0 min-w-0 flex-1 overflow-auto">
             {filtered.map((p) => (
               <button
                 key={p.slug}
@@ -352,7 +352,7 @@ export function PromptLibraryModal() {
         </div>
 
         {/* Right: preview + variables + insert, OR the authoring form */}
-        <div className="flex w-1/2 flex-col">
+        <div className="flex min-h-0 min-w-0 w-1/2 flex-col">
           {creating ? (
             <>
               <div className="flex items-center justify-between border-b border-border p-3">
@@ -367,7 +367,7 @@ export function PromptLibraryModal() {
                   Cancel
                 </button>
               </div>
-              <div className="flex-1 space-y-2 overflow-auto p-3 text-xs">
+              <div className="min-h-0 min-w-0 flex-1 space-y-2 overflow-auto p-3 text-xs">
                 <input
                   value={draft.title}
                   onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
@@ -546,7 +546,7 @@ export function PromptLibraryModal() {
                   {selected.favorite ? '★' : '☆'}
                 </button>
               </div>
-              <div className="flex-1 overflow-auto p-3">
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto p-3">
                 <pre className="whitespace-pre-wrap break-words text-xs text-foreground">
                   {content || '…'}
                 </pre>

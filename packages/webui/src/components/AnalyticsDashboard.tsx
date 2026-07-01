@@ -299,7 +299,7 @@ export function AnalyticsDashboard() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* ── Header ── */}
       <div className="shrink-0 px-4 pt-3 pb-2 border-b border-slate-700/50">
         <div className="flex items-center justify-between">
@@ -314,7 +314,7 @@ export function AnalyticsDashboard() {
       </div>
 
       {/* ── Scrollable content ── */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 space-y-5">
         {/* ── Row 1: Overview cards ── */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard

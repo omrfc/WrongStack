@@ -314,22 +314,10 @@ export class WrongStackWebSocketClient {
         toolName: string;
         input: unknown;
         suggestedPattern: string;
-        resolve: (d: 'yes' | 'no' | 'always' | 'deny') => void;
       };
 
-      this.pendingConfirms.set(payload.id, {
-        resolve: payload.resolve,
-      });
-
-      const msgForHandler = {
-        ...msg,
-        payload: {
-          ...payload,
-          resolve: () => {},
-        },
-      };
-
-      this.emit(msgForHandler as WSServerMessage);
+      this.pendingConfirms.set(payload.id, {});
+      this.emit(msg);
       return;
     }
 
@@ -371,8 +359,7 @@ export class WrongStackWebSocketClient {
     if (
       message.type === 'context.clear' ||
       message.type === 'session.new' ||
-      message.type === 'session.resume' ||
-      message.type === 'projects.select'
+      message.type === 'session.resume'
     ) {
       streamCoalescer.dropAll();
     }
@@ -450,9 +437,7 @@ export class WrongStackWebSocketClient {
   }
 
   sendConfirm(id: string, decision: 'yes' | 'no' | 'always' | 'deny') {
-    const pending = this.pendingConfirms.get(id);
-    if (pending) {
-      pending.resolve(decision);
+    if (this.pendingConfirms.has(id)) {
       this.pendingConfirms.delete(id);
     }
     this.send({
@@ -770,18 +755,6 @@ export class WrongStackWebSocketClient {
 
   deleteSession(id: string) {
     this.send({ type: 'session.delete', payload: { id } });
-  }
-
-  listProjects() {
-    this.send({ type: 'projects.list' });
-  }
-
-  addProject(root: string, name?: string | undefined) {
-    this.send({ type: 'projects.add', payload: { root, name } });
-  }
-
-  selectProject(root: string, name?: string | undefined) {
-    this.send({ type: 'projects.select', payload: { root, name } });
   }
 
   setWorkingDir(path: string) {

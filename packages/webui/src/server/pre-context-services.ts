@@ -78,6 +78,11 @@ import type { CustomModeStore } from './custom-context-modes.js';
 import { createCustomModeStore } from './custom-context-modes.js';
 import { resolveSetupProvider } from './setup-screen.js';
 import { seedContextMeta } from './context-meta.js';
+import { resolveProviderModelMetadata } from './model-catalog.js';
+import { discoverAndMergeWebuiProviders } from './model-auto-discovery.js';
+
+const GITHUB_PROVIDERS_OVERLAY_URL =
+  'https://raw.githubusercontent.com/WrongStack/WrongStack/main/packages/cli/data/providers.json';
 
 export interface PreContextServicesInput {
   config: Config;
@@ -134,7 +139,32 @@ export async function createPreContextServices(
   // ── ModelsRegistry ──
   const modelsRegistry =
     opts.services?.modelsRegistry ??
-    new DefaultModelsRegistry({ cacheFile: wpaths.modelsCache, ttlSeconds: 24 * 3600 });
+    new DefaultModelsRegistry({
+      cacheFile: wpaths.modelsCache,
+      ttlSeconds: 0,
+      overlayUrl: GITHUB_PROVIDERS_OVERLAY_URL,
+      overlayCacheFile: wpaths.modelsOverlayCache,
+    });
+
+  if (!opts.services?.modelsRegistry) {
+    try {
+      await modelsRegistry.refresh();
+      logger.info('models.dev catalog refreshed');
+    } catch (err) {
+      logger.warn(`models.dev refresh failed (${toErrorMessage(err)}); using cached catalog`);
+    }
+  }
+
+  try {
+    await discoverAndMergeWebuiProviders({
+      config,
+      registry: modelsRegistry,
+      cacheDir: path.dirname(wpaths.modelsCache),
+      logger,
+    });
+  } catch (err) {
+    logger.debug(`provider auto-discovery skipped: ${toErrorMessage(err)}`);
+  }
 
   // ── Container ──
   const container = createDefaultContainer({ config, wpaths, logger, modelsRegistry });
@@ -290,7 +320,12 @@ export async function createPreContextServices(
   console.log('[WebUI] Custom context modes loaded:', customModeStore.list().filter((m) => (m as { custom?: boolean }).custom).length, 'custom');
 
   // ── Model capabilities ref ──
-  const resolvedModel = await modelsRegistry.getModel(config.provider, config.model);
+  const resolvedModel = await resolveProviderModelMetadata(
+    modelsRegistry,
+    config.provider,
+    config.model,
+    config.providers?.[config.provider],
+  );
   const modelCapabilities = resolvedModel?.capabilities
     ? { maxContextTokens: resolvedModel.capabilities.maxContext, supportsTools: resolvedModel.capabilities.tools, supportsVision: resolvedModel.capabilities.vision, supportsReasoning: resolvedModel.capabilities.reasoning }
     : undefined;
@@ -330,6 +365,11 @@ export async function createPreContextServices(
     modelCapabilities: () => modelCapabilitiesRef.current,
     instructionPaths: { globalDir: wpaths.globalInstructions, projectDir: wpaths.inProjectInstructions },
   });
+  if (container.has(TOKENS.SystemPromptBuilder)) {
+    container.override(TOKENS.SystemPromptBuilder, () => systemPromptBuilder, { owner: 'webui' });
+  } else {
+    container.bind(TOKENS.SystemPromptBuilder, () => systemPromptBuilder, { owner: 'webui' });
+  }
 
   // ── System prompt (with online agents from the shared mailbox) ──
   let onlineAgents: import('@wrongstack/core').MailboxAgentStatus[] = [];

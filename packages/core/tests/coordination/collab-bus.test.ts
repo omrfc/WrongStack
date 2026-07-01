@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CollaborationBus, collabPauseMiddleware } from '../../src/index.js';
+import { CollaborationBus, collabInjectMiddleware, collabPauseMiddleware } from '../../src/index.js';
+import type { ToolCallPipelinePayload } from '../../src/core/agent-types.js';
+import { Pipeline } from '../../src/kernel/index.js';
 
 describe('CollaborationBus', () => {
   it('starts in the running state', () => {
@@ -98,7 +100,7 @@ describe('CollaborationBus', () => {
 describe('collabPauseMiddleware', () => {
   const noopLogger = { debug() {}, warn() {} };
 
-  function makePayload(name: string) {
+  function makePayload(name: string): ToolCallPipelinePayload {
     return {
       toolUse: { type: 'tool_use' as const, id: 'tu-1', name, input: {} },
       result: { type: 'tool_result' as const, tool_use_id: 'tu-1', content: 'ok' },
@@ -109,17 +111,25 @@ describe('collabPauseMiddleware', () => {
   it('passes through when the bus is not paused', async () => {
     const bus = new CollaborationBus();
     const mw = collabPauseMiddleware(bus, { logger: noopLogger });
-    const next = vi.fn().mockResolvedValue(undefined);
-    await mw(makePayload('read'), next);
+    const next = vi.fn(async (payload: ToolCallPipelinePayload) => payload);
+    await mw.handler(makePayload('read'), next);
     expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('runs inside the named Pipeline middleware contract', async () => {
+    const bus = new CollaborationBus();
+    const pipeline = new Pipeline<ToolCallPipelinePayload>();
+    pipeline.prepend(collabPauseMiddleware(bus, { logger: noopLogger }));
+    const payload = makePayload('read');
+    await expect(pipeline.run(payload)).resolves.toBe(payload);
   });
 
   it('blocks the pipeline while paused and resumes via the bus', async () => {
     const bus = new CollaborationBus();
     const mw = collabPauseMiddleware(bus, { logger: noopLogger });
     bus.requestPause('controller-1');
-    const next = vi.fn().mockResolvedValue(undefined);
-    const p = mw(makePayload('bash'), next);
+    const next = vi.fn(async (payload: ToolCallPipelinePayload) => payload);
+    const p = mw.handler(makePayload('bash'), next);
     // next() must not have been called yet.
     await new Promise((r) => setImmediate(r));
     expect(next).not.toHaveBeenCalled();
@@ -133,8 +143,8 @@ describe('collabPauseMiddleware', () => {
     const warn = vi.fn();
     const mw = collabPauseMiddleware(bus, { logger: { warn, debug() {} }, defaultTimeoutMs: 15 });
     bus.requestPause('controller-1');
-    const next = vi.fn().mockResolvedValue(undefined);
-    await mw(makePayload('bash'), next);
+    const next = vi.fn(async (payload: ToolCallPipelinePayload) => payload);
+    await mw.handler(makePayload('bash'), next);
     expect(bus.isPaused()).toBe(false);
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]![0]).toMatch(/auto-resuming/);
@@ -146,10 +156,11 @@ describe('collabPauseMiddleware', () => {
     const mw = collabPauseMiddleware(bus, { logger: noopLogger });
     bus.requestPause('controller-1');
     const order: string[] = [];
-    const next = vi.fn().mockImplementation(async () => {
+    const next = vi.fn().mockImplementation(async (payload: ToolCallPipelinePayload) => {
       order.push('next');
+      return payload;
     });
-    const p = mw(makePayload('bash'), next).then(() => order.push('mw-done'));
+    const p = mw.handler(makePayload('bash'), next).then(() => order.push('mw-done'));
     await new Promise((r) => setImmediate(r));
     expect(order).toEqual([]); // nothing yet
     bus.resume();
@@ -228,7 +239,7 @@ describe('CollaborationBus.injectToolResult', () => {
 describe('collabInjectMiddleware', () => {
   const noopLogger = { debug() {}, warn() {} };
 
-  function makePayload(id: string, name: string) {
+  function makePayload(id: string, name: string): ToolCallPipelinePayload {
     return {
       toolUse: { type: 'tool_use' as const, id, name, input: {} },
       result: { type: 'tool_result' as const, tool_use_id: id, content: 'real' },
@@ -238,14 +249,31 @@ describe('collabInjectMiddleware', () => {
 
   it('passes through when no injection is queued for the toolUse.id', async () => {
     const bus = new CollaborationBus();
-    const { collabInjectMiddleware } = await import('../../src/middleware/collab-pause.js');
     const mw = collabInjectMiddleware(bus, { logger: noopLogger });
-    const next = vi.fn().mockResolvedValue(undefined);
+    const next = vi.fn(async (payload: ToolCallPipelinePayload) => payload);
     const payload = makePayload('tu-1', 'read');
-    await mw(payload, next);
+    await mw.handler(payload, next);
     expect(next).toHaveBeenCalledOnce();
     // Real result preserved.
     expect(payload.result.content).toBe('real');
+  });
+
+  it('runs pause and inject inside the named Pipeline middleware contract', async () => {
+    const bus = new CollaborationBus();
+    bus.injectToolResult({
+      toolUseId: 'tu-pipe',
+      content: 'pipeline synthetic',
+      isError: false,
+      reason: 'pipeline regression',
+      authorId: 'p1',
+    });
+    const pipeline = new Pipeline<ToolCallPipelinePayload>();
+    pipeline.prepend(collabInjectMiddleware(bus, { logger: noopLogger }));
+    pipeline.prepend(collabPauseMiddleware(bus, { logger: noopLogger }));
+    const payload = makePayload('tu-pipe', 'bash');
+    const out = await pipeline.run(payload);
+    expect(out).toBe(payload);
+    expect(payload.result.content).toBe('pipeline synthetic');
   });
 
   it('splices the injected result and does NOT call next() when matched', async () => {
@@ -257,11 +285,10 @@ describe('collabInjectMiddleware', () => {
       reason: 'controller: skip the bash call',
       authorId: 'p1',
     });
-    const { collabInjectMiddleware } = await import('../../src/middleware/collab-pause.js');
     const mw = collabInjectMiddleware(bus, { logger: noopLogger });
-    const next = vi.fn().mockResolvedValue(undefined);
+    const next = vi.fn(async (payload: ToolCallPipelinePayload) => payload);
     const payload = makePayload('tu-2', 'bash');
-    await mw(payload, next);
+    await mw.handler(payload, next);
     expect(next).not.toHaveBeenCalled();
     expect(payload.result.content).toBe('synthetic content');
     expect(payload.result.is_error).toBe(false);
@@ -278,11 +305,10 @@ describe('collabInjectMiddleware', () => {
       reason: 'controller: simulate a tool error',
       authorId: 'p1',
     });
-    const { collabInjectMiddleware } = await import('../../src/middleware/collab-pause.js');
     const mw = collabInjectMiddleware(bus, { logger: noopLogger });
-    const next = vi.fn().mockResolvedValue(undefined);
+    const next = vi.fn(async (payload: ToolCallPipelinePayload) => payload);
     const payload = makePayload('tu-3', 'read');
-    await mw(payload, next);
+    await mw.handler(payload, next);
     expect(payload.result.is_error).toBe(true);
     expect(payload.result.content).toBe('simulated failure');
   });
@@ -296,11 +322,10 @@ describe('collabInjectMiddleware', () => {
       reason: 'r',
       authorId: 'p',
     });
-    const { collabInjectMiddleware } = await import('../../src/middleware/collab-pause.js');
     const mw = collabInjectMiddleware(bus, { logger: noopLogger });
-    const next = vi.fn().mockResolvedValue(undefined);
+    const next = vi.fn(async (payload: ToolCallPipelinePayload) => payload);
     const payload = makePayload('tu-4', 'read');
-    await mw(payload, next);
+    await mw.handler(payload, next);
     expect(payload.result.content).toBe(JSON.stringify({ foo: 'bar', n: 42 }));
   });
 
@@ -315,9 +340,11 @@ describe('collabInjectMiddleware', () => {
     });
     const consumed: Array<Record<string, unknown>> = [];
     bus.onInjectionConsumed((info) => consumed.push(info));
-    const { collabInjectMiddleware } = await import('../../src/middleware/collab-pause.js');
     const mw = collabInjectMiddleware(bus, { logger: noopLogger });
-    await mw(makePayload('tu-9', 'bash'), vi.fn().mockResolvedValue(undefined));
+    await mw.handler(
+      makePayload('tu-9', 'bash'),
+      vi.fn(async (payload: ToolCallPipelinePayload) => payload),
+    );
     expect(consumed).toHaveLength(1);
     expect(consumed[0]).toMatchObject({
       toolUseId: 'tu-9',
@@ -332,9 +359,11 @@ describe('collabInjectMiddleware', () => {
     const bus = new CollaborationBus();
     const consumed: unknown[] = [];
     bus.onInjectionConsumed((info) => consumed.push(info));
-    const { collabInjectMiddleware } = await import('../../src/middleware/collab-pause.js');
     const mw = collabInjectMiddleware(bus, { logger: noopLogger });
-    await mw(makePayload('tu-x', 'read'), vi.fn().mockResolvedValue(undefined));
+    await mw.handler(
+      makePayload('tu-x', 'read'),
+      vi.fn(async (payload: ToolCallPipelinePayload) => payload),
+    );
     expect(consumed).toHaveLength(0);
   });
 });

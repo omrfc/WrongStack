@@ -24,7 +24,14 @@ const wsListeners = new Map<string, (message: unknown) => void>();
 vi.mock('@monaco-editor/react', () => ({
   default: function MockEditor(props: { onMount?: (editor: unknown) => void }) {
     React.useEffect(() => {
-      props.onMount?.({});
+      // Minimal editor stub covering the methods CodeEditor's onMount touches
+      // (selection tracking + context-menu action registration).
+      props.onMount?.({
+        onDidChangeCursorSelection: () => ({ dispose: () => {} }),
+        addAction: () => ({ dispose: () => {} }),
+        getSelection: () => null,
+        getModel: () => null,
+      });
     }, [props]);
     return <div data-testid="mock-monaco-editor" />;
   },
@@ -36,6 +43,8 @@ vi.mock('monaco-editor', () => ({
     defineTheme: vi.fn(),
     setTheme: vi.fn(),
   },
+  KeyMod: { CtrlCmd: 1, Shift: 2 },
+  KeyCode: { KeyL: 1 },
   languages: {
     CompletionItemKind: {
       Text: 1,

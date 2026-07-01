@@ -216,7 +216,7 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
   const chains = snapshot?.diagnostics?.deadlockChains ?? [];
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       {/* ── Header ── */}
       <header className="sdd-sheen shrink-0 border-b border-border px-4 pb-3 pt-2.5">
         <div className="flex items-center justify-between">
@@ -438,8 +438,8 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
       )}
 
       {/* ── Dashboard: animated DAG (left) + side panel (right) ── */}
-      <div className="flex min-h-0 flex-1">
-        <div className="relative min-w-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1">
           {!snapshot ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
               <Zap className="h-10 w-10 text-violet-500/40" />

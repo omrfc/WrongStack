@@ -102,6 +102,28 @@ export interface SessionHistoryEntry {
   isCurrent: boolean;
 }
 
+export type AgentTranscriptKind =
+  | 'text'
+  | 'thinking'
+  | 'tool_use'
+  | 'tool_result'
+  | 'error'
+  | 'status'
+  | 'system';
+
+export interface AgentTranscriptEntry {
+  id: string;
+  subagentId: string;
+  agentName: string;
+  content: string;
+  kind: AgentTranscriptKind;
+  iteration: number;
+  ts: string;
+  toolName?: string | undefined;
+  costUsd?: number | undefined;
+  status?: string | undefined;
+}
+
 /** One live (or just-finished) subagent in the fleet roster. */
 export interface SubagentView {
   id: string;

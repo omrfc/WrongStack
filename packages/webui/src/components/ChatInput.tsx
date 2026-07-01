@@ -4,7 +4,9 @@ import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
-import { useChatStore, useSessionStore, useUIStore } from '@/stores';
+import { useChatStore, useFileReferenceStore, useSessionStore, useUIStore } from '@/stores';
+import { refsToMarkdown } from '@/stores/file-reference-store.js';
+import { FileReferenceChip } from './FileReferenceChip.js';
 import { useAutoSubmitStreak } from '@/stores/auto-submit-streak.js';
 import type { QueueMode } from '@/stores/chat-store';
 import { FileMentionPicker, type FileMentionState } from './ChatInput/file-mention-picker.js';
@@ -72,6 +74,9 @@ export function ChatInput({
    *  (`@compa`) with the chosen path. Null = closed. */
   const [atMention, setAtMention] = useState<FileMentionState | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileRefs = useFileReferenceStore((s) => s.refs);
+  const { addRef, removeRef, clearRefs } = useFileReferenceStore.getState();
+  const hasFileRefs = fileRefs.length > 0;
   const {
     draggingOver,
     onDragEnter,
@@ -84,7 +89,7 @@ export function ChatInput({
     pendingImage,
     clearPendingImage,
     setPasteHint,
-  } = usePasteDrop({ input, textareaRef, setInput, setAtMention });
+  } = usePasteDrop({ input, textareaRef, setInput });
 
   // Prompt library "Insert" pushes its rendered text here; fold it into the input.
   useEffect(() => {
@@ -269,13 +274,18 @@ export function ChatInput({
     async (mode: QueueMode) => {
       // Manual submit re-arms the auto-proceed consecutive cap.
       resetAutoSubmitStreak();
-      if (!input.trim() && !pendingImageRef.current) return;
+      if (!input.trim() && !pendingImageRef.current && fileRefs.length === 0) return;
 
       // Drain and clear the pending clipboard image (if any)
       const pendingImage = pendingImageRef.current;
       clearPendingImage();
 
       const content = input.trim();
+      const refsMarkdown = refsToMarkdown(fileRefs);
+      const combined = [content, refsMarkdown].filter(Boolean).join('\n\n');
+      // Snapshot refs and clear them immediately so a rapid second submit
+      // doesn't duplicate the references.
+      clearRefs();
 
       if (content.startsWith('/') && runSlashCommand(content)) {
         pushPrompt(content);
@@ -293,7 +303,7 @@ export function ChatInput({
 
       // Build the full content: prepend the pasted image as a markdown
       // image link so both the chat view and the agent receive it.
-      const fullContent = pendingImage ? `![pasted image](${pendingImage})\n\n${content}` : content;
+      const fullContent = pendingImage ? `![pasted image](${pendingImage})\n\n${combined}` : combined;
 
       // `queue` mode always enqueues, even when idle. The drain loop
       // picks it up after the next run.result.
@@ -324,18 +334,18 @@ export function ChatInput({
           // If refine is enabled, trigger the refinement flow instead of sending directly
           if (refineEnabled && refineModel) {
             setRefinePanel({
-              original: content,
-              refined: content, // Will be replaced when backend responds
-              english: content,
+              original: combined,
+              refined: combined, // Will be replaced when backend responds
+              english: combined,
               resolve: (_decision) => {
                 // This is called when the refine panel is decided
               },
             });
-            refineModel(content);
+            refineModel(combined);
           } else {
             addMessage({ role: 'user', content: fullContent });
             setLoading(true);
-            sendMessage(content, pendingImage ?? undefined);
+            sendMessage(combined, pendingImage ?? undefined);
           }
         } else {
           console.warn(
@@ -361,6 +371,7 @@ export function ChatInput({
     },
     [
       input,
+      fileRefs,
       isLoading,
       enqueue,
       client,
@@ -662,6 +673,29 @@ export function ChatInput({
             }
           }}
         />
+      )}
+
+      {/* File reference chips queued for the next message. */}
+      {hasFileRefs && (
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+            References
+          </span>
+          {fileRefs.map((ref) => (
+            <FileReferenceChip
+              key={ref.id}
+              ref={ref}
+              onRemove={() => removeRef(ref.id)}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={clearRefs}
+            className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
+          >
+            Clear all
+          </button>
+        </div>
       )}
 
       <form

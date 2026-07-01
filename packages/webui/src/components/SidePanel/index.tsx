@@ -9,6 +9,7 @@
 import { PanelLeftClose } from 'lucide-react';
 import { useEffect } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { cn } from '@/lib/utils';
 import {
   type Activity,
   SIDEBAR_DEFAULT_WIDTH,
@@ -19,7 +20,6 @@ import {
 } from '@/stores';
 import { FileExplorer } from '../FileExplorer';
 import { MailboxPanel } from '../MailboxPanel';
-import { ProjectsPanel } from '../ProjectsPanel';
 import { Button } from '../ui/button';
 import { AgentsPanel } from './AgentsPanel';
 import { ChangesPanel } from './ChangesPanel';
@@ -36,7 +36,6 @@ const PANEL_TITLE: Record<Activity, string> = {
   history: 'History',
   files: 'Files',
   changes: 'Changes',
-  projects: 'Projects',
   mailbox: 'Mailbox',
   skills: 'Skills',
   design: 'Design Studio',
@@ -44,13 +43,14 @@ const PANEL_TITLE: Record<Activity, string> = {
   officemap: 'Office Map',
 };
 
-export function SidePanel() {
+export function SidePanel({ desktopShell = false }: { desktopShell?: boolean | undefined }) {
   const activeActivity = useUIStore((s) => s.activeActivity);
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const sidebarWidth = useUIStore((s) => s.sidebarWidth);
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth);
   const wsConnected = useConfigStore((s) => s.wsConnected);
   const { client } = useWebSocket();
+  const effectiveWidth = desktopShell ? Math.min(sidebarWidth, 280) : sidebarWidth;
 
   // Load the file tree when the Files panel is shown.
   useEffect(() => {
@@ -79,10 +79,25 @@ export function SidePanel() {
   };
 
   return (
-    <aside
-      style={{ width: `${sidebarWidth}px` }}
-      className="relative border-r bg-card flex flex-col shrink-0 overflow-hidden animate-slide-in"
-    >
+    <>
+      <div
+        className={cn(
+          'fixed inset-y-0 right-0 z-30 bg-black/20 md:hidden',
+          desktopShell ? 'left-10' : 'left-12',
+        )}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+      <aside
+        style={{
+          width: `${effectiveWidth}px`,
+          maxWidth: desktopShell ? 'min(300px, calc(100vw - 2.5rem))' : 'calc(100vw - 3rem)',
+        }}
+        className={cn(
+          'fixed inset-y-0 z-40 flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-r bg-card shadow-2xl animate-slide-in md:relative md:inset-auto md:z-auto md:shadow-none',
+          desktopShell ? 'left-10' : 'left-12',
+        )}
+      >
       {/* Drag handle */}
       <div
         onMouseDown={startDrag}
@@ -94,7 +109,12 @@ export function SidePanel() {
       </div>
 
       {/* Panel header — names the active panel */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b shrink-0">
+      <div
+        className={cn(
+          'flex items-center justify-between border-b shrink-0',
+          desktopShell ? 'px-2.5 py-2' : 'px-3 py-2.5',
+        )}
+      >
         <span className="text-xs font-semibold tracking-tight text-muted-foreground uppercase">
           {PANEL_TITLE[activeActivity]}
         </span>
@@ -110,47 +130,43 @@ export function SidePanel() {
       </div>
 
       {/* Panel body — routed by activity */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {activeActivity === 'chat' && <SessionPanel />}
         {activeActivity === 'agents' && <AgentsPanel />}
         {activeActivity === 'history' && <HistoryPanel />}
         {activeActivity === 'files' && (
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto">
             <FileExplorer />
           </div>
         )}
         {activeActivity === 'changes' && <ChangesPanel />}
-        {activeActivity === 'projects' && (
-          <div className="flex-1 overflow-y-auto p-3">
-            <ProjectsPanel />
-          </div>
-        )}
         {activeActivity === 'mailbox' && (
-          <div className="flex-1 overflow-y-auto p-3">
+          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto p-3">
             <MailboxPanel />
           </div>
         )}
         {activeActivity === 'skills' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             <SkillsList className="h-full" />
           </div>
         )}
         {activeActivity === 'design' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             <DesignStudioPanel className="h-full" />
           </div>
         )}
         {activeActivity === 'worktrees' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             <WorktreesPanel />
           </div>
         )}
         {activeActivity === 'officemap' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             <OfficeMapSettingsPanel />
           </div>
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

@@ -48,6 +48,26 @@ vi.mock('@/stores', () => ({
   },
 }));
 
+vi.mock('@/stores/ui-store', () => ({
+  useUIStore: {
+    getState: () => ({
+      currentView: 'chat',
+      refineEnabled: false,
+      setAgentsMonitorOpen: mocks.setAgentsMonitorOpen,
+      setFleetMonitorOpen: mocks.setFleetMonitorOpen,
+      setQueuePanelOpen: mocks.setQueuePanelOpen,
+      setProcessMonitorOpen: mocks.setProcessMonitorOpen,
+      setDockSection: mocks.setDockSection,
+      setWorkDashboardTab: mocks.setWorkDashboardTab,
+      setDockCustomizeOpen: mocks.setDockCustomizeOpen,
+      setSidebarOpen: mocks.setSidebarOpen,
+      selectActivity: mocks.selectActivity,
+      setCurrentView: mocks.setCurrentViewUI,
+      setTerminalOpen: mocks.setTerminalOpen,
+    }),
+  },
+}));
+
 vi.mock('../../src/components/CommandPalette', () => ({
   downloadChatAsMarkdown: vi.fn(),
 }));
@@ -173,7 +193,9 @@ describe('runChatSlashCommand', () => {
   it('/load calls ws.listSessions and switches to sessions view', () => {
     expect(runChatSlashCommand({ ...options, raw: '/load' })).toBe(true);
     expect(options.ws.listSessions).toHaveBeenCalledWith(50);
-    expect(options.setCurrentView).toHaveBeenCalledWith('sessions');
+    expect(mocks.setSidebarOpen).toHaveBeenCalledWith(true);
+    expect(mocks.selectActivity).toHaveBeenCalledWith('history');
+    expect(mocks.setCurrentViewUI).toHaveBeenCalledWith('sessions');
   });
 
   it.each(['/interrupt', '/abort', '/stop'])('%s calls sendAbort and setLoading(false)', (cmd) => {
@@ -184,7 +206,8 @@ describe('runChatSlashCommand', () => {
 
   it('/settings switches to settings view', () => {
     expect(runChatSlashCommand({ ...options, raw: '/settings' })).toBe(true);
-    expect(options.setCurrentView).toHaveBeenCalledWith('settings');
+    expect(mocks.setSidebarOpen).toHaveBeenCalledWith(false);
+    expect(mocks.setCurrentViewUI).toHaveBeenCalledWith('settings');
   });
 
   it('/suggest sends a suggestion prompt', () => {
@@ -289,7 +312,9 @@ describe('runChatSlashCommand — /f', () => {
     const opts = makeOptions({ raw: '/f10' });
     expect(runChatSlashCommand(opts)).toBe(true);
     expect(opts.ws.listSessions).toHaveBeenCalledWith(50);
-    expect(opts.setCurrentView).toHaveBeenCalledWith('sessions');
+    expect(mocks.setSidebarOpen).toHaveBeenCalledWith(true);
+    expect(mocks.selectActivity).toHaveBeenCalledWith('history');
+    expect(mocks.setCurrentViewUI).toHaveBeenCalledWith('sessions');
   });
 
   it('/f11 opens the coordinator office map surface', () => {
@@ -381,7 +406,8 @@ describe('runChatSlashCommand — agent/autonomy commands', () => {
     const opts = makeOptions({ raw: '/mcp' });
     expect(runChatSlashCommand(opts)).toBe(true);
     expect(opts.client?.send).toHaveBeenCalledWith({ type: 'mcp.list' });
-    expect(opts.setCurrentView).toHaveBeenCalledWith('settings');
+    expect(mocks.setSidebarOpen).toHaveBeenCalledWith(false);
+    expect(mocks.setCurrentViewUI).toHaveBeenCalledWith('settings');
   });
 
   it('/working-dir <path> sends working_dir.set', () => {

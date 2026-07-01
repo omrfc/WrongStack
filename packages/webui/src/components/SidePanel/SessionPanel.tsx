@@ -28,6 +28,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { playCompletionChime } from '@/lib/chime';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
+import { showPanel } from '@/lib/view-navigation';
 import { useChatStore, useConfigStore, useFleetStore, useSessionStore, useUIStore } from '@/stores';
 import { useLocalPrefs } from '@/stores/local-prefs';
 import { fmtTok } from '../ChatView/utils';
@@ -237,7 +238,7 @@ export function SessionPanel() {
     getWSClient(wsUrl)?.send?.(msg);
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
       {/* ── Quick actions ── */}
       <div className="px-3 py-2.5 border-b grid grid-cols-2 gap-1.5">
         {isLoading ? (
@@ -256,7 +257,7 @@ export function SessionPanel() {
             onClick={() => {
               client?.newSession?.();
               // Starting a conversation is a chat-surface action — bring it up.
-              useUIStore.getState().setCurrentView('chat');
+              showPanel('chat');
             }}
             disabled={!wsConnected}
             title="Start a new session (Ctrl+N)"

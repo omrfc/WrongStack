@@ -346,6 +346,41 @@ describe('makeMailboxTool', () => {
     expect(result.summary).toBe('No unread messages.');
   });
 
+  it('check can peek without marking messages read', async () => {
+    await mailbox.send({ from: 'a', to: 'agent-b', type: 'note', subject: 'peek', body: 'b' });
+
+    const tool = makeMailboxTool({ resolveMailbox: () => mailbox, agentId: 'agent-b' });
+    const result = await tool.execute({ action: 'check', markRead: false }, mockCtx() as any);
+    expect(result.ok).toBe(true);
+    expect(result.count).toBe(1);
+
+    const uniqueId = `agent-b@${mailboxSessionTag('default')}`;
+    const remaining = await mailbox.query({ to: 'agent-b', unreadBy: uniqueId });
+    expect(remaining.length).toBe(1);
+  });
+
+  it('check can complete returned messages with an outcome', async () => {
+    await mailbox.send({ from: 'a', to: 'agent-b', type: 'ask', subject: 'q1', body: 'b1' });
+    await mailbox.send({ from: 'a', to: 'agent-b', type: 'assign', subject: 'q2', body: 'b2' });
+
+    const tool = makeMailboxTool({ resolveMailbox: () => mailbox, agentId: 'agent-b' });
+    const result = await tool.execute(
+      { action: 'check', completed: true, outcome: 'handled from check' },
+      mockCtx() as any,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.count).toBe(2);
+    expect(result.summary).toContain('(marked read)');
+    expect(result.summary).toContain('(completed)');
+
+    const uniqueId = `agent-b@${mailboxSessionTag('default')}`;
+    const all = await mailbox.query({ to: 'agent-b', limit: 10 });
+    expect(all).toHaveLength(2);
+    expect(all.every((m) => m.completed)).toBe(true);
+    expect(all.every((m) => m.completedBy === uniqueId)).toBe(true);
+    expect(all.every((m) => m.outcome === 'handled from check')).toBe(true);
+  });
+
   it('send posts a message', async () => {
     const result = await toolForSender.execute({
       action: 'send',
@@ -964,5 +999,57 @@ describe('recipient "all" normalizes to the broadcast address', () => {
     expect(byType.get('ask')).toBe('s1');
     expect(byType.get('assign')).toBe('s2');
     expect(byType.get('review')).toBe('s3');
+  });
+
+  it('mail_inbox can mark returned messages completed with one catch-up call', async () => {
+    const { makeMailSendTool, makeMailInboxTool } = await import(
+      '../../src/coordination/mail-tools.js'
+    );
+    const send = makeMailSendTool({ resolveMailbox: () => mailbox });
+    const inbox = makeMailInboxTool({ resolveMailbox: () => mailbox });
+    const ctxA = mockCtx({ meta: { agentId: 'coder' } });
+    const ctxB = mockCtx({ meta: { agentId: 'reviewer' } });
+    const uniqueB = `reviewer@${mailboxSessionTag('default')}`;
+
+    await send.execute({ to: uniqueB, subject: 'q1', body: 'body', type: 'ask' }, ctxA as never);
+    await send.execute({ to: uniqueB, subject: 'q2', body: 'body', type: 'assign' }, ctxA as never);
+
+    const got = await inbox.execute(
+      { limit: 10, completed: true, outcome: 'handled from inbox' },
+      ctxB as never,
+    );
+    expect(got.count).toBe(2);
+    expect(got.summary).toContain('(marked read)');
+    expect(got.summary).toContain('(completed)');
+
+    const all = await mailbox.query({ to: uniqueB, limit: 10 });
+    expect(all).toHaveLength(2);
+    expect(all.every((m) => m.completed)).toBe(true);
+    expect(all.every((m) => m.completedBy === uniqueB)).toBe(true);
+    expect(all.every((m) => m.outcome === 'handled from inbox')).toBe(true);
+  });
+
+  it('mail_inbox markRead=false can peek without completing messages', async () => {
+    const { makeMailSendTool, makeMailInboxTool } = await import(
+      '../../src/coordination/mail-tools.js'
+    );
+    const send = makeMailSendTool({ resolveMailbox: () => mailbox });
+    const inbox = makeMailInboxTool({ resolveMailbox: () => mailbox });
+    const ctxA = mockCtx({ meta: { agentId: 'coder' } });
+    const ctxB = mockCtx({ meta: { agentId: 'reviewer' } });
+    const uniqueB = `reviewer@${mailboxSessionTag('default')}`;
+
+    await send.execute({ to: uniqueB, subject: 'peek', body: 'body', type: 'ask' }, ctxA as never);
+
+    const peek = await inbox.execute({ markRead: false }, ctxB as never);
+    expect(peek.count).toBe(1);
+
+    const again = await inbox.execute({ markRead: false }, ctxB as never);
+    expect(again.count).toBe(1);
+
+    const all = await mailbox.query({ to: uniqueB, limit: 10 });
+    expect(all).toHaveLength(1);
+    expect(all[0]?.completed).toBe(false);
+    expect(all[0]?.readBy[uniqueB]).toBeUndefined();
   });
 });

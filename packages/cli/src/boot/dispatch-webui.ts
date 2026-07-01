@@ -44,6 +44,7 @@ export interface WebUIDispatchContext {
   needsSetup: boolean | undefined;
   renderer: TerminalRenderer;
   onAutonomy: ((mode: AutonomyMode) => void) | undefined;
+  applyLiveSettings?: ((settings: { yolo?: boolean }) => void) | undefined;
   onModelContextResolved?: ((providerId: string, modelId: string, maxContext: number) => void) | undefined;
   activeRecoveryLock: {
     clear: () => Promise<void>;
@@ -83,6 +84,7 @@ export async function runWebUIDispatch(ctx: WebUIDispatchContext): Promise<numbe
     needsSetup,
     renderer,
     onAutonomy,
+    applyLiveSettings,
     onModelContextResolved,
     activeRecoveryLock,
     sddSubagentFactory,
@@ -241,6 +243,9 @@ export async function runWebUIDispatch(ctx: WebUIDispatchContext): Promise<numbe
       ) {
         onAutonomy?.(mode as AutonomyMode);
       }
+    },
+    onYoloSwitch: (enabled: boolean) => {
+      applyLiveSettings?.({ yolo: enabled });
     },
   });
   // In --webui mode, skip the full REPL — just keep the process alive

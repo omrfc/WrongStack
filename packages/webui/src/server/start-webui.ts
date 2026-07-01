@@ -105,6 +105,7 @@ import { createAgentServices } from './backend-services.js';
 import { seedContextMeta } from './context-meta.js';
 import { createConnectionHandler } from './connection-handler.js';
 import { createMessageDispatcher } from './message-dispatcher.js';
+import type { PendingConfirm } from './pending-confirms.js';
 import {
   persistPrefsToConfig as persistPrefsToConfigImpl,
   prefSnapshot as prefSnapshotImpl,
@@ -281,7 +282,7 @@ export async function startWebUI(
   const vault = opts.services?.vault ?? boot.vault;
   let config = baseConfig;
 
-  /** Mutable project root — updated on `projects.select`. File handlers,
+  /** Mutable project root. File handlers,
    *  sessionStartPayload, and session store use this value. */
   let projectRoot = boot.projectRoot;
   /** Mutable working directory — starts at projectRoot, changeable via
@@ -412,6 +413,9 @@ export async function startWebUI(
     collabHandler,
     updateAutoCompactionMaxContext,
   } = agentServices;
+  if (typeof context.meta['yolo'] === 'boolean') {
+    permissionPolicy.setYolo?.(context.meta['yolo']);
+  }
 
   // Helper: build the rich session.start payload from current runtime state.
   // Centralised so initial connect, post-/new, and post-model.switch all
@@ -458,12 +462,12 @@ export async function startWebUI(
   let _runLock: AbortController | null = null;
   const runLockControl = { get: () => _runLock, set: (ctrl: AbortController | null) => { _runLock = ctrl; } };
 
-  const pendingConfirms = new Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>();
+  const pendingConfirms = new Map<string, PendingConfirm>();
 
   // Audit-level-aware session log bridge — persists tool/error/provider
   // events to the session JSONL with the same contract as the CLI. The
   // getter form resolves the CURRENT writer on every append so events
-  // follow session.new / session.resume / projects.select swaps.
+  // follow session.new / session.resume swaps.
   const sessionLogging = resolveSessionLoggingConfig(config as never as Parameters<typeof resolveSessionLoggingConfig>[0]);
   const sessionBridge = createSessionEventBridge(() => context.session ?? session, sessionLogging.auditLevel, { sampling: sessionLogging.sampling });
 
@@ -589,6 +593,7 @@ export async function startWebUI(
     configStore,
     tokenCounter,
     permissionPolicy,
+    pendingConfirms,
     pipelines,
     logger,
     memoryStore,

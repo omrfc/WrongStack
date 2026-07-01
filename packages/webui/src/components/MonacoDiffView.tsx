@@ -89,8 +89,8 @@ export function MonacoDiffView({
   const language = guessLanguage(path);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-2 py-1.5 border-b border-border/40">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 items-center justify-between gap-2 px-2 py-1.5 border-b border-border/40">
         <span className="text-xs font-mono text-muted-foreground truncate">{path}</span>
         <button
           type="button"
@@ -109,7 +109,7 @@ export function MonacoDiffView({
           {saving ? 'Applying…' : savedAt && !dirty ? 'Applied' : 'Apply'}
         </button>
       </div>
-      <div className="flex-1 overflow-hidden">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <DiffEditor
           original={oldText}
           modified={newText}

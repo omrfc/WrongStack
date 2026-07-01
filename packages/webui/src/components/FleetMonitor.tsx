@@ -32,11 +32,12 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConcurrencyGauge, EventTimeline } from '@/components/ui';
+import { AgentTranscript } from '@/components/AgentTranscript';
 import { SparklineChart } from '@/components/ui/sparkline';
 import { cn } from '@/lib/utils';
 import { compareAgentsByActivity, tallyAgents } from '@/lib/agent-status';
 import type { SubagentView } from '@/stores';
-import { useFleetStore } from '@/stores';
+import { EMPTY_AGENT_TRANSCRIPT, useFleetStore } from '@/stores';
 
 export interface FleetMonitorProps {
   onClose: () => void;
@@ -65,6 +66,7 @@ function FleetAgentDetailPanel({
 }): React.ReactElement {
   const [copied, setCopied] = useState(false);
   const [showFullToolLog, setShowFullToolLog] = useState(false);
+  const transcript = useFleetStore((s) => s.agentTranscripts.get(agent.id) ?? EMPTY_AGENT_TRANSCRIPT);
   const meta = STATUS_META[agent.status];
   const active = agent.status === 'running';
   const ctxPct = Math.min(100, Math.max(0, agent.ctxPct));
@@ -91,7 +93,7 @@ function FleetAgentDetailPanel({
   const isStream = !agent.finalText && !!agent.partialText;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Fixed header */}
       <div className="shrink-0 border-b bg-card p-4 space-y-3">
         {/* Header */}
@@ -152,7 +154,7 @@ function FleetAgentDetailPanel({
       </div>
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 space-y-4">
         {/* Stats grid */}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border bg-card p-3">
@@ -221,6 +223,12 @@ function FleetAgentDetailPanel({
             </div>
           </div>
         </div>
+
+        <AgentTranscript
+          entries={transcript}
+          agentName={agent.name}
+          maxHeightClassName="max-h-[28rem]"
+        />
 
         {/* Current tool */}
         {agent.currentTool && (
@@ -398,7 +406,7 @@ export function FleetAgentRow({
       type="button"
       onClick={onClick}
       className={cn(
-        'w-full text-left grid grid-cols-[140px_60px_1fr_60px_60px_60px_60px_50px_50px] items-center gap-x-2 px-3 py-1.5 rounded-md text-xs transition-colors',
+        'min-w-[650px] w-full text-left grid grid-cols-[140px_60px_1fr_60px_60px_60px_60px_50px_50px] items-center gap-x-2 px-3 py-1.5 rounded-md text-xs transition-colors',
         isSelected ? 'bg-primary/15 ring-1 ring-primary/40' : 'hover:bg-accent/50',
         active && !isSelected && 'bg-muted/30',
       )}
@@ -567,7 +575,7 @@ export function FleetMonitor({
         aria-hidden="true"
       />
       <div
-        className="fixed right-0 top-0 h-full z-50 w-[720px] max-w-[95vw] flex flex-col bg-background border-l shadow-2xl animate-slide-in-right"
+        className="fixed right-0 top-0 z-50 flex h-full min-h-0 w-[720px] max-w-[95vw] flex-col border-l bg-background shadow-2xl animate-slide-in-right"
         onKeyDown={handleKeyDown}
         tabIndex={-1}
       >
@@ -616,15 +624,15 @@ export function FleetMonitor({
         </div>
 
       {/* Main content: two-column layout when agent selected */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         {/* Left: Agent table */}
         <div className={cn(
-          'flex flex-col border-r transition-all duration-200',
-          selectedAgent ? 'w-[500px] shrink-0' : 'w-full'
+          'flex min-h-0 min-w-0 flex-col border-r transition-all duration-200',
+          selectedAgent ? 'w-[500px] max-w-full shrink-0' : 'w-full'
         )}>
           {/* Column headers */}
-          <div className="border-b bg-card/80 px-3 py-2">
-            <div className="grid grid-cols-[140px_60px_1fr_60px_60px_60px_60px_50px_50px] gap-x-2 text-[9px] uppercase tracking-wider text-muted-foreground font-medium">
+          <div className="border-b bg-card/80 px-3 py-2 overflow-x-auto">
+            <div className="grid min-w-[650px] grid-cols-[140px_60px_1fr_60px_60px_60px_60px_50px_50px] gap-x-2 text-[9px] uppercase tracking-wider text-muted-foreground font-medium">
               <span>Name</span>
               <span>Status</span>
               <span>Activity</span>
@@ -638,7 +646,7 @@ export function FleetMonitor({
           </div>
 
           {/* Agent list */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="min-h-0 min-w-0 flex-1 overflow-auto">
             {fleetList.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                 <Users className="h-12 w-12 mb-3 opacity-20" />
@@ -678,7 +686,7 @@ export function FleetMonitor({
               ) : (
                 <div className="space-y-1">
                   {fleetAgentTimeline.slice(0, 15).map((entry) => {
-                    const iconMap: Record<string, string> = { text: '\u{1F4AC}', tool_use: '\u{1F527}', error: '\u{274C}', status: '\u{1F4AC}' };
+                    const iconMap: Record<string, string> = { text: '\u{1F4AC}', thinking: '\u{1F9E0}', tool_use: '\u{1F527}', tool_result: '\u{2705}', error: '\u{274C}', status: '\u{1F4AC}', system: '\u{25CF}' };
                     const icon = iconMap[entry.kind] ?? '\u{25CF}';
                     const statusColor = entry.status === 'running' || entry.status === 'spawned' ? 'text-emerald-500'
                       : entry.status === 'failed' || entry.status === 'timeout' ? 'text-destructive' : 'text-muted-foreground';
@@ -688,7 +696,7 @@ export function FleetMonitor({
                         <span className="font-medium text-primary shrink-0">{entry.agentName}</span>
                         {entry.status && <span className={`${statusColor} shrink-0`}>{entry.status}</span>}
                         {entry.toolName && <span className="text-muted-foreground shrink-0">[{entry.toolName}]</span>}
-                        <span className="text-muted-foreground truncate">{entry.content}</span>
+                        <span className="min-w-0 text-muted-foreground line-clamp-2 whitespace-pre-wrap break-words">{entry.content}</span>
                       </div>
                     );
                   })}
@@ -705,8 +713,8 @@ export function FleetMonitor({
 
         {/* Right: Agent detail */}
         {selectedAgent && (
-          <div className="flex-1 overflow-hidden bg-card/50">
-            <div className="h-full flex flex-col">
+          <div className="min-h-0 min-w-[360px] flex-1 overflow-hidden bg-card/50">
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
               {/* Detail header bar */}
               <div className="shrink-0 px-4 py-2 border-b bg-card/80 flex items-center gap-2">
                 <ArrowRight className="h-4 w-4 text-primary" />
@@ -721,7 +729,7 @@ export function FleetMonitor({
                 </button>
               </div>
               {/* Detail content */}
-              <div className="flex-1 overflow-hidden">
+              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 <FleetAgentDetailPanel agent={selectedAgent} now={nowTick} />
               </div>
             </div>
@@ -730,7 +738,7 @@ export function FleetMonitor({
 
         {/* Empty state when nothing selected */}
         {!selectedAgent && fleetList.length > 0 && (
-          <div className="flex-1 flex items-center justify-center bg-muted/20">
+          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-muted/20">
             <div className="text-center space-y-3 max-w-sm">
               <Users className="h-12 w-12 text-muted-foreground/30 mx-auto" />
               <p className="text-sm text-muted-foreground">

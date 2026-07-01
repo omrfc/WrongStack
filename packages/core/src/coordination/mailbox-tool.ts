@@ -135,7 +135,8 @@ export function makeMailboxTool(opts: MailboxToolOptions = {}): Tool {
         replyTo: { type: 'string', description: 'Reply to a specific message id.' },
         messageId: { type: 'string', description: "Message id to acknowledge. Required for 'ack'." },
         read: { type: 'boolean', description: 'Mark as read (adds read receipt).' },
-        completed: { type: 'boolean', description: 'Mark as completed.' },
+        markRead: { type: 'boolean', description: 'For action=check, add read receipts for returned messages (default true).' },
+        completed: { type: 'boolean', description: 'Mark as completed. For action=check, completes every returned message.' },
         outcome: { type: 'string', description: 'Outcome summary when marking complete.' },
         unreadBy: { type: 'string', description: "Filter messages unread by this agent. Used by 'check'." },
         incompleteOnly: { type: 'boolean', description: 'Only incomplete messages.' },
@@ -207,6 +208,9 @@ async function executeCheck(
   i: Record<string, unknown>,
 ) {
   const limit = (i.limit as number) ?? 20;
+  const markRead = (i.markRead as boolean | undefined) ?? true;
+  const completed = (i.completed as boolean | undefined) ?? false;
+  const outcome = i.outcome as string | undefined;
   // Check every address this agent answers to: unique id + base-id aliases
   // ('*' broadcasts match each query — dedupe by message id below).
   const targets = [agentId, ...aliases.filter((al) => al && al !== agentId)];
@@ -222,23 +226,28 @@ async function executeCheck(
     return true;
   });
 
-  // Auto-read: add a read receipt for each message. Await the acks (rather
-  // than fire-and-forget) and return the post-ack snapshots so readByMe in
-  // the response reflects the receipt that "check" just added.
-  const acked = await Promise.all(
-    messages.map(async (m) => {
-      const updated = await mb
-        .ack({ messageId: m.id, readerId: agentId, read: true })
-        .catch(() => null);
-      return updated ?? m;
-    }),
-  );
+  // Auto-read: add read receipts for each message by default. Use the batch
+  // path so catch-up checks perform one locked rewrite instead of N rewrites.
+  // Return the post-ack snapshots so readByMe/completed reflect this call.
+  const acked = markRead || completed
+    ? await mb
+        .ackMany({
+          acks: messages.map((m) => ({
+            messageId: m.id,
+            readerId: agentId,
+            read: markRead,
+            completed,
+            outcome: completed ? outcome : undefined,
+          })),
+        })
+        .catch(() => messages)
+    : messages;
 
   return {
     ok: true,
     count: acked.length,
     messages: acked.map((m) => formatMessage(m, agentId)),
-    summary: acked.length === 0 ? 'No unread messages.' : `${acked.length} unread message(s).`,
+    summary: acked.length === 0 ? 'No unread messages.' : `${acked.length} unread message(s)${markRead ? ' (marked read)' : ''}${completed ? ' (completed)' : ''}.`,
   };
 }
 

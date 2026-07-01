@@ -39,6 +39,7 @@ export interface MailboxMessagesPayload {
   limit?: number;
   agentId?: string;
   unreadOnly?: boolean;
+  incompleteOnly?: boolean;
 }
 
 export function validateMailboxMessagesPayload(
@@ -51,6 +52,7 @@ export function validateMailboxMessagesPayload(
   const limit = payload['limit'];
   const agentId = payload['agentId'];
   const unreadOnly = payload['unreadOnly'];
+  const incompleteOnly = payload['incompleteOnly'];
   if (limit !== undefined && (typeof limit !== 'number' || !Number.isFinite(limit) || limit < 1)) {
     return {
       ok: false,
@@ -69,7 +71,13 @@ export function validateMailboxMessagesPayload(
       message: 'mailbox.messages payload.unreadOnly must be a boolean when provided',
     };
   }
-  return { ok: true, value: { limit, agentId, unreadOnly } };
+  if (incompleteOnly !== undefined && typeof incompleteOnly !== 'boolean') {
+    return {
+      ok: false,
+      message: 'mailbox.messages payload.incompleteOnly must be a boolean when provided',
+    };
+  }
+  return { ok: true, value: { limit, agentId, unreadOnly, incompleteOnly } };
 }
 
 export interface MailboxAgentsPayload {

@@ -65,7 +65,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   // F-key panels (shown as numbered options under /f)
   { name: '/f', category: 'App', description: 'Open F-key panels (F1–F12). Type /f for numbered options.' },
   // Hidden aliases — not shown in the main picker but dispatchable directly
-  { name: '/f1', category: 'App', description: 'Project switcher', hidden: true },
+  { name: '/f1', category: 'App', description: 'Session panel', hidden: true },
   { name: '/f2', category: 'App', description: 'Fleet orchestration monitor', hidden: true },
   { name: '/f3', category: 'App', description: 'Agents live monitor', hidden: true },
   { name: '/f4', category: 'App', description: 'Worktree monitor', hidden: true },

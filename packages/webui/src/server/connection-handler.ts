@@ -24,10 +24,8 @@ import type { SpecsWebSocketHandler } from './specs-ws-handler.js';
 import type { TerminalWebSocketHandler } from './terminal-ws-handler.js';
 import type { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
 import type { ConnectedClient, WSClientMessage } from './types.js';
+import { resolveAllPendingConfirms, type PendingConfirm } from './pending-confirms.js';
 import { send } from './ws-utils.js';
-
-/** Decision type persisted for a pending tool.confirm_needed prompt. */
-type ConfirmDecision = 'yes' | 'no' | 'always' | 'deny';
 
 /** The session.start payload enriched with optional F5-replay fields. */
 type SessionStartEnriched = Record<string, unknown>;
@@ -44,7 +42,7 @@ export interface ConnectionHandlerOptions {
   /** Live WS clients map (shared with the dispatcher + broadcaster). */
   clients: Map<WebSocket, ConnectedClient>;
   /** Pending permission confirmations — drained to 'no' on disconnect. */
-  pendingConfirms: Map<string, (decision: ConfirmDecision) => void>;
+  pendingConfirms: Map<string, PendingConfirm>;
   /** Per-feature WS handlers that register each new client for their feeds. */
   autoPhaseHandler: AutoPhaseWebSocketHandler;
   specsHandler: SpecsWebSocketHandler;
@@ -231,12 +229,7 @@ export function createConnectionHandler(
       // If the client disconnects while a permission prompt is pending,
       // resolve all pending confirms with 'no' so the agent loop doesn't
       // hang forever waiting for a response that will never come.
-      if (opts.pendingConfirms.size > 0) {
-        for (const [, resolve] of opts.pendingConfirms) {
-          resolve('no');
-        }
-        opts.pendingConfirms.clear();
-      }
+      resolveAllPendingConfirms(opts.pendingConfirms, 'no');
     });
 
     ws.on('error', (err) => {

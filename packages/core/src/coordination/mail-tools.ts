@@ -151,11 +151,12 @@ export function makeMailInboxTool(opts: MailToolsOptions = {}): Tool {
       'addressed to you directly, to your base name (e.g. "leader"), and broadcasts ("*"). ' +
       'Urgent steer/btw mail is already injected automatically — use this to catch up on ' +
       'notes, questions, handoffs, results, and review requests (type="review" — passive ' +
-      'asks where no reply is required). Best called after a long stretch of tool work.',
-    usageHint: 'mail_inbox  (optionally: limit=10, markRead=false to peek)',
+      'asks where no reply is required). Best called after a long stretch of tool work. ' +
+      'Set completed=true to finish every returned message in the same call.',
+    usageHint: 'mail_inbox  (optionally: limit=10, markRead=false to peek, completed=true outcome="handled")',
     category: 'Coordination',
     permission: 'auto',
-    mutating: false,
+    mutating: true,
     capabilities: [ToolCapabilities.COORDINATION_MAIL],
     inputSchema: {
       type: 'object',
@@ -165,12 +166,22 @@ export function makeMailInboxTool(opts: MailToolsOptions = {}): Tool {
           type: 'boolean',
           description: 'Add a read receipt for each returned message (default true).',
         },
+        completed: {
+          type: 'boolean',
+          description: 'Also mark each returned message completed (default false).',
+        },
+        outcome: {
+          type: 'string',
+          description: 'Completion outcome to store when completed=true.',
+        },
       },
     },
     async execute(input: unknown, ctx: Context) {
       const i = (input ?? {}) as Record<string, unknown>;
       const limit = (i.limit as number | undefined) ?? 20;
       const markRead = (i.markRead as boolean | undefined) ?? true;
+      const completed = (i.completed as boolean | undefined) ?? false;
+      const outcome = i.outcome as string | undefined;
       const mb = resolveMailbox(ctx);
       const identity = await register(mb, ctx);
 
@@ -193,12 +204,18 @@ export function makeMailInboxTool(opts: MailToolsOptions = {}): Tool {
         })
         .slice(0, limit);
 
-      if (markRead) {
-        await Promise.all(
-          messages.map((m) =>
-            mb.ack({ messageId: m.id, readerId: identity.callerId, read: true }).catch(() => null),
-          ),
-        );
+      if (markRead || completed) {
+        await mb
+          .ackMany({
+            acks: messages.map((m) => ({
+              messageId: m.id,
+              readerId: identity.callerId,
+              read: markRead,
+              completed,
+              outcome: completed ? outcome : undefined,
+            })),
+          })
+          .catch(() => null);
       }
 
       return {
@@ -218,7 +235,7 @@ export function makeMailInboxTool(opts: MailToolsOptions = {}): Tool {
         summary:
           messages.length === 0
             ? 'Inbox empty.'
-            : `${messages.length} unread message(s)${markRead ? ' (marked read)' : ''}. Reply with mail_send using the sender id.`,
+            : `${messages.length} unread message(s)${markRead ? ' (marked read)' : ''}${completed ? ' (completed)' : ''}. Reply with mail_send using the sender id.`,
       };
     },
   };

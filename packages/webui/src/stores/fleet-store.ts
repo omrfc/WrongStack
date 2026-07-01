@@ -1,11 +1,15 @@
 import { create } from 'zustand';
-import type { FleetTimelineEvent, SubagentView, SubagentEvent } from './types.js';
+import type { AgentTranscriptEntry, AgentTranscriptKind, FleetTimelineEvent, SubagentView, SubagentEvent } from './types.js';
 import { stripNextStepsBlock } from '../components/NextStepsBar.js';
 
 // ── Fleet store (live subagent roster; not persisted) ───────────────────────
 
 const SPARKLINE_BINS = 12;
 const MAX_TIMELINE = 20;
+const MAX_AGENT_TIMELINE = 500;
+const MAX_AGENT_TRANSCRIPT = 1000;
+
+export const EMPTY_AGENT_TRANSCRIPT: AgentTranscriptEntry[] = [];
 
 interface FleetState {
   agents: Map<string, SubagentView>;
@@ -20,22 +24,16 @@ interface FleetState {
   /** Last 20 fleet events for the Fleet Monitor timeline. */
   eventTimeline: FleetTimelineEvent[];
   /** Agent conversation timeline entries (agent.timeline.message + agent.status_changed). */
-  agentTimeline: Array<{
-    id: string;
-    subagentId: string;
-    agentName: string;
-    content: string;
-    kind: string;
-    iteration: number;
-    ts: string;
-    toolName?: string;
-    status?: string;
-  }>;
+  agentTimeline: AgentTranscriptEntry[];
+  /** Per-agent ordered chat transcripts (oldest first). */
+  agentTranscripts: Map<string, AgentTranscriptEntry[]>;
   applyEvent: (e: SubagentEvent) => void;
-  pushAgentTimelineEntry: (entry: Omit<FleetState['agentTimeline'][number], 'id'>) => void;
+  pushAgentTimelineEntry: (entry: Omit<AgentTranscriptEntry, 'id'>) => void;
   clear: () => void;
   /** Return all agents belonging to a session. Used for project-scoped filtering. */
   getAgentsBySession: (sessionId: string) => SubagentView[];
+  /** Return one agent's full ordered transcript. */
+  getAgentTranscript: (subagentId: string) => AgentTranscriptEntry[];
 }
 
 function blankAgent(id: string, name?: string, sessionId?: string): SubagentView {
@@ -69,6 +67,43 @@ function pushTimeline(
   return [event, ...timeline].slice(0, MAX_TIMELINE);
 }
 
+function normalizeTranscriptKind(kind: string): AgentTranscriptKind {
+  switch (kind) {
+    case 'text':
+    case 'thinking':
+    case 'tool_use':
+    case 'tool_result':
+    case 'error':
+    case 'status':
+    case 'system':
+      return kind;
+    default:
+      return 'status';
+  }
+}
+
+function canMergeTranscriptEntry(a: AgentTranscriptEntry, b: AgentTranscriptEntry): boolean {
+  if (a.subagentId !== b.subagentId) return false;
+  if (a.kind !== b.kind) return false;
+  if (a.iteration !== b.iteration) return false;
+  if (a.toolName !== b.toolName) return false;
+  return a.kind === 'text' || a.kind === 'thinking';
+}
+
+function appendTranscriptEntry(
+  entries: AgentTranscriptEntry[],
+  entry: AgentTranscriptEntry,
+): AgentTranscriptEntry[] {
+  const last = entries[entries.length - 1];
+  if (last && canMergeTranscriptEntry(last, entry)) {
+    return [
+      ...entries.slice(0, -1),
+      { ...last, content: `${last.content}${entry.content}`, ts: entry.ts },
+    ].slice(-MAX_AGENT_TRANSCRIPT);
+  }
+  return [...entries, entry].slice(-MAX_AGENT_TRANSCRIPT);
+}
+
 /** Update sparkline bins for an agent — bump bin 0 and shift left.
  *  The bins array has index 0 as the most recent bucket.
  *  Each event bumps bin 0, then the array is truncated to SPARKLINE_BINS. */
@@ -90,13 +125,24 @@ export const useFleetStore = create<FleetState>()((set, get) => ({
   fleetConcurrencyMax: 4,
   eventTimeline: [],
   agentTimeline: [],
+  agentTranscripts: new Map(),
   pushAgentTimelineEntry: (entry) =>
-    set((state) => ({
-      agentTimeline: [
-        { id: `agent_tl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, ...entry },
-        ...state.agentTimeline,
-      ].slice(0, 200),
-    })),
+    set((state) => {
+      const fullEntry: AgentTranscriptEntry = {
+        id: `agent_tl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        ...entry,
+        kind: normalizeTranscriptKind(entry.kind),
+      };
+      const agentTranscripts = new Map(state.agentTranscripts);
+      agentTranscripts.set(
+        fullEntry.subagentId,
+        appendTranscriptEntry(agentTranscripts.get(fullEntry.subagentId) ?? [], fullEntry),
+      );
+      return {
+        agentTimeline: [fullEntry, ...state.agentTimeline].slice(0, MAX_AGENT_TIMELINE),
+        agentTranscripts,
+      };
+    }),
   clear: () =>
     set({
       agents: new Map(),
@@ -106,6 +152,7 @@ export const useFleetStore = create<FleetState>()((set, get) => ({
       fleetConcurrency: 0,
       eventTimeline: [],
       agentTimeline: [],
+      agentTranscripts: new Map(),
     }),
   getAgentsBySession: (sessionId) => {
     const result: SubagentView[] = [];
@@ -114,9 +161,11 @@ export const useFleetStore = create<FleetState>()((set, get) => ({
     }
     return result;
   },
+  getAgentTranscript: (subagentId) => get().agentTranscripts.get(subagentId) ?? EMPTY_AGENT_TRANSCRIPT,
   applyEvent: (e) =>
     set((state) => {
       const agents = new Map(state.agents);
+      const agentTranscripts = new Map(state.agentTranscripts);
       let timeline = state.eventTimeline;
       let leaderId = state.leaderId;
       let fleetTokensIn = state.fleetTokensIn;
@@ -125,10 +174,22 @@ export const useFleetStore = create<FleetState>()((set, get) => ({
       // session_stopped carries a sessionId instead of subagentId —
       // remove ALL agents belonging to that session.
       if (e.kind === 'session_stopped' && e.sessionId) {
+        const removedIds = new Set<string>();
         for (const [id, agent] of agents) {
-          if (agent.sessionId === e.sessionId) agents.delete(id);
+          if (agent.sessionId === e.sessionId) {
+            agents.delete(id);
+            agentTranscripts.delete(id);
+            removedIds.add(id);
+          }
         }
-        return { agents, leaderId: undefined, fleetTokensIn: 0, fleetTokensOut: 0 };
+        return {
+          agents,
+          agentTranscripts,
+          agentTimeline: state.agentTimeline.filter((entry) => !removedIds.has(entry.subagentId)),
+          leaderId: undefined,
+          fleetTokensIn: 0,
+          fleetTokensOut: 0,
+        };
       }
 
       // leader_updated: mark the new leader and demote the old one.

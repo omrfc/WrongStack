@@ -27,26 +27,74 @@ const BASE_PAYLOAD = {
 
 describe('session.start resume transition', () => {
   beforeEach(() => {
+    history.pushState(null, '', '/');
+    delete (window as unknown as { wrongstackDesktopHost?: unknown }).wrongstackDesktopHost;
     useChatStore.getState().clearMessages();
     useChatStore.getState().setLoading(false);
     useSessionStore.setState({ session: null, todos: [] });
-    useUIStore.getState().setCurrentView('chat');
+    useUIStore.setState({
+      activeActivity: 'chat',
+      currentView: 'chat',
+      sidebarOpen: false,
+      dockSection: null,
+      fleetMonitorOpen: false,
+      agentsMonitorOpen: false,
+      processMonitorOpen: false,
+      queuePanelOpen: false,
+      inspectorOpen: false,
+      terminalOpen: false,
+      paletteOpen: false,
+      searchOpen: false,
+      searchQuery: '',
+      searchActiveMessageId: null,
+      modelSwitcherOpen: false,
+      promptLibraryOpen: false,
+    });
   });
 
   it('switches to the chat view when a resume replay arrives', () => {
-    useUIStore.getState().setCurrentView('sessions');
+    useUIStore.setState({ currentView: 'sessions', activeActivity: 'history', sidebarOpen: true });
     fireSessionStart({
       ...BASE_PAYLOAD,
       reset: true,
       replayMessages: [{ role: 'user', content: 'hello', ts: '2026-06-11T10:00:00Z' }],
     });
-    expect(useUIStore.getState().currentView).toBe('chat');
+    expect(useUIStore.getState()).toMatchObject({
+      currentView: 'chat',
+      activeActivity: 'chat',
+      sidebarOpen: true,
+    });
   });
 
   it('does not yank the view on a plain session.start (connect/new)', () => {
     useUIStore.getState().setCurrentView('sessions');
     fireSessionStart({ ...BASE_PAYLOAD, reset: true });
     expect(useUIStore.getState().currentView).toBe('sessions');
+  });
+
+  it('returns desktop shell sessions to the chat home on a plain session.start', () => {
+    history.pushState(null, '', '/?shell=desktop');
+    useUIStore.setState({
+      currentView: 'officemap',
+      activeActivity: 'officemap',
+      sidebarOpen: true,
+      dockSection: 'work',
+      terminalOpen: true,
+      searchOpen: true,
+      paletteOpen: true,
+    });
+
+    fireSessionStart({ ...BASE_PAYLOAD, reset: true });
+
+    expect(useUIStore.getState()).toMatchObject({
+      currentView: 'chat',
+      activeActivity: 'chat',
+      sidebarOpen: false,
+      dockSection: null,
+      terminalOpen: false,
+      searchOpen: false,
+      paletteOpen: false,
+    });
   });
 
   it('hydrates replayed messages into the chat store', () => {

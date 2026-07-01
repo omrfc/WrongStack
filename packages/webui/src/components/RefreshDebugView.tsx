@@ -109,7 +109,7 @@ export function RefreshDebugView() {
       : false;
 
   return (
-    <div className="flex-1 overflow-y-auto bg-background p-6">
+    <div className="h-full min-h-0 min-w-0 flex-1 overflow-y-auto bg-background p-6">
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="flex items-start justify-between">
           <div>

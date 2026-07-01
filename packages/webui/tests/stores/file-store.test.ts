@@ -61,6 +61,24 @@ describe('openFile', () => {
     expect(state.activeFilePath).toBe('/project/src/index.ts');
   });
 
+  it('refreshes an already-open file with content from disk', () => {
+    useFileStore.getState().openFile('/project/src/index.ts', 'stale');
+    useFileStore.getState().updateContent('/project/src/index.ts', 'unsaved edit');
+
+    useFileStore.getState().openFile('/project/src/other.ts', 'other');
+    useFileStore.getState().openFile('/project/src/index.ts', 'fresh from disk');
+
+    const state = useFileStore.getState();
+    expect(state.openFiles).toHaveLength(2);
+    expect(state.activeFilePath).toBe('/project/src/index.ts');
+    expect(state.openFiles.find((file) => file.path === '/project/src/index.ts')).toEqual({
+      path: '/project/src/index.ts',
+      content: 'fresh from disk',
+      dirty: false,
+      savedContent: 'fresh from disk',
+    });
+  });
+
   it('adds second file tab alongside first', () => {
     useFileStore.getState().openFile('/project/src/a.ts', 'a');
     useFileStore.getState().openFile('/project/src/b.ts', 'b');

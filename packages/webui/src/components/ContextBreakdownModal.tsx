@@ -94,8 +94,8 @@ export function ContextBreakdownModal({ open, onClose }: ContextBreakdownModalPr
       : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/40 backdrop-blur-sm">
-      <div className="w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-xl border bg-card shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10dvh] bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-2xl max-h-[80dvh] overflow-y-auto rounded-xl border bg-card shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b sticky top-0 bg-card z-10">
           <h3 className="text-sm font-semibold flex items-center gap-2">

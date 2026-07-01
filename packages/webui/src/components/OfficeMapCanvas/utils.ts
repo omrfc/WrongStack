@@ -24,6 +24,7 @@ export interface OfficeNodeData extends Record<string, unknown> {
   agentsActive?: number;
   agentsTotal?: number;
   sessionId?: string;
+  serverId?: string;
   pid?: number;
   branch?: string;
   workingDir?: string;

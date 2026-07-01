@@ -1,6 +1,11 @@
 import type { WebSocket } from 'ws';
 import { describe, expect, it, vi } from 'vitest';
+import type { ResolvedProvider } from '@wrongstack/core';
 import { handleProviderRoute, type ProviderRouteHandlers } from '../../src/server/provider-routes.js';
+import {
+  resolveProviderCatalogForModels,
+  resolveProviderModelMetadata,
+} from '../../src/server/model-catalog.js';
 
 function mockWs() {
   return {
@@ -11,6 +16,16 @@ function mockWs() {
 
 function sentMessages(ws: ReturnType<typeof mockWs>) {
   return ws.send.mock.calls.map(([raw]) => JSON.parse(String(raw)) as { type: string; payload: { success?: boolean; message?: string } });
+}
+
+function provider(id: string, modelIds: string[]): ResolvedProvider {
+  return {
+    id,
+    name: id,
+    family: 'openai-compatible',
+    envVars: [],
+    models: modelIds.map((modelId) => ({ id: modelId, name: modelId })),
+  };
 }
 
 function routes(): ProviderRouteHandlers {
@@ -93,5 +108,104 @@ describe('handleProviderRoute malformed payload characterization', () => {
 
     expect(deps.providerHandlers.handleProviderRemove).toHaveBeenCalledWith(ws, 'custom');
     expect(ws.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveProviderCatalogForModels', () => {
+  it('prefers provider-specific catalogs over generic wire type catalogs', async () => {
+    const getProvider = vi.fn(async (id: string) => {
+      if (id === 'omniroute') return provider('omniroute', ['omni/large', 'omni/small']);
+      if (id === 'openai-compatible') return provider('openai-compatible', ['generic']);
+      return undefined;
+    });
+
+    const resolved = await resolveProviderCatalogForModels(
+      { getProvider },
+      'omniroute',
+      { type: 'openai-compatible' },
+    );
+
+    expect(resolved?.id).toBe('omniroute');
+    expect(resolved?.models.map((m) => m.id)).toEqual(['omni/large', 'omni/small']);
+    expect(getProvider).toHaveBeenCalledTimes(1);
+    expect(getProvider).toHaveBeenCalledWith('omniroute');
+  });
+
+  it('falls back to the provider type when no provider-specific catalog exists', async () => {
+    const getProvider = vi.fn(async (id: string) => {
+      if (id === 'openai-compatible') return provider('openai-compatible', ['generic']);
+      return undefined;
+    });
+
+    const resolved = await resolveProviderCatalogForModels(
+      { getProvider },
+      'custom-gateway',
+      { type: 'openai-compatible' },
+    );
+
+    expect(resolved?.id).toBe('openai-compatible');
+    expect(resolved?.models.map((m) => m.id)).toEqual(['generic']);
+    expect(getProvider).toHaveBeenNthCalledWith(1, 'custom-gateway');
+    expect(getProvider).toHaveBeenNthCalledWith(2, 'openai-compatible');
+  });
+});
+
+describe('resolveProviderModelMetadata', () => {
+  it('prefers provider-specific discovered metadata for context windows', async () => {
+    const getModel = vi.fn(async (providerId: string, modelId: string) => {
+      if (providerId === 'omniroute' && modelId === 'omni/large') {
+        return {
+          providerId,
+          modelId,
+          capabilities: { tools: true, vision: false, reasoning: true, maxContext: 262144 },
+          cost: { input: 1, output: 2 },
+        };
+      }
+      if (providerId === 'openai-compatible' && modelId === 'omni/large') {
+        return {
+          providerId,
+          modelId,
+          capabilities: { tools: false, vision: false, reasoning: false, maxContext: 4096 },
+        };
+      }
+      return undefined;
+    });
+
+    const resolved = await resolveProviderModelMetadata(
+      { getModel },
+      'omniroute',
+      'omni/large',
+      { type: 'openai-compatible' },
+    );
+
+    expect(resolved?.providerId).toBe('omniroute');
+    expect(resolved?.capabilities.maxContext).toBe(262144);
+    expect(getModel).toHaveBeenCalledTimes(1);
+    expect(getModel).toHaveBeenCalledWith('omniroute', 'omni/large');
+  });
+
+  it('falls back to type metadata when the saved provider has no model hit', async () => {
+    const getModel = vi.fn(async (providerId: string, modelId: string) => {
+      if (providerId === 'openai-compatible' && modelId === 'generic') {
+        return {
+          providerId,
+          modelId,
+          capabilities: { tools: false, vision: false, reasoning: false, maxContext: 8192 },
+        };
+      }
+      return undefined;
+    });
+
+    const resolved = await resolveProviderModelMetadata(
+      { getModel },
+      'custom-gateway',
+      'generic',
+      { type: 'openai-compatible' },
+    );
+
+    expect(resolved?.providerId).toBe('openai-compatible');
+    expect(resolved?.capabilities.maxContext).toBe(8192);
+    expect(getModel).toHaveBeenNthCalledWith(1, 'custom-gateway', 'generic');
+    expect(getModel).toHaveBeenNthCalledWith(2, 'openai-compatible', 'generic');
   });
 });

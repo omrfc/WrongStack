@@ -291,3 +291,52 @@ describe('SkillInstaller.update', () => {
     expect(res.errors[0].error).toContain('network down');
   });
 });
+
+// ── importFromDir ────────────────────────────────────────────────────────────
+
+describe('SkillInstaller.importFromDir', () => {
+  it('copies valid skills from a local directory, skipping invalid names', async () => {
+    const src = path.join(tmpRoot, 'claude-skills');
+    await fs.mkdir(path.join(src, 'valid-skill', 'references'), { recursive: true });
+    await fs.writeFile(
+      path.join(src, 'valid-skill', 'SKILL.md'),
+      '---\nname: valid-skill\ndescription: d\n---\nimported body',
+    );
+    await fs.writeFile(path.join(src, 'valid-skill', 'references', 'REF.md'), '# ref');
+    // Invalid name (uppercase) → skipped
+    await fs.mkdir(path.join(src, 'BadName'), { recursive: true });
+    await fs.writeFile(path.join(src, 'BadName', 'SKILL.md'), '---\nname: BadName\ndescription: d\n---\nbody');
+    // Non-skill subdir (no SKILL.md) → skipped
+    await fs.mkdir(path.join(src, 'not-a-skill'), { recursive: true });
+
+    const inst = mkInstaller();
+    const results = await inst.importFromDir(src);
+    expect(results.map((r) => r.name)).toEqual(['valid-skill']);
+
+    const dest = path.join(projectSkillsDir, 'valid-skill', 'SKILL.md');
+    expect(await fs.readFile(dest, 'utf8')).toContain('imported body');
+    await expect(
+      fs.access(path.join(projectSkillsDir, 'valid-skill', 'references', 'REF.md')),
+    ).resolves.toBeUndefined();
+    const installed = await inst.listInstalled();
+    expect(installed.find((e) => e.name === 'valid-skill')?.scope).toBe('project');
+  });
+
+  it('targets the global dir when --global is requested', async () => {
+    const src = path.join(tmpRoot, 'src2');
+    await fs.mkdir(path.join(src, 'g-skill'), { recursive: true });
+    await fs.writeFile(path.join(src, 'g-skill', 'SKILL.md'), '---\nname: g-skill\ndescription: d\n---\nbody');
+
+    const inst = mkInstaller();
+    await inst.importFromDir(src, { global: true });
+    await expect(fs.access(path.join(globalSkillsDir, 'g-skill', 'SKILL.md'))).resolves.toBeUndefined();
+    expect((await inst.listInstalled()).find((e) => e.name === 'g-skill')?.scope).toBe('user');
+  });
+
+  it('throws when the source directory does not exist', async () => {
+    const inst = mkInstaller();
+    await expect(inst.importFromDir(path.join(tmpRoot, 'nope'))).rejects.toThrow(
+      /not found or not readable/,
+    );
+  });
+});

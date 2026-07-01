@@ -47,7 +47,7 @@ export function TaskBoard({
   };
 
   return (
-    <div className={cn('flex flex-col h-full bg-background', className)}>
+    <div className={cn('flex h-full min-h-0 min-w-0 flex-col bg-background', className)}>
       {/* Header */}
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between">
@@ -85,7 +85,7 @@ export function TaskBoard({
       </div>
 
       {/* Task Groups */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 space-y-6">
         {statusOrder.map((groupKey) => {
           const groupTasks = grouped[groupKey];
           if (groupTasks.length === 0) return null;

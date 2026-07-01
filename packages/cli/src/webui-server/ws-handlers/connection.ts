@@ -25,6 +25,36 @@ import { toErrorMessage } from '@wrongstack/core/utils';
 /** The tool-confirmation decision the client can send back. */
 export type ConfirmDecision = 'yes' | 'no' | 'always' | 'deny';
 
+export interface PendingConfirm {
+  resolve: (decision: ConfirmDecision) => void;
+  decisionSource?: string | undefined;
+  riskTier?: 'safe' | 'standard' | 'destructive' | undefined;
+}
+
+export function isDestructivePendingConfirm(confirm: PendingConfirm): boolean {
+  return confirm.riskTier === 'destructive' || confirm.decisionSource === 'yolo_destructive';
+}
+
+export function resolveYoloEligiblePendingConfirms(
+  pendingConfirms: Map<string, PendingConfirm>,
+): void {
+  for (const [id, confirm] of pendingConfirms) {
+    if (isDestructivePendingConfirm(confirm)) continue;
+    pendingConfirms.delete(id);
+    confirm.resolve('yes');
+  }
+}
+
+export function resolveAllPendingConfirms(
+  pendingConfirms: Map<string, PendingConfirm>,
+  decision: ConfirmDecision,
+): void {
+  for (const [id, confirm] of pendingConfirms) {
+    pendingConfirms.delete(id);
+    confirm.resolve(decision);
+  }
+}
+
 export interface ConnectionOptions {
   agent: Agent;
 }
@@ -34,7 +64,7 @@ export interface ConnectionContext extends WsCommon {
   /** One in-flight run controller per socket; owned by runWebUI. */
   abortControllers: Map<WebSocket, AbortController>;
   /** Pending tool-permission resolvers keyed by confirm id; owned by runWebUI. */
-  pendingConfirms: Map<string, (decision: ConfirmDecision) => void>;
+  pendingConfirms: Map<string, PendingConfirm>;
 }
 
 function currentSessionId(ctx: ConnectionContext): string {
@@ -167,9 +197,9 @@ export function handleToolConfirmResult(
 ): void {
   const liveSessionId = currentSessionId(ctx);
   if (requestedSessionId && liveSessionId && requestedSessionId !== liveSessionId) return;
-  const resolve = ctx.pendingConfirms.get(id);
-  if (resolve) {
+  const confirm = ctx.pendingConfirms.get(id);
+  if (confirm) {
     ctx.pendingConfirms.delete(id);
-    resolve(decision);
+    confirm.resolve(decision);
   }
 }

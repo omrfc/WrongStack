@@ -17,10 +17,11 @@ function flushRaf() {
 }
 
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileMentionPicker } from '../../src/components/ChatInput/file-mention-picker.js';
 import { QueuedMessages } from '../../src/components/ChatInput/queued-messages.js';
 import type { QueuedItem } from '../../src/stores/chat-store.js';
+import { useFileReferenceStore } from '../../src/stores/file-reference-store.js';
 
 // Helper for test readability — wrap a string in the new queue-item shape.
 // `addedAt` is the index in the source list so tests can keep a stable
@@ -173,6 +174,10 @@ describe('FileMentionPicker', () => {
       ...overrides,
     }) as never as HTMLTextAreaElement;
 
+  beforeEach(() => {
+    useFileReferenceStore.setState({ refs: [] });
+  });
+
   it('renders nothing when atMention is null', () => {
     const { container } = render(
       <FileMentionPicker
@@ -216,7 +221,7 @@ describe('FileMentionPicker', () => {
     expect(setAtMention).toHaveBeenCalledWith(null);
   });
 
-  it('replaces partial @query with picked path and clears atMention', () => {
+  it('removes the @query token, clears atMention, and adds a file ref', () => {
     const setInput = vi.fn();
     const setAtMention = vi.fn();
 
@@ -232,9 +237,14 @@ describe('FileMentionPicker', () => {
 
     fireEvent.click(screen.getByText('Pick src/index.ts'));
 
-    // before = "" (slice 0..0), after = " rest" (slice 0+1+3=4..end)
-    expect(setInput).toHaveBeenCalledWith('@src/index.ts  rest');
+    // before = "" (slice 0..0), after = " rest" (slice 0+1+3=4..end),
+    // collapsed + trimmed → "rest". The `@query` token is removed from the
+    // textarea; the chosen file is added as a reference chip instead.
+    expect(setInput).toHaveBeenCalledWith('rest');
     expect(setAtMention).toHaveBeenCalledWith(null);
+    const refs = useFileReferenceStore.getState().refs;
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toMatchObject({ kind: 'file', path: 'src/index.ts' });
   });
 
   it('restores cursor position and textarea height after pick', () => {

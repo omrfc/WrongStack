@@ -140,14 +140,14 @@ export function BoardView(): React.ReactElement {
 
   if (phases.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
+      <div className="flex h-full min-h-0 min-w-0 items-center justify-center text-muted-foreground">
         <p className="text-sm">No phases yet — start an AutoPhase run to populate the board.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
         <span className="text-xs text-muted-foreground">
@@ -179,7 +179,7 @@ export function BoardView(): React.ReactElement {
 
       {/* Board */}
       {layout === 'phase' ? (
-        <div className="flex flex-1 gap-3 overflow-x-auto p-3">
+        <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-x-auto p-3">
           {phases.map((phase) => {
             const phaseTasks = tasks.filter((t) => t.phaseId === phase.id);
             return (
@@ -187,7 +187,7 @@ export function BoardView(): React.ReactElement {
                 key={phase.id}
                 {...dropZone(`phase:${phase.id}`, () => dropToPhase(phase.id))}
                 className={cn(
-                  'flex w-80 shrink-0 flex-col rounded-lg border bg-muted/30 transition-colors',
+                  'flex min-h-0 w-80 shrink-0 flex-col rounded-lg border bg-muted/30 transition-colors',
                   hoverKey === `phase:${phase.id}` ? 'border-primary/60 bg-primary/5' : 'border-border',
                 )}
               >
@@ -212,7 +212,7 @@ export function BoardView(): React.ReactElement {
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="flex-1 space-y-2 overflow-y-auto p-2">
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
                   {phaseTasks.length === 0 ? (
                     <p className="px-1 py-4 text-center text-[11px] text-muted-foreground">Drop tasks here</p>
                   ) : (
@@ -228,7 +228,7 @@ export function BoardView(): React.ReactElement {
           })}
         </div>
       ) : (
-        <div className="flex-1 overflow-auto p-3">
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto p-3">
           {/* Status column headers */}
           <div className="grid min-w-[900px] gap-2" style={{ gridTemplateColumns: `9rem repeat(${STATUS_COLUMNS.length}, minmax(0, 1fr))` }}>
             <div />

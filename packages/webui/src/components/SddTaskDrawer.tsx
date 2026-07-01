@@ -119,7 +119,7 @@ export function SddTaskDrawer({
         : null;
 
   return (
-    <div className="sdd-rise flex h-full flex-col">
+    <div className="sdd-rise flex h-full min-h-0 min-w-0 flex-col">
       {/* header */}
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <button
@@ -143,7 +143,7 @@ export function SddTaskDrawer({
         </span>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-auto p-3">
+      <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-auto p-3">
         <h3 className="text-sm font-semibold leading-snug text-foreground">{task.title}</h3>
 
         {/* worker */}

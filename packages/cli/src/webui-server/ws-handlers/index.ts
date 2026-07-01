@@ -66,10 +66,13 @@ export {
   type ConfirmDecision,
   type ConnectionContext,
   type ConnectionOptions,
+  type PendingConfirm,
   handleAbort,
   handlePing,
   handleToolConfirmResult,
   handleUserMessage,
+  resolveAllPendingConfirms,
+  resolveYoloEligiblePendingConfirms,
 } from './connection.js';
 export {
   type ContextHandlerContext,

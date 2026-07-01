@@ -118,7 +118,7 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
   );
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-2 border-b bg-card shrink-0">
         <div className="flex items-center gap-2">

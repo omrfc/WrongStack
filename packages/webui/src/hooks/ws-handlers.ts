@@ -1,4 +1,4 @@
-import { type SessionHistoryEntry, useChatStore, useConfigStore, useFleetStore, useHistoryStore, useSessionStore, useSpecsStore, useSddBoardStore, useSddWizardStore, useSideEffectStore } from '@/stores';
+import { type AgentTranscriptKind, type SessionHistoryEntry, useChatStore, useConfigStore, useFleetStore, useHistoryStore, useSessionStore, useSpecsStore, useSddBoardStore, useSddWizardStore, useSideEffectStore } from '@/stores';
 import type { SideEffectEntry } from '@/stores';
 import type { WSServerMessage } from '@/types';
 
@@ -195,8 +195,9 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
     };
     useFleetStore.getState().pushAgentTimelineEntry({
       subagentId: p.subagentId, agentName: p.agentName,
-      content: p.content.slice(0, 200), kind: p.kind,
+      content: p.content, kind: p.kind as AgentTranscriptKind,
       iteration: p.iteration, ts: p.ts, toolName: p.toolName,
+      costUsd: p.costUsd,
     });
   },
   'agent.status_changed': (msg: WSServerMessage) => {
@@ -225,13 +226,13 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
     // Handled directly by ProcessMonitor component via WS client.on()
   },
   'projects.list': (_msg: WSServerMessage) => {
-    // Handled directly by ProjectsPanel component
+    // Legacy server response. Project switching/registering is no longer a WebUI surface.
   },
   'projects.added': (_msg: WSServerMessage) => {
-    // Handled directly by ProjectsPanel component
+    // Legacy server response. Project switching/registering is no longer a WebUI surface.
   },
   'projects.selected': (_msg: WSServerMessage) => {
-    // Handled directly by ProjectsPanel component
+    // Legacy server response. Project switching/registering is no longer a WebUI surface.
   },
   'prompts.search': (_msg: WSServerMessage) => {
     // Reserved for server-side prompt search; the current modal filters its

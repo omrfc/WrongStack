@@ -82,7 +82,7 @@ export function PhasePanel({
   className,
 }: PhasePanelProps): React.ReactElement {
   return (
-    <div className={cn('flex flex-col h-full border-r border-border bg-card', className)}>
+    <div className={cn('flex h-full min-h-0 min-w-0 flex-col border-r border-border bg-card', className)}>
       {/* Header */}
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between mb-3">
@@ -118,7 +118,7 @@ export function PhasePanel({
       </div>
 
       {/* Phase List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 space-y-2">
         {phases.map((phase) => {
           const status = STATUS_CONFIG[phase.status];
           const isActive = phase.id === activePhaseId;

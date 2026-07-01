@@ -24,6 +24,7 @@ import {
 import { useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '@/lib/utils';
+import { showPanel } from '@/lib/view-navigation';
 import { useUIStore } from '@/stores/ui-store';
 import { markdownComponents } from './MessageBubble/utils';
 
@@ -121,7 +122,6 @@ function ReadByList({ readBy }: { readBy: Record<string, string> }) {
 export function MailboxDetailView({ className }: { className?: string }) {
   const msg = useUIStore((s) => s.selectedMailMessage);
   const setSelectedMailMessage = useUIStore((s) => s.setSelectedMailMessage);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
 
   // Clear selectedMailMessage whenever the detail view unmounts (user navigates
   // away via panel switch, keyboard shortcut, command palette, etc.).
@@ -133,7 +133,7 @@ export function MailboxDetailView({ className }: { className?: string }) {
 
   function handleClose() {
     setSelectedMailMessage(null);
-    setCurrentView('chat');
+    showPanel('chat');
   }
 
   if (!msg) return <EmptyState />;
@@ -143,7 +143,7 @@ export function MailboxDetailView({ className }: { className?: string }) {
   const priorityClass = PRIORITY_COLORS[msg.priority] ?? PRIORITY_COLORS.normal;
 
   return (
-    <div className={cn('flex-1 flex flex-col overflow-hidden', className)}>
+    <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden', className)}>
       {/* ── Header bar ── */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card/40 shrink-0">
         <button
@@ -192,7 +192,7 @@ export function MailboxDetailView({ className }: { className?: string }) {
       </div>
 
       {/* ── Body ── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         <div className="px-4 py-4">
           <div className="markdown-content prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed">
             <ReactMarkdown components={markdownComponents}>{msg.body}</ReactMarkdown>

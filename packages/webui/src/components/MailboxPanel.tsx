@@ -1,5 +1,6 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
+import { showPanel } from '@/lib/view-navigation';
 import { useMailboxStore, useUIStore } from '@/stores';
 import {
   CheckCircle2,
@@ -72,22 +73,17 @@ export function MailboxPanel({ className }: { className?: string }) {
 
   const selectedMailMessage = useUIStore((s) => s.selectedMailMessage);
   const setSelectedMailMessage = useUIStore((s) => s.setSelectedMailMessage);
-  const selectActivity = useUIStore((s) => s.selectActivity);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
-  const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
 
   function handleMessageClick(m: typeof messages[number]) {
     // Re-clicking the same message deselects and goes back to chat
     if (selectedMailMessage?.id === m.id) {
       setSelectedMailMessage(null);
-      setCurrentView('chat');
+      showPanel('chat');
       return;
     }
     setSelectedMailMessage(m);
     // Ensure the mailbox panel is open and the main area shows the detail
-    setSidebarOpen(true);
-    selectActivity('mailbox');
-    setCurrentView('mailbox');
+    showPanel('mailbox');
   }
 
   const unreadCount = messages.filter((m) => !m.completed).length;

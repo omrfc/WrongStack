@@ -172,7 +172,10 @@ export async function persistPrefsToConfig(
       setAutonomy('autoProceedDelayMs', payload['autonomyDelayMs']);
     if (typeof payload['autoProceedMaxIterations'] === 'number')
       setAutonomy('autoProceedMaxIterations', payload['autoProceedMaxIterations']);
-    if (typeof payload['yolo'] === 'boolean') setAutonomy('yolo', payload['yolo']);
+    if (typeof payload['yolo'] === 'boolean') {
+      setAutonomy('yolo', payload['yolo']);
+      decrypted.yolo = payload['yolo'];
+    }
     if (typeof payload['chime'] === 'boolean') setAutonomy('chime', payload['chime']);
     if (typeof payload['confirmExit'] === 'boolean')
       setAutonomy('confirmExit', payload['confirmExit']);

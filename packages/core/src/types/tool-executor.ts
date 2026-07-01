@@ -103,6 +103,8 @@ export interface ToolConfirmPendingResult {
   toolName: string;
   input: unknown;
   suggestedPattern: string;
+  decisionSource?: import('./permission.js').PermissionDecision['source'] | undefined;
+  riskTier?: import('./tool.js').RiskTier | undefined;
 }
 
 export type ToolExecutorStrategy = 'parallel' | 'sequential' | 'smart';

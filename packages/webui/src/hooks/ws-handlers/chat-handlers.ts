@@ -6,6 +6,7 @@ import { ensureNotificationPermission, notifyIfHidden } from '@/lib/notify';
 import { getWSClient } from '@/lib/ws-client';
 import { streamCoalescer } from '@/lib/stream-coalescer';
 import { useChatStore, useConfigStore, useSessionStore, useUIStore } from '@/stores';
+import { useLocalPrefs } from '@/stores/local-prefs';
 import { useVizStore, wsToVizEvent } from '@/stores/viz-store';
 import type { WSServerMessage } from '@/types';
 
@@ -139,8 +140,31 @@ export function handleToolExecuted(msg: WSServerMessage) {
 
 export function handleToolConfirmNeeded(msg: WSServerMessage) {
   if (!isActiveSessionMessage(msg)) return;
-  const payload = msg.payload as { id: string; toolName: string; input: unknown; suggestedPattern: string };
-  useUIStore.getState().showConfirm({ id: payload.id, toolName: payload.toolName, input: payload.input, suggestedPattern: payload.suggestedPattern });
+  const payload = msg.payload as {
+    id: string;
+    toolName: string;
+    input: unknown;
+    suggestedPattern: string;
+    decisionSource?: string | undefined;
+    riskTier?: 'safe' | 'standard' | 'destructive' | undefined;
+  };
+  if (
+    useLocalPrefs.getState().yolo === true &&
+    payload.riskTier !== 'destructive' &&
+    payload.decisionSource !== 'yolo_destructive'
+  ) {
+    getWSClient(useConfigStore.getState().wsUrl).sendConfirm(payload.id, 'yes');
+    useUIStore.getState().hideConfirm();
+    return;
+  }
+  useUIStore.getState().showConfirm({
+    id: payload.id,
+    toolName: payload.toolName,
+    input: payload.input,
+    suggestedPattern: payload.suggestedPattern,
+    decisionSource: payload.decisionSource,
+    riskTier: payload.riskTier,
+  });
   try { playPermissionChime(); } catch { /* audio policy */ }
   void ensureNotificationPermission();
   const label = useSessionStore.getState().projectName || 'Agent';

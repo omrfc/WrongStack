@@ -317,7 +317,7 @@ function FleetTabContent({
   onSelectAgent: (agent: SubagentView) => void;
 }) {
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Summary strip */}
       <div className="flex items-center gap-3 px-3 py-1.5 border-b text-[11px] text-muted-foreground shrink-0">
         <span className="flex items-center gap-1">
@@ -343,7 +343,7 @@ function FleetTabContent({
           <p className="text-[11px] mt-0.5">Agents appear here when the fleet is active.</p>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto p-1.5">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-1.5">
           {fleetList.map((agent) => (
             <FleetAgentRow
               key={agent.id}
@@ -397,9 +397,9 @@ function AgentsTabContent({
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Detail card */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-3">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3">
         <div className="max-w-2xl mx-auto">
           <AgentCard agent={selectedAgent} isLeader={selectedAgent.id === leaderId} />
         </div>

@@ -51,6 +51,7 @@
  *
  *   POST /mailbox/send              → send({from,to,type,subject,body,...})
  *   POST /mailbox/query             → query({to?,from?,unreadBy?,...})
+ *   POST /mailbox/check             → check({agentId,baseId?,markRead?,completed?})
  *   POST /mailbox/ack               → ack({messageId,readerId,...})
  *   POST /mailbox/ack-many          → ackMany({acks:[...]})
  *   POST /mailbox/unread-count      → unreadCount({forAgentId})
@@ -73,6 +74,7 @@ import {
   type ClientRegistrationInput,
   type MailboxAckBatchInput,
   type MailboxAckInput,
+  type MailboxMessage,
   type MailboxQuery,
   type MailboxSendInput,
   resolveProjectDir,
@@ -294,6 +296,12 @@ async function handle(
       const input = validateQuery(body);
       const msgs = await mailbox.query(input);
       return writeJson(res, 200, { data: msgs, count: msgs.length });
+    }
+    if (method === 'POST' && url === '/mailbox/check') {
+      const body = await readJsonBody(req);
+      const input = validateCheck(body);
+      const result = await checkMailbox(mailbox, input);
+      return writeJson(res, 200, result);
     }
     if (method === 'POST' && url === '/mailbox/ack') {
       const body = await readJsonBody(req);
@@ -524,6 +532,68 @@ function validateQuery(body: unknown): MailboxQuery {
   return result;
 }
 
+interface MailboxCheckInput {
+  agentId: string;
+  baseId?: string | undefined;
+  limit?: number | undefined;
+  markRead?: boolean | undefined;
+  completed?: boolean | undefined;
+  outcome?: string | undefined;
+}
+
+async function checkMailbox(mailbox: GlobalMailbox, input: MailboxCheckInput): Promise<{ data: MailboxMessage[]; count: number }> {
+  const limit = input.limit ?? 20;
+  const markRead = input.markRead ?? true;
+  const completed = input.completed ?? false;
+  const targets = input.baseId !== undefined && input.baseId !== input.agentId
+    ? [input.agentId, input.baseId]
+    : [input.agentId];
+  const batches = await Promise.all(
+    targets.map((to) => mailbox.query({ to, unreadBy: input.agentId, limit })),
+  );
+  const seen = new Set<string>();
+  const messages = batches
+    .flat()
+    .filter((m) => {
+      if (seen.has(m.id) || m.from === input.agentId) return false;
+      seen.add(m.id);
+      return true;
+    })
+    .slice(0, limit);
+  const data = markRead || completed
+    ? await mailbox.ackMany({
+        acks: messages.map((m) => ({
+          messageId: m.id,
+          readerId: input.agentId,
+          read: markRead,
+          completed,
+          outcome: completed ? input.outcome : undefined,
+        })),
+      })
+    : messages;
+  return { data, count: data.length };
+}
+
+function validateCheck(body: unknown): MailboxCheckInput {
+  if (typeof body !== 'object' || body === null) throw validationError('expected JSON object body');
+  const o = body as Record<string, unknown>;
+  const result: MailboxCheckInput = { agentId: requireString(o, 'agentId') };
+  const baseId = optionalString(o, 'baseId');
+  const limit = optionalNumber(o, 'limit');
+  const markRead = optionalBoolean(o, 'markRead');
+  const completed = optionalBoolean(o, 'completed');
+  const outcome = optionalString(o, 'outcome');
+  if (baseId !== undefined) result.baseId = baseId;
+  if (limit !== undefined) {
+    if (!Number.isInteger(limit) || limit < 1) throw validationError('field "limit" must be a positive integer when present');
+    result.limit = limit;
+  }
+  if (markRead !== undefined) result.markRead = markRead;
+  if (completed !== undefined) result.completed = completed;
+  if (outcome !== undefined) result.outcome = outcome;
+  return result;
+}
+
 function validateAck(body: unknown): MailboxAckInput {
   if (typeof body !== 'object' || body === null) throw validationError('expected JSON object body');
   const o = body as Record<string, unknown>;
@@ -636,6 +706,7 @@ function writeStartupInfo(deps: SubcommandDeps, info: StartupInfo): void {
   deps.renderer.write('Routes:\n');
   deps.renderer.write('  POST /mailbox/send              send a message\n');
   deps.renderer.write('  POST /mailbox/query             query messages\n');
+  deps.renderer.write('  POST /mailbox/check             check inbox and optionally mark read/completed\n');
   deps.renderer.write('  POST /mailbox/ack               acknowledge one message\n');
   deps.renderer.write('  POST /mailbox/ack-many          acknowledge many in one batch\n');
   deps.renderer.write('  POST /mailbox/unread-count      count unread messages for an agent\n');

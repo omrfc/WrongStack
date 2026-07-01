@@ -172,7 +172,7 @@ export interface HqAgentMessagePayload {
   subagentId: string;
   agentName: string;
   content: string;
-  kind: 'text' | 'tool_use' | 'error' | 'status';
+  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'error' | 'status' | 'system';
   iteration: number;
   ts: string;
   toolName?: string;

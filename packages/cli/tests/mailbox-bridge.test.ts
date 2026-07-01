@@ -248,6 +248,72 @@ describe('mailbox-bridge — POST /mailbox/query', () => {
   });
 });
 
+describe('mailbox-bridge — POST /mailbox/check', () => {
+  it('checks direct/base/broadcast inbox mail and can complete returned messages', async () => {
+    await http('POST', '/mailbox/send', {
+      from: 'external-sender',
+      to: 'external-reader',
+      type: 'ask',
+      subject: 'direct-check',
+      body: 'direct body',
+    }, auth());
+    await http('POST', '/mailbox/send', {
+      from: 'external-sender',
+      to: 'external',
+      type: 'assign',
+      subject: 'base-check',
+      body: 'base body',
+    }, auth());
+    await http('POST', '/mailbox/send', {
+      from: 'external-sender',
+      to: '*',
+      type: 'broadcast',
+      subject: 'broadcast-check',
+      body: 'broadcast body',
+    }, auth());
+
+    const res = await http('POST', '/mailbox/check', {
+      agentId: 'external-reader',
+      baseId: 'external',
+      completed: true,
+      outcome: 'handled over bridge',
+      limit: 10,
+    }, auth());
+    expect(res.status).toBe(200);
+    const data = (res.body as { data: Array<{ subject: string; completed: boolean; outcome?: string }>; count: number }).data;
+    expect((res.body as { count: number }).count).toBe(3);
+    expect(data.map((m) => m.subject).sort()).toEqual(['base-check', 'broadcast-check', 'direct-check']);
+    expect(data.every((m) => m.completed)).toBe(true);
+    expect(data.every((m) => m.outcome === 'handled over bridge')).toBe(true);
+  });
+
+  it('can peek without marking returned messages read', async () => {
+    await http('POST', '/mailbox/send', {
+      from: 'peek-sender',
+      to: 'peek-reader',
+      type: 'note',
+      subject: 'peek-check',
+      body: 'peek body',
+    }, auth());
+
+    const res = await http('POST', '/mailbox/check', {
+      agentId: 'peek-reader',
+      markRead: false,
+    }, auth());
+    expect(res.status).toBe(200);
+    expect(
+      (res.body as { data: Array<{ subject: string }> }).data.some((m) => m.subject === 'peek-check'),
+    ).toBe(true);
+
+    const query = await http('POST', '/mailbox/query', {
+      to: 'peek-reader',
+      unreadBy: 'peek-reader',
+      limit: 10,
+    }, auth());
+    expect((query.body as { data: Array<{ subject: string }> }).data.some((m) => m.subject === 'peek-check')).toBe(true);
+  });
+});
+
 describe('mailbox-bridge — POST /mailbox/ack', () => {
   it('acks a single message and returns the updated message', async () => {
     // First, send a message directed at our test reader.

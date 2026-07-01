@@ -32,6 +32,9 @@ auditConfig:
 allowBuilds:
   '@biomejs/biome': true
   better-sqlite3: true
+  # Electron's install script fetches the platform runtime used by
+  # apps/desktop. Keep this explicit so new installs can run the desktop app.
+  electron: true
   esbuild: true
   # node-pty is a local-dev/optional WebUI terminal dependency. Decline its
   # build script here so workspace installs stay clean on machines without
@@ -40,4 +43,7 @@ allowBuilds:
 onlyBuiltDependencies:
   - "@biomejs/biome"
   - better-sqlite3
+  - electron
   - esbuild
+minimumReleaseAgeExclude:
+  - electron@43.0.0

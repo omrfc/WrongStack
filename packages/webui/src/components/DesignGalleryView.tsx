@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { colorToHex } from '@/lib/color';
 import { cn } from '@/lib/utils';
-import { useUIStore } from '@/stores/ui-store';
+import { showPanel } from '@/lib/view-navigation';
 
 type Tokens = Record<string, string>;
 type ThemeName = 'light' | 'dark';
@@ -173,7 +173,6 @@ function ColorEditor({
 
 export function DesignGalleryView({ className }: { className?: string }) {
   const { client } = useWebSocket();
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
   const [kits, setKits] = useState<Kit[]>([]);
   const [activeKit, setActiveKit] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Tokens>({});
@@ -283,8 +282,8 @@ export function DesignGalleryView({ className }: { className?: string }) {
   }, [kits, q]);
 
   return (
-    <div className={cn('flex flex-col h-full', className)}>
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border/60">
+    <div className={cn('flex h-full min-h-0 min-w-0 flex-col', className)}>
+      <div className="flex min-w-0 items-center gap-2 px-4 py-3 border-b border-border/60">
         <Palette className="w-5 h-5 text-muted-foreground" />
         <h2 className="text-sm font-semibold">Design Studio — Gallery</h2>
         <span className="text-xs text-muted-foreground">{filtered.length} kits</span>
@@ -311,7 +310,7 @@ export function DesignGalleryView({ className }: { className?: string }) {
         )}
         <button
           type="button"
-          onClick={() => setCurrentView('chat')}
+          onClick={() => showPanel('chat')}
           className="ml-auto p-1 rounded hover:bg-muted text-muted-foreground"
           title="Close"
         >
@@ -319,7 +318,7 @@ export function DesignGalleryView({ className }: { className?: string }) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
         <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
           {filtered.map((kit) => {
             const isActive = activeKit === kit.id;

@@ -41,7 +41,7 @@ export const DiffView = memo(function DiffView({ oldText, newText, caption, fill
     <div
       className={cn(
         'rounded-lg border bg-background/40 overflow-hidden text-xs',
-        fill && 'flex flex-col h-full',
+        fill && 'flex h-full min-h-0 min-w-0 flex-col',
       )}
     >
       <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40 shrink-0">
@@ -53,7 +53,7 @@ export const DiffView = memo(function DiffView({ oldText, newText, caption, fill
         </span>
       </div>
       <div
-        className={cn('font-mono leading-relaxed overflow-auto', fill ? 'flex-1' : 'max-h-96')}
+        className={cn('font-mono leading-relaxed overflow-auto', fill ? 'min-h-0 flex-1' : 'max-h-96')}
       >
         {rows.map((r, i) => (
           <div

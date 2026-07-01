@@ -56,6 +56,7 @@ import {
 } from './memory-handlers.js';
 import { handleModeRoute } from './mode-routes.js';
 import { handlePrefsRoute } from './prefs-routes.js';
+import type { ConfirmDecision, PendingConfirm } from './pending-confirms.js';
 import {
   handleProcessKill,
   handleProcessKillAll,
@@ -87,17 +88,14 @@ import { handleSddWizardRoute } from './sdd-wizard-routes.js';
 import { handleSessionRoute } from './session-routes.js';
 import { handleShellGitRoute } from './shell-git-routes.js';
 import { handleSpecsRoute } from './specs-routes.js';
+import { resolveProviderModelMetadata } from './model-catalog.js';
 import { computeUsageCost, getCostRates } from './usage-cost.js';
 import { validateAutonomySwitchPayload } from './ws-payload-validation.js';
 import { broadcast, errMessage, send, sendResult } from './ws-utils.js';
 
-/** Decision type persisted for a pending tool.confirm_needed prompt. */
-type ConfirmDecision = 'yes' | 'no' | 'always' | 'deny';
-
 /**
  * Shared run-lock control. `user_message` acquires/releases it around
- * `agent.run`; `projects.select` aborts a stale run via `state.abortRunLock`.
- * Both the dispatcher and the mutable-state wiring read through this object
+ * `agent.run`. Both the dispatcher and the mutable-state wiring read through this object
  * so a second user_message while running is rejected and a project swap can
  * tear down the in-flight run.
  */
@@ -118,7 +116,7 @@ export interface MessageDispatcherOptions {
   /** Shared run-lock guarding concurrent agent.run() calls. */
   runLock: RunLockControl;
   /** Pending permission confirmations — tool.confirm_result resolves one. */
-  pendingConfirms: Map<string, (decision: ConfirmDecision) => void>;
+  pendingConfirms: Map<string, PendingConfirm>;
 }
 
 /**
@@ -290,10 +288,10 @@ export function createMessageDispatcher(
         const { id, decision } = (
           msg as { payload: { id: string; decision: ConfirmDecision } }
         ).payload;
-        const resolve = pendingConfirms.get(id);
-        if (resolve) {
+        const confirm = pendingConfirms.get(id);
+        if (confirm) {
           pendingConfirms.delete(id);
-          resolve(decision);
+          confirm.resolve(decision);
         }
         break;
       }
@@ -535,7 +533,12 @@ export function createMessageDispatcher(
         const session = state.getSession();
         const usage = deps.tokenCounter.total();
         const cacheStats = deps.tokenCounter.cacheStats();
-        const m = await deps.modelsRegistry.getModel(config.provider, config.model).catch(() => null);
+        const m = await resolveProviderModelMetadata(
+          deps.modelsRegistry,
+          config.provider,
+          config.model,
+          config.providers?.[config.provider],
+        ).catch(() => null);
         const cost = computeUsageCost(usage, getCostRates(m));
         send(ws, {
           type: 'stats.get',

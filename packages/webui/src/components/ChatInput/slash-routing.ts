@@ -1,4 +1,5 @@
 import { streamCoalescer } from '@/lib/stream-coalescer';
+import { navigateToView, openMainView, showPanel } from '@/lib/view-navigation';
 import { useSessionStore, useUIStore } from '@/stores';
 import type { WSClientMessage } from '@/types';
 import { downloadChatAsMarkdown } from '../CommandPalette';
@@ -82,7 +83,6 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
     sendAbort,
     sendMsg,
     setLoading,
-    setCurrentView,
     toggleRefineEnabled,
     setProcessMonitorOpen,
     setQueuePanelOpen,
@@ -102,7 +102,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
   const cmd = head;
   const openWorkTab = (tab: 'todos' | 'tasks' | 'plan') => {
     const ui = useUIStore.getState();
-    ui.setCurrentView('chat');
+    showPanel('chat');
     ui.setDockSection('work');
     ui.setWorkDashboardTab(tab);
   };
@@ -128,6 +128,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
       return true;
     case '/new':
       client?.newSession?.();
+      showPanel('chat');
       return true;
     case '/exit':
       client?.send?.({ type: 'webui.shutdown' });
@@ -170,7 +171,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
     case '/load':
     case '/resume':
       ws.listSessions(50);
-      setCurrentView('sessions');
+      showPanel('history');
       return true;
     case '/agents':
       useUIStore.getState().setAgentsMonitorOpen(true);
@@ -199,6 +200,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
     }
     case '/goal':
       client?.send?.({ type: 'goal.get' });
+      showPanel('chat');
       useUIStore.getState().setDockSection('goal');
       return true;
     case '/fleet':
@@ -209,10 +211,12 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
       useUIStore.getState().setTerminalOpen(true);
       return true;
     case '/collab':
+      showPanel('chat');
       useUIStore.getState().setDockSection('collab');
       return true;
     case '/worktree':
     case '/worktrees':
+      showPanel('worktrees');
       useUIStore.getState().setDockSection('worktrees');
       return true;
     case '/mode': {
@@ -232,7 +236,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
     }
     case '/mcp':
       client?.send?.({ type: 'mcp.list' });
-      setCurrentView('settings');
+      openMainView('settings');
       return true;
     case '/working-dir':
     case '/cwd': {
@@ -262,7 +266,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
           return true;
         }
         client?.send?.({ type: 'autophase.start', payload: { title } });
-        useUIStore.getState().setCurrentView('autophase');
+        openMainView('autophase');
         return true;
       }
       if (subcmd === 'pause') {
@@ -277,7 +281,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
         client?.send?.({ type: 'autophase.stop', payload: {} });
         return true;
       }
-      useUIStore.getState().setCurrentView('autophase');
+      openMainView('autophase');
       return true;
     }
     case '/brain': {
@@ -300,7 +304,6 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
     }
     case '/plan':
       ws.getPlan();
-      setCurrentView('chat');
       // Surface the Work section of the dock strip above the chat.
       openWorkTab('plan');
       return true;
@@ -349,10 +352,10 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
       return true;
     case '/settings':
     case '/model':
-      setCurrentView('settings');
+      openMainView('settings');
       return true;
     case '/setup':
-      useUIStore.getState().setCurrentView('setup');
+      navigateToView('setup');
       return true;
     case '/enhance': {
       const enabled = !useUIStore.getState().refineEnabled;
@@ -445,7 +448,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
     case '/f12': {
       const panelMap: Record<string, string> = {
         '/f': '',
-        '/f1': 'projectPicker',
+        '/f1': 'sessionPanel',
         '/f2': 'fleetMonitor',
         '/f3': 'agentsMonitor',
         '/f4': 'worktreeMonitor',
@@ -464,7 +467,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
         const lines = [
           '🎛️  **F-key panels**',
           '',
-          '/f 1 — Project switcher',
+          '/f 1 — Session panel',
           '/f 2 — Fleet orchestration monitor',
           '/f 3 — Agents live monitor',
           '/f 4 — Worktree monitor',
@@ -484,11 +487,10 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
       }
       // Dispatch to the appropriate WebUI store action
       const ui = useUIStore.getState();
-      ui.setCurrentView('chat');
+      showPanel('chat');
       ui.setDockCustomizeOpen(false);
-      if (panel === 'projectPicker') {
-        ui.setSidebarOpen(true);
-        ui.selectActivity('projects');
+      if (panel === 'sessionPanel') {
+        showPanel('chat');
         return true;
       }
       if (panel === 'fleetMonitor') {
@@ -500,6 +502,7 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
         return true;
       }
       if (panel === 'worktreeMonitor') {
+        showPanel('worktrees');
         ui.setDockSection('worktrees');
         return true;
       }
@@ -524,21 +527,21 @@ export function runChatSlashCommand(options: RunChatSlashCommandOptions): boolea
       }
       if (panel === 'goalPanel') {
         client?.send?.({ type: 'goal.get' });
+        showPanel('chat');
         ui.setDockSection('goal');
         return true;
       }
       if (panel === 'sessionsPanel') {
         ws.listSessions(50);
-        setCurrentView('sessions');
+        showPanel('history');
         return true;
       }
       if (panel === 'coordinatorMonitor') {
-        ui.setSidebarOpen(true);
-        ui.selectActivity('officemap');
-        ui.setCurrentView('officemap');
+        showPanel('officemap');
         return true;
       }
       if (panel === 'statuslinePicker') {
+        showPanel('chat');
         ui.setDockSection('work');
         ui.setDockCustomizeOpen(true);
         return true;

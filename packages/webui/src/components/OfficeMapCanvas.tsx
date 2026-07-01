@@ -53,7 +53,9 @@ import {
   Maximize2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { AgentTranscript } from './AgentTranscript';
 import {
+  EMPTY_AGENT_TRANSCRIPT,
   useFleetStore,
   useSessionStore,
   useVizStore,
@@ -797,6 +799,7 @@ export function OfficeMapCanvas() {
   // Store subscriptions
   const vizEvents = useVizStore((s) => s.events);
   const fleetAgents = useFleetStore((s) => s.agents);
+  const agentTranscripts = useFleetStore((s) => s.agentTranscripts);
   const leaderId = useFleetStore((s) => s.leaderId);
 
   // Live cross-process snapshot — the structural source of truth for the map.
@@ -833,6 +836,16 @@ export function OfficeMapCanvas() {
   const [broadcastDraft, setBroadcastDraft] = useState('');
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastResult, setBroadcastResult] = useState<string | null>(null);
+  const selectedAgentTranscript = useMemo(() => {
+    if (selectedNode?.data.kind !== 'agent') return EMPTY_AGENT_TRANSCRIPT;
+    const serverId = selectedNode.data.serverId
+      ?? (selectedNode.id.includes('__agent-')
+        ? selectedNode.id.split('__agent-').pop()
+        : selectedNode.id.replace(/^agent-/, ''));
+    return serverId
+      ? agentTranscripts.get(serverId) ?? EMPTY_AGENT_TRANSCRIPT
+      : EMPTY_AGENT_TRANSCRIPT;
+  }, [agentTranscripts, selectedNode]);
 
   const sendBroadcast = useCallback(async () => {
     const text = broadcastDraft.trim();
@@ -1062,6 +1075,7 @@ export function OfficeMapCanvas() {
             label: agent.name,
             kind: 'agent',
             status: agent.status,
+            serverId: agent.serverId,
             sessionId: client.sessionId,
             currentTask: agent.currentTask,
             iteration: agent.iteration,
@@ -1694,7 +1708,7 @@ export function OfficeMapCanvas() {
         <div
           className={cn(
             'absolute top-20 right-4 bg-background border border-border rounded-lg p-4 shadow-xl z-20',
-            selectedNode.data.sessionId ? 'w-80' : 'w-64',
+            selectedNode.data.kind === 'agent' ? 'w-[28rem] max-w-[calc(100%-2rem)]' : selectedNode.data.sessionId ? 'w-80' : 'w-64',
           )}
         >
           <div className="flex items-center justify-between mb-3">
@@ -1772,6 +1786,14 @@ export function OfficeMapCanvas() {
                     )}
                     <Row k="Cost" v={`$${(d.costUsd || 0).toFixed(4)}`} accent="text-emerald-600 dark:text-emerald-400" />
                     {d.lastActivityAt && <Row k="Last seen" v={fmtAgo(d.lastActivityAt, now)} accent="text-muted-foreground" />}
+                    <div className="pt-2">
+                      <AgentTranscript
+                        entries={selectedAgentTranscript}
+                        agentName={d.label}
+                        compact
+                        maxHeightClassName="max-h-64"
+                      />
+                    </div>
                   </>
                 )}
 

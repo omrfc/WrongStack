@@ -9,7 +9,8 @@ import { GitCompare, Loader2, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
-import { type GitChangedFile, useConfigStore, useGitChangesStore, useUIStore } from '@/stores';
+import { showPanel } from '@/lib/view-navigation';
+import { type GitChangedFile, useConfigStore, useGitChangesStore } from '@/stores';
 
 /** Visual treatment for each git status letter. */
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -89,14 +90,14 @@ export function ChangesPanel() {
   const select = (path: string) => {
     useGitChangesStore.getState().select(path);
     client?.getGitDiff?.(path);
-    useUIStore.getState().setCurrentView('changes');
+    showPanel('changes');
   };
 
   const totalAdded = files.reduce((n, f) => n + f.added, 0);
   const totalDeleted = files.reduce((n, f) => n + f.deleted, 0);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
         <span className="text-[11px] text-muted-foreground font-mono">
           {files.length} {files.length === 1 ? 'file' : 'files'}
@@ -122,7 +123,7 @@ export function ChangesPanel() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-1.5">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-1.5">
         {error ? (
           <div className="px-2 py-6 text-center text-xs text-muted-foreground">{error}</div>
         ) : files.length === 0 ? (

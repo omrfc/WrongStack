@@ -16,9 +16,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useProviderModels } from '@/hooks/useProviderModels';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { openMainView } from '@/lib/view-navigation';
 import { priorityStyle } from '@/lib/sdd-theme';
 import { cn } from '@/lib/utils';
-import { useSddWizardStore, useUIStore } from '@/stores';
+import { useSddWizardStore } from '@/stores';
 import { FallbackEditor } from './FallbackEditor';
 import { ModelPicker } from './ModelPicker';
 import { type FlowTask, SddFlowGraph } from './SddFlowGraph';
@@ -49,7 +50,6 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
   const error = useSddWizardStore((s) => s.error);
   const startedRunId = useSddWizardStore((s) => s.startedRunId);
   const setStartedRunId = useSddWizardStore((s) => s.setStartedRunId);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
 
   const [goal, setGoal] = useState('');
   const [reply, setReply] = useState('');
@@ -89,10 +89,10 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
   // When the run starts, jump to the live board to watch the agents work.
   useEffect(() => {
     if (startedRunId) {
-      setCurrentView('sddboard');
+      openMainView('sddboard');
       setStartedRunId(null);
     }
-  }, [startedRunId, setCurrentView, setStartedRunId]);
+  }, [startedRunId, setStartedRunId]);
 
   const busy = snapshot?.busy ?? false;
   const phase = snapshot?.phase ?? 'idle';
@@ -154,7 +154,7 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
   const hasGraph = flowTasks.length > 0;
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       <header className="sdd-sheen flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-violet-400" />
@@ -305,7 +305,7 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
         </div>
       )}
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="min-h-0 flex-1 overflow-auto p-4">
         {error && (
           <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/5 p-2 text-xs text-red-300">
             {error}
@@ -364,7 +364,7 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
                   <span className="ml-auto text-slate-500">{graphOpen ? 'drag to explore' : 'show'}</span>
                 </button>
                 {graphOpen && (
-                  <div className="h-[32vh] min-h-[200px]">
+                  <div className="h-[32dvh] min-h-[200px]">
                     <SddFlowGraph tasks={flowTasks} columns={snapshot?.board?.columns ?? []} />
                   </div>
                 )}
@@ -444,7 +444,7 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
                     <Sparkles className="h-3.5 w-3.5 text-violet-400" /> Implementation plan
                   </button>
                   {planOpen && (
-                    <div className="max-h-[40vh] overflow-auto px-3 py-2">
+                    <div className="max-h-[40dvh] overflow-auto px-3 py-2">
                       <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
                         {stripJsonBlocks(agentText)}
                       </p>

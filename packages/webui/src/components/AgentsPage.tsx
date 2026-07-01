@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { useChatStore, useConfigStore, useFleetStore, useSessionStore } from '@/stores';
+import { EMPTY_AGENT_TRANSCRIPT, useChatStore, useConfigStore, useFleetStore, useSessionStore } from '@/stores';
 import type { SubagentView } from '@/stores';
 import {
   Activity,
@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ContextFillBar } from './ContextBar';
 import { ContextBreakdownModal } from './ContextBreakdownModal';
+import { AgentTranscript } from './AgentTranscript';
 import { fmtTok } from './ChatView/utils';
 import { bucketActivity, fmtCost, fmtDuration, fmtElapsed, sparkline } from './AgentsPage/format';
 
@@ -126,6 +127,7 @@ function AgentDetailPanel({
   const active = agent.status === 'running';
   const tool = agent.currentTool;
   const lastTool = agent.toolLog[0];
+  const transcript = useFleetStore((s) => s.agentTranscripts.get(agent.id) ?? EMPTY_AGENT_TRANSCRIPT);
   const toolTimestamps = agent.toolLog.map((t) => t.at);
   const spark = sparkline(bucketActivity(toolTimestamps, now));
   const ctxPct = Math.min(100, Math.max(0, agent.ctxPct));
@@ -146,7 +148,7 @@ function AgentDetailPanel({
   }, [agent.toolLog]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Fixed header */}
       <div className="shrink-0 border-b bg-card p-4 space-y-3">
         {/* Header */}
@@ -212,7 +214,7 @@ function AgentDetailPanel({
       </div>
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 space-y-4">
         {/* Stats grid - detailed */}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border bg-card p-3">
@@ -299,6 +301,14 @@ function AgentDetailPanel({
               <span className="ml-auto text-[10px] text-muted-foreground">completed</span>
             )}
           </div>
+        )}
+
+        {agent.id !== 'leader' && (
+          <AgentTranscript
+            entries={transcript}
+            agentName={agent.name}
+            maxHeightClassName="max-h-[28rem]"
+          />
         )}
 
         {/* Streaming/Final output */}
@@ -703,17 +713,20 @@ export function AgentsPage({
   }, [sorted]);
 
   return (
-    <div className={cn('flex h-full', className)} ref={containerRef}>
+    <div
+      className={cn('flex h-full min-h-0 min-w-0 overflow-x-auto overflow-y-hidden', className)}
+      ref={containerRef}
+    >
       {/* ── Left column: Agent list ── */}
       <div className={cn(
-        'flex flex-col border-r bg-card/95 transition-all duration-200',
-        selected ? 'w-[400px] shrink-0' : 'w-full'
+        'flex min-h-0 min-w-0 flex-col border-r bg-card/95 transition-all duration-200',
+        selected ? 'w-[400px] max-w-full shrink-0' : 'w-full'
       )}>
         {/* Header */}
         <div className="border-b bg-card/95 backdrop-blur-sm shrink-0">
           <div className="px-4 py-3 space-y-2">
             {/* Title row */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-semibold flex items-center gap-1.5">
                 <Bot className="h-4 w-4 text-primary" />
                 AGENTS · LIVE
@@ -737,7 +750,7 @@ export function AgentsPage({
 
             {/* Model mapping */}
             {modelMap.length > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] text-muted-foreground">models</span>
                 {modelMap.map(([name, mod]) => (
                   <span key={name} className="text-[10px] text-muted-foreground font-mono">
@@ -748,7 +761,7 @@ export function AgentsPage({
             )}
 
             {/* Totals row */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-[10px] text-muted-foreground">shown</span>
               <span className="text-[10px] font-medium">{sorted.length}</span>
               <span className="text-[10px] text-muted-foreground">total</span>
@@ -779,7 +792,7 @@ export function AgentsPage({
         </div>
 
         {/* Agent list */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
           {sorted.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-2">
@@ -857,8 +870,8 @@ export function AgentsPage({
 
       {/* ── Right column: Agent detail ── */}
       {selected && (
-        <div className="flex-1 overflow-hidden bg-card/50">
-          <div className="h-full flex flex-col">
+        <div className="min-h-0 min-w-[360px] flex-1 overflow-hidden bg-card/50">
+          <div className="flex h-full min-h-0 min-w-0 flex-col">
             {/* Detail header bar */}
             <div className="shrink-0 px-4 py-2 border-b bg-card/80 flex items-center gap-2">
               <ArrowRight className="h-4 w-4 text-primary" />
@@ -873,7 +886,7 @@ export function AgentsPage({
               </button>
             </div>
             {/* Detail content */}
-            <div className="flex-1 overflow-hidden">
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
               <AgentDetailPanel agent={selected} now={nowTick} />
             </div>
           </div>
@@ -882,7 +895,7 @@ export function AgentsPage({
 
       {/* Empty state when nothing selected */}
       {!selected && sorted.length > 0 && (
-        <div className="flex-1 flex items-center justify-center bg-muted/20">
+        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-muted/20">
           <div className="text-center space-y-3 max-w-sm">
             <Bot className="h-12 w-12 text-muted-foreground/30 mx-auto" />
             <p className="text-sm text-muted-foreground">

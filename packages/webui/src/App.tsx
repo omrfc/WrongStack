@@ -1,11 +1,31 @@
 import { expectDefined } from '@wrongstack/core';
 import { useEffect } from 'react';
 import { useWebSocketBootstrap } from '@/hooks/useWebSocket';
+import { isDesktopShell } from '@/lib/desktop-shell';
 import { streamCoalescer } from '@/lib/stream-coalescer';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
-import { useChatStore, useConfigStore, useFileStore, useSessionStore, useUIStore } from '@/stores';
-import { ActivityBar, openPanel, PANEL_ORDER } from './components/ActivityBar';
+import { useLocalPrefs } from '@/stores/local-prefs';
+import {
+  type Activity,
+  type DockSection,
+  resetUiNavigationToHome,
+  useChatStore,
+  useConfigStore,
+  useFileStore,
+  useSessionStore,
+  useUIStore,
+} from '@/stores';
+import {
+  ACTIVITY_SHORTCUT_BY_KEY,
+  ActivityBar,
+  navigateToView,
+  openMainView,
+  openPanel,
+  pairedViewForActivity,
+  PANEL_ORDER,
+  showPanel,
+} from './components/ActivityBar';
 import { AgentsMonitor } from './components/AgentsMonitor';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { AutoPhaseView } from './components/AutoPhaseView';
@@ -38,19 +58,100 @@ import { SkillDetailView } from './components/SkillDetailView';
 import { SpecsView } from './components/SpecsView';
 import { TerminalPanel } from './components/TerminalPanel';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
-import { Toaster } from './components/Toaster';
+import { toast, Toaster } from './components/Toaster';
 import { WorkspaceDock } from './components/WorkspaceDock';
+
+const DESKTOP_COMMAND_VIEWS = new Set([
+  'chat',
+  'settings',
+  'autophase',
+  'specs',
+  'sddboard',
+  'sddwizard',
+  'files',
+  'changes',
+  'sessions',
+  'setup',
+  'skill',
+  'officemap',
+  'mailbox',
+  'debug',
+  'design-gallery',
+  'refresh-debug',
+  'analytics',
+]);
+
+const DESKTOP_COMMAND_DOCKS = new Set([
+  'autophase',
+  'goal',
+  'fleet',
+  'work',
+  'worktrees',
+  'collab',
+]);
+
+const DESKTOP_COMMAND_WORK_TABS = new Set(['todos', 'tasks', 'plan']);
+
+function publishDesktopPrefsSnapshot(): void {
+  if (typeof window === 'undefined') return;
+  const host = (window as unknown as {
+    wrongstackDesktopHost?: {
+      setReady?: (ready: boolean) => void;
+      setPrefs?: (prefs: {
+        yolo: boolean;
+        nextPrediction: boolean;
+        contextAutoCompact: boolean;
+      }) => void;
+      ackCommand?: (requestId: string, handled: boolean, message?: string | undefined) => void;
+    };
+  }).wrongstackDesktopHost;
+  if (!host?.setPrefs) return;
+  const prefs = useLocalPrefs.getState();
+  host.setPrefs({
+    yolo: prefs.yolo,
+    nextPrediction: prefs.nextPrediction,
+    contextAutoCompact: prefs.contextAutoCompact,
+  });
+}
+
+function publishDesktopReady(ready: boolean): void {
+  if (typeof window === 'undefined') return;
+  const host = (window as unknown as {
+    wrongstackDesktopHost?: {
+      setReady?: (ready: boolean) => void;
+    };
+  }).wrongstackDesktopHost;
+  host?.setReady?.(ready);
+}
+
+function publishDesktopCommandAck(
+  requestId: unknown,
+  handled: boolean,
+  message?: string | undefined,
+): void {
+  if (typeof window === 'undefined' || typeof requestId !== 'string') return;
+  const host = (window as unknown as {
+    wrongstackDesktopHost?: {
+      ackCommand?: (id: string, handled: boolean, message?: string | undefined) => void;
+    };
+  }).wrongstackDesktopHost;
+  host?.ackCommand?.(requestId, handled, message);
+}
 
 function AppInner() {
   const { theme } = useTheme();
+  const desktopShell = isDesktopShell();
   const {
     currentView,
     sidebarOpen,
     toggleSidebar,
     setSearchOpen,
     setSidebarOpen,
-    setCurrentView,
     setInspectorTab,
+    setPaletteOpen,
+    setShortcutsOpen,
+    setModelSwitcherOpen,
+    setPromptLibraryOpen,
     toggleInspector,
     fleetMonitorOpen,
     agentsMonitorOpen,
@@ -70,17 +171,22 @@ function AppInner() {
   const sessionId = useSessionStore((s) => s.session?.id);
   const nickname = useUIStore((s) => (sessionId ? s.sessionNicknames[sessionId] : undefined));
 
+  useEffect(() => {
+    if (!desktopShell) return;
+    resetUiNavigationToHome({ sidebarOpen: false });
+  }, [desktopShell]);
+
   // Detect /debug, /analytics, /refresh-debug URL paths and switch views.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (window.location.pathname === '/debug') {
-      setCurrentView('debug');
+      navigateToView('debug');
     } else if (window.location.pathname === '/analytics') {
-      setCurrentView('analytics');
+      navigateToView('analytics');
     } else if (window.location.pathname === '/refresh-debug') {
-      setCurrentView('refresh-debug');
+      navigateToView('refresh-debug');
     }
-  }, [setCurrentView]);
+  }, []);
 
   // Handle file open requests from FileExplorer (dispatches custom events on window)
   useEffect(() => {
@@ -136,6 +242,261 @@ function AppInner() {
   // the duplicate-handler trap this avoids.
   useWebSocketBootstrap();
 
+  useEffect(() => {
+    publishDesktopPrefsSnapshot();
+    return useLocalPrefs.subscribe((next, prev) => {
+      if (
+        next.yolo === prev.yolo &&
+        next.nextPrediction === prev.nextPrediction &&
+        next.contextAutoCompact === prev.contextAutoCompact
+      ) {
+        return;
+      }
+      publishDesktopPrefsSnapshot();
+    });
+  }, []);
+
+  // Desktop shell integration. Electron hosts the real WebUI in a
+  // WebContentsView and sends this event when the native sidebar asks to open a
+  // WebUI surface. Browser users never see this path.
+  useEffect(() => {
+    const applyDesktopCommand = (rawDetail: unknown): boolean => {
+      const detail =
+        rawDetail && typeof rawDetail === 'object' && !Array.isArray(rawDetail)
+          ? (rawDetail as Record<string, unknown>)
+          : {};
+      const ui = useUIStore.getState();
+      const ws = getWSClient(useConfigStore.getState().wsUrl);
+      let handled = false;
+
+      const openDesktopView = (view: string): void => {
+        navigateToView(view as never);
+        if (view === 'sessions') {
+          ws?.listSessions?.(50);
+        }
+      };
+
+      const activity = detail['activity'];
+      if (typeof activity === 'string' && (PANEL_ORDER as readonly string[]).includes(activity)) {
+        const nextActivity = activity as (typeof PANEL_ORDER)[number];
+        showPanel(nextActivity);
+        handled = true;
+        if (detail['view'] === undefined) {
+          const fallbackView = pairedViewForActivity(nextActivity);
+          if (fallbackView === 'sessions') {
+            ws?.listSessions?.(50);
+          }
+        }
+      }
+
+      const view = detail['view'];
+      if (typeof view === 'string' && DESKTOP_COMMAND_VIEWS.has(view)) {
+        openDesktopView(view);
+        handled = true;
+      }
+
+      const action = detail['action'];
+      if (action === 'new-session') {
+        ws?.newSession?.();
+        showPanel('chat');
+        handled = true;
+      } else if (action === 'clear-context') {
+        streamCoalescer.dropAll();
+        useChatStore.getState().clearMessages();
+        ws?.clearContext?.();
+        showPanel('chat');
+        handled = true;
+      } else if (action === 'compact-context') {
+        ws?.compactContext?.();
+        showPanel('chat');
+        handled = true;
+      } else if (action === 'repair-context') {
+        ws?.repairContext?.();
+        showPanel('chat');
+        handled = true;
+      } else if (action === 'download-chat') {
+        downloadChatAsMarkdown();
+        handled = true;
+      } else if (action === 'focus-chat') {
+        showPanel('chat');
+        window.requestAnimationFrame(() => document.querySelector('textarea')?.focus());
+        handled = true;
+      } else if (action === 'open-command-palette') {
+        setPaletteOpen(true);
+        handled = true;
+      } else if (action === 'open-shortcuts') {
+        setShortcutsOpen(true);
+        handled = true;
+      } else if (action === 'search-chat') {
+        setSearchOpen(true);
+        handled = true;
+      } else if (action === 'open-model-switcher') {
+        setModelSwitcherOpen(true);
+        handled = true;
+      } else if (action === 'open-prompt-library') {
+        setPromptLibraryOpen(true);
+        handled = true;
+      }
+
+      const dockSection = detail['dockSection'];
+      if (typeof dockSection === 'string' && DESKTOP_COMMAND_DOCKS.has(dockSection)) {
+        const section = dockSection as DockSection;
+        ui.showDockChip(section);
+        ui.setDockCustomizeOpen(false);
+        handled = true;
+        if (dockSection === 'autophase') {
+          openMainView('autophase');
+          ui.setDockSection(null);
+          return handled;
+        }
+        showPanel('chat');
+        ui.setDockSection(section);
+        if (dockSection === 'goal') {
+          ws?.send?.({ type: 'goal.get' });
+        }
+      }
+
+      const workTab = detail['workTab'];
+      if (typeof workTab === 'string' && DESKTOP_COMMAND_WORK_TABS.has(workTab)) {
+        ui.showDockChip('work');
+        ui.setDockCustomizeOpen(false);
+        showPanel('chat');
+        ui.setDockSection('work');
+        ui.setWorkDashboardTab(workTab as never);
+        handled = true;
+        if (workTab === 'plan') {
+          ws?.getPlan?.();
+        }
+      }
+
+      const overlay = detail['overlay'];
+      if (overlay === 'fleet') {
+        setFleetMonitorOpen(true);
+        handled = true;
+      } else if (overlay === 'agents-monitor') {
+        setAgentsMonitorOpen(true);
+        handled = true;
+      } else if (overlay === 'processes') {
+        setProcessMonitorOpen(true);
+        handled = true;
+      } else if (overlay === 'queue') {
+        setQueuePanelOpen(true);
+        handled = true;
+      }
+
+      if (detail['terminal'] === 'toggle') {
+        ui.toggleTerminal();
+        handled = true;
+      } else if (detail['terminal'] === 'new') {
+        if (ui.terminalOpen) {
+          ui.requestTerminalCreate();
+        } else {
+          setTerminalOpen(true);
+        }
+        handled = true;
+      } else if (detail['terminal'] === true) {
+        setTerminalOpen(true);
+        handled = true;
+      } else if (detail['terminal'] === false) {
+        setTerminalOpen(false);
+        handled = true;
+      }
+
+      const pref = detail['pref'];
+      if (pref && typeof pref === 'object' && !Array.isArray(pref)) {
+        const command = pref as Record<string, unknown>;
+        const key = command['key'];
+        if (
+          key === 'yolo' ||
+          key === 'nextPrediction' ||
+          key === 'contextAutoCompact'
+        ) {
+          const prefs = useLocalPrefs.getState();
+          const value =
+            command['toggle'] === true ? !prefs[key] : command['value'];
+          if (typeof value === 'boolean') {
+            const patch = { [key]: value };
+            prefs.set(patch);
+            ws?.updatePrefs?.(patch);
+            if (key === 'yolo') {
+              toast.info(`YOLO ${value ? 'enabled' : 'disabled'}`);
+            }
+            handled = true;
+          }
+        }
+      }
+
+      return handled;
+    };
+
+    const handledDesktopCommandIds = new Set<string>();
+    const handledDesktopCommandOrder: string[] = [];
+    const rememberHandledDesktopCommand = (requestId: string): void => {
+      handledDesktopCommandIds.add(requestId);
+      handledDesktopCommandOrder.push(requestId);
+      while (handledDesktopCommandOrder.length > 120) {
+        const stale = handledDesktopCommandOrder.shift();
+        if (stale) handledDesktopCommandIds.delete(stale);
+      }
+    };
+
+    const handleDesktopCommand = (rawDetail: unknown): void => {
+      const detail =
+        rawDetail && typeof rawDetail === 'object' && !Array.isArray(rawDetail)
+          ? (rawDetail as Record<string, unknown>)
+          : {};
+      const requestId = detail['requestId'];
+      if (typeof requestId === 'string' && handledDesktopCommandIds.has(requestId)) {
+        publishDesktopCommandAck(requestId, true);
+        return;
+      }
+      try {
+        const handled = applyDesktopCommand(rawDetail);
+        if (handled && typeof requestId === 'string') {
+          rememberHandledDesktopCommand(requestId);
+        }
+        publishDesktopCommandAck(requestId, handled);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        publishDesktopCommandAck(requestId, false, message);
+        console.error('Failed to handle desktop command:', err);
+      }
+    };
+
+    const bridge = (window as unknown as {
+      wrongstackDesktopCommands?: {
+        subscribe?: (cb: (command: Record<string, unknown>) => void) => () => void;
+      };
+    }).wrongstackDesktopCommands;
+    const unsubscribe =
+      bridge?.subscribe?.((command) => {
+        handleDesktopCommand(command);
+      }) ?? null;
+    const onDesktopCommand = (event: Event): void => {
+      handleDesktopCommand((event as CustomEvent<Record<string, unknown>>).detail);
+    };
+    window.addEventListener('wrongstack:desktop-command', onDesktopCommand);
+    (window as unknown as { __wrongstackDesktopReady?: boolean }).__wrongstackDesktopReady = true;
+    publishDesktopReady(true);
+    return () => {
+      (window as unknown as { __wrongstackDesktopReady?: boolean }).__wrongstackDesktopReady = false;
+      publishDesktopReady(false);
+      if (unsubscribe) unsubscribe();
+      window.removeEventListener('wrongstack:desktop-command', onDesktopCommand);
+    };
+  }, [
+    setAgentsMonitorOpen,
+    setFleetMonitorOpen,
+    setModelSwitcherOpen,
+    setPaletteOpen,
+    setPromptLibraryOpen,
+    setProcessMonitorOpen,
+    setQueuePanelOpen,
+    setSearchOpen,
+    setShortcutsOpen,
+    setTerminalOpen,
+  ]);
+
   // F5-resilience: the zustand persist middleware writes asynchronously
   // after every mutation. When the page tears down via F5 / tab close /
   // navigation, in-flight writes can be lost. We hook `pagehide` (the
@@ -182,7 +543,7 @@ function AppInner() {
       persistedView === 'design-gallery' ||
       persistedView === 'setup'
     ) {
-      useUIStore.getState().setCurrentView('chat');
+      showPanel('chat');
     }
   }, []);
 
@@ -232,15 +593,22 @@ function AppInner() {
         useUIStore.getState().toggleTerminal();
         return;
       }
-      // Ctrl+1..9 — jump straight to a side panel (same logic as clicking
-      // its ActivityBar icon, including close-on-repeat).
-      if (mod && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= String(PANEL_ORDER.length)) {
-        const activity = PANEL_ORDER[Number(e.key) - 1];
+      // Ctrl+1..9/0 — jump straight to a side panel (same logic as clicking
+      // its ActivityBar icon, including close-on-repeat). Use an explicit
+      // map instead of numeric PANEL_ORDER indexing because some panels use
+      // non-sequential shortcuts (Design is Ctrl+0; Worktrees is Ctrl+Shift+W).
+      if (mod && !e.shiftKey && !e.altKey && Object.hasOwn(ACTIVITY_SHORTCUT_BY_KEY, e.key)) {
+        const activity = ACTIVITY_SHORTCUT_BY_KEY[e.key];
         if (activity) {
           e.preventDefault();
           openPanel(activity);
           return;
         }
+      }
+      if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        openPanel('worktrees');
+        return;
       }
       // F1..F12 — browser equivalents of the TUI function-key panels.
       // These are skipped while typing so editor/text-input conventions keep
@@ -253,7 +621,7 @@ function AppInner() {
         ui.setDockCustomizeOpen(false);
         switch (n) {
           case 1:
-            openPanel('projects');
+            openPanel('chat');
             return;
           case 2:
             ui.setFleetMonitorOpen(true);
@@ -262,17 +630,17 @@ function AppInner() {
             ui.setAgentsMonitorOpen(true);
             return;
           case 4:
-            ui.setCurrentView('chat');
+            showPanel('worktrees');
             ui.setDockSection('worktrees');
             return;
           case 5:
             ws?.getPlan?.();
-            ui.setCurrentView('chat');
+            showPanel('chat');
             ui.setDockSection('work');
             ui.setWorkDashboardTab('plan');
             return;
           case 6:
-            ui.setCurrentView('chat');
+            showPanel('chat');
             ui.setDockSection('work');
             ui.setWorkDashboardTab('todos');
             return;
@@ -284,20 +652,18 @@ function AppInner() {
             return;
           case 9:
             ws?.send?.({ type: 'goal.get' });
-            ui.setCurrentView('chat');
+            showPanel('chat');
             ui.setDockSection('goal');
             return;
           case 10:
             ws?.listSessions?.(50);
-            ui.setCurrentView('sessions');
+            showPanel('history');
             return;
           case 11:
-            ui.setSidebarOpen(true);
-            ui.selectActivity('officemap');
-            ui.setCurrentView('officemap');
+            showPanel('officemap');
             return;
           case 12:
-            ui.setCurrentView('chat');
+            showPanel('chat');
             ui.setDockSection('work');
             ui.setDockCustomizeOpen(true);
             return;
@@ -330,7 +696,7 @@ function AppInner() {
         } else if (e.key.toLowerCase() === 'n') {
           e.preventDefault();
           getWSClient(useConfigStore.getState().wsUrl)?.newSession?.();
-          useUIStore.getState().setCurrentView('chat');
+          showPanel('chat');
         } else if (e.key.toLowerCase() === 'e') {
           e.preventDefault();
           downloadChatAsMarkdown();
@@ -367,7 +733,7 @@ function AppInner() {
       // Ctrl+Shift+G — open Debug Dashboard
       if (mod && e.shiftKey && e.key.toLowerCase() === 'g') {
         e.preventDefault();
-        setCurrentView('debug');
+        navigateToView('debug');
       }
       // Escape — collapse the inspector panel when it's open (DevTools
       // habit). Runs only when the inspector is visible so it doesn't steal
@@ -445,15 +811,22 @@ function AppInner() {
   }, [toggleSidebar, setSearchOpen]);
 
   return (
-    <div className={cn('flex h-screen', theme)}>
+    <div
+      data-shell={desktopShell ? 'desktop' : 'browser'}
+      className={cn(
+        'ws-app-root flex min-h-0 min-w-0 overflow-hidden',
+        desktopShell && 'ws-desktop-shell',
+        theme,
+      )}
+    >
       {/* ── Activity Bar — hidden during setup ── */}
-      {currentView !== 'setup' && <ActivityBar />}
+      {currentView !== 'setup' && <ActivityBar desktopShell={desktopShell} />}
 
       {/* ── Secondary Panel — collapsible, context-sensitive ── */}
-      {sidebarOpen && currentView !== 'setup' && <SidePanel />}
+      {sidebarOpen && currentView !== 'setup' && <SidePanel desktopShell={desktopShell} />}
 
       {/* ── Main area ── */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
         {currentView !== 'setup' && <ConnectionBanner />}
         {currentView === 'chat' && (
           <>
@@ -466,7 +839,12 @@ function AppInner() {
                 scroll. The dock scrolls internally past the cap; ChatView keeps
                 the remaining height as its own scroll region. */}
             {sessionId && (
-              <div className="px-4 pt-2 shrink-0 max-h-[45vh] overflow-y-auto">
+              <div
+                className={cn(
+                  'ws-workspace-dock-wrap px-4 pt-2 shrink-0 overflow-y-auto overscroll-contain',
+                  terminalOpen ? 'max-h-[28dvh]' : 'max-h-[45dvh]',
+                )}
+              >
                 <WorkspaceDock sessionId={sessionId} />
               </div>
             )}
@@ -478,62 +856,113 @@ function AppInner() {
             <InspectorPanel />
           </>
         )}
-        {currentView === 'settings' && <SettingsPanel />}
-        {currentView === 'setup' && <SetupScreen />}
-        {currentView === 'autophase' && <AutoPhaseView onClose={() => setCurrentView('chat')} />}
-        {currentView === 'specs' && <SpecsView onClose={() => setCurrentView('chat')} />}
-        {currentView === 'sddboard' && <SddBoardView onClose={() => setCurrentView('chat')} />}
-        {currentView === 'sddwizard' && <SddWizard onClose={() => setCurrentView('chat')} />}
+        {currentView === 'settings' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <SettingsPanel />
+          </div>
+        )}
+        {currentView === 'setup' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <SetupScreen />
+          </div>
+        )}
+        {currentView === 'autophase' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <AutoPhaseView onClose={() => showPanel('chat')} />
+          </div>
+        )}
+        {currentView === 'specs' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <SpecsView onClose={() => showPanel('chat')} />
+          </div>
+        )}
+        {currentView === 'sddboard' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <SddBoardView onClose={() => showPanel('chat')} />
+          </div>
+        )}
+        {currentView === 'sddwizard' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <SddWizard onClose={() => showPanel('chat')} />
+          </div>
+        )}
         {currentView === 'sessions' && (
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto">
             <SessionsDashboard />
           </div>
         )}
         {/* ── Debug Dashboard — accessed via /debug URL ── */}
-        {currentView === 'debug' && <DebugDashboard />}
+        {currentView === 'debug' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <DebugDashboard />
+          </div>
+        )}
 
         {/* ── Refresh-resilience verifier — accessed via /refresh-debug URL. ──
          *  Lets the user confirm in-app that the latest active session
          *  pointer, transcript, and UI state survived an F5. Without a
          *  visible surface there's no way for the user to verify the
          *  contract from the WebUI itself, which was a stated requirement. */}
-        {currentView === 'refresh-debug' && <RefreshDebugView />}
+        {currentView === 'refresh-debug' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <RefreshDebugView />
+          </div>
+        )}
 
         {/* ── IDE Code Editor (only in Files view) ── */}
-        {currentView === 'files' && <CodeEditor />}
+        {currentView === 'files' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <CodeEditor />
+          </div>
+        )}
 
         {/* ── Source-control diff — file list lives in the SidePanel ── */}
-        {currentView === 'changes' && <ChangesView className="h-full" />}
+        {currentView === 'changes' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <ChangesView className="h-full min-h-0" />
+          </div>
+        )}
 
         {/* ── Mailbox detail — wide main area; list lives in the SidePanel ── */}
-        {currentView === 'mailbox' && <MailboxDetailView className="h-full" />}
+        {currentView === 'mailbox' && (
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            <MailboxDetailView className="h-full min-h-0" />
+          </div>
+        )}
 
         {/* ── Design Studio gallery — live kit previews ── */}
         {currentView === 'design-gallery' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             <DesignGalleryView className="h-full" />
           </div>
         )}
 
         {/* ── Skill detail — wide main area; list lives in the SidePanel ── */}
         {currentView === 'skill' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             <SkillDetailView className="h-full" />
           </div>
         )}
 
         {/* ── Office Map (Fleet HQ) — wide main area; settings in the SidePanel ── */}
         {currentView === 'officemap' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             <OfficeMapPanel />
           </div>
         )}
 
         {/* ── Analytics Dashboard — event stats, session metrics, usage ── */}
         {currentView === 'analytics' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             <AnalyticsDashboard />
           </div>
+        )}
+
+        {/* Integrated terminal bottom dock. It lives inside main's flex column
+            so every view above it gets a smaller, scrollable height instead of
+            being covered by a fixed overlay. */}
+        {terminalOpen && (
+          <TerminalPanel desktopShell={desktopShell} onClose={() => setTerminalOpen(false)} />
         )}
       </main>
 
@@ -552,9 +981,6 @@ function AppInner() {
       {queuePanelOpen && (
         <QueuePanel open={queuePanelOpen} onClose={() => setQueuePanelOpen(false)} />
       )}
-
-      {/* Integrated terminal bottom-dock — toggled by Ctrl+` or /terminal */}
-      {terminalOpen && <TerminalPanel onClose={() => setTerminalOpen(false)} />}
 
       {/* Global overlays */}
       <ConfirmDialog />

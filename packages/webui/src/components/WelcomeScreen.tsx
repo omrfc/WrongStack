@@ -1,6 +1,7 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
+import { openMainView } from '@/lib/view-navigation';
 import { useConfigStore, useHistoryStore, useSessionStore, useUIStore } from '@/stores';
 import type { WSServerMessage } from '@/types';
 import type { LucideIcon } from 'lucide-react';
@@ -101,7 +102,6 @@ export function WelcomeScreen() {
   const { provider, model } = useConfigStore();
   const wsConnected = useConfigStore((s) => s.wsConnected);
   const wsUrl = useConfigStore((s) => s.wsUrl);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
   /** Saved-provider count. We subscribe directly to `providers.saved`
    *  because SettingsPanel is the canonical owner of that state but isn't
    *  always mounted (only when the user is on the Settings tab). undefined
@@ -192,7 +192,7 @@ export function WelcomeScreen() {
       {wsConnected && savedCount === 0 && (
         <button
           type="button"
-          onClick={() => setCurrentView('settings')}
+          onClick={() => openMainView('settings')}
           className={cn(
             'group rounded-xl border bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent',
             'border-amber-500/30 hover:border-amber-500/50 transition-colors',
@@ -217,7 +217,7 @@ export function WelcomeScreen() {
       )}
 
       {/* Prompt cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[calc(100vh-16rem)] lg:max-h-none overflow-y-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[calc(100dvh-16rem)] lg:max-h-none overflow-y-auto">
         {CARDS.map((card, ci) => {
           const Icon = card.icon;
           return (

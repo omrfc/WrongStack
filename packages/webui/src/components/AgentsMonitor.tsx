@@ -18,10 +18,11 @@
 import { Bot, ChevronLeft, ChevronRight, Cpu, Crown, Loader2, Wrench, X, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ContextBar } from '@/components/ContextBar';
+import { AgentTranscript } from '@/components/AgentTranscript';
 import { SparklineChart } from '@/components/ui/sparkline';
 import { cn } from '@/lib/utils';
 import type { SubagentView } from '@/stores';
-import { useFleetStore } from '@/stores';
+import { EMPTY_AGENT_TRANSCRIPT, useFleetStore } from '@/stores';
 
 export interface AgentsMonitorProps {
   onClose: () => void;
@@ -58,6 +59,7 @@ export function AgentCard({ agent, isLeader }: { agent: SubagentView; isLeader: 
   const meta = STATUS_META[agent.status];
   const active = agent.status === 'running';
   const elapsed = Date.now() - agent.startedAt;
+  const transcript = useFleetStore((s) => s.agentTranscripts.get(agent.id) ?? EMPTY_AGENT_TRANSCRIPT);
 
   const toolLogSlice = agent.toolLog.slice(0, 8);
   const last8Tools = [...toolLogSlice].reverse();
@@ -165,6 +167,13 @@ export function AgentCard({ agent, isLeader }: { agent: SubagentView; isLeader: 
         </div>
       )}
 
+      <AgentTranscript
+        entries={transcript}
+        agentName={agent.name}
+        compact
+        maxHeightClassName="max-h-80"
+      />
+
       {/* Streaming tail */}
       {agent.partialText && active && (
         <div className="rounded-lg border bg-muted/30 p-2">
@@ -266,7 +275,7 @@ export function AgentsMonitor({ onClose }: AgentsMonitorProps) {
         aria-hidden="true"
       />
       <div
-        className="fixed right-0 top-0 h-full z-50 w-[600px] max-w-[90vw] flex flex-col bg-background border-l shadow-2xl animate-slide-in-right"
+        className="fixed right-0 top-0 z-50 flex h-full min-h-0 w-[600px] max-w-[90vw] flex-col border-l bg-background shadow-2xl animate-slide-in-right"
         onKeyDown={handleKeyDown}
         tabIndex={-1}
       >
@@ -313,7 +322,7 @@ export function AgentsMonitor({ onClose }: AgentsMonitorProps) {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
           {fleetList.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
               <Bot className="h-12 w-12 mb-3 opacity-20" />

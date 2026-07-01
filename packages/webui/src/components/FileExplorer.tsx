@@ -1,19 +1,14 @@
 import { cn } from '@/lib/utils';
 import { useFileStore } from '@/stores/file-store';
 import type { TreeNode } from '@/stores/file-store';
-import { useSessionStore } from '@/stores';
+import { useFileReferenceStore, useSessionStore } from '@/stores';
 import { getWSClient } from '@/lib/ws-client';
+import { fileIcon, fileIconColor } from '@/lib/file-icons';
+import { showPanel } from '@/lib/view-navigation';
 import {
   ChevronRight,
   CornerLeftUp,
-  File,
   FileCode,
-  FileCog,
-  FileImage,
-  FileJson,
-  FileLock,
-  FileText,
-  FileType,
   Folder,
   FolderGit,
   FolderOpen,
@@ -22,163 +17,6 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-// ── File icon by extension ────────────────────────────────────────────
-
-const EXT_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  // ── Code ──
-  ts: FileCode,
-  tsx: FileCode,
-  js: FileCode,
-  jsx: FileCode,
-  mjs: FileCode,
-  cjs: FileCode,
-  // ── Data / config ──
-  json: FileJson,
-  lock: FileLock,
-  // ── Styles ──
-  css: FileText,
-  scss: FileText,
-  less: FileText,
-  // ── Markup ──
-  html: FileType,
-  htm: FileType,
-  svg: FileImage,
-  xml: FileType,
-  // ── Docs ──
-  md: FileText,
-  mdx: FileText,
-  txt: FileText,
-  // ── Config / data formats ──
-  yml: FileText,
-  yaml: FileText,
-  toml: FileCog,
-  env: FileCog,
-  gitignore: FileCog,
-  editorconfig: FileCog,
-  // ── Scripts ──
-  sh: FileCode,
-  bash: FileCode,
-  zsh: FileCode,
-  fish: FileCode,
-  ps1: FileCode,
-  bat: FileCode,
-  // ── Python ──
-  py: FileCode,
-  pyi: FileCode,
-  pyx: FileCode,
-  // ── Rust ──
-  rs: FileCode,
-  // ── Go ──
-  go: FileCode,
-  // ── Other languages ──
-  rb: FileCode,
-  java: FileCode,
-  c: FileCode,
-  cpp: FileCode,
-  h: FileCode,
-  hpp: FileCode,
-  sql: FileCode,
-  graphql: FileCode,
-  // ── Images ──
-  png: FileImage,
-  jpg: FileImage,
-  jpeg: FileImage,
-  gif: FileImage,
-  webp: FileImage,
-  ico: FileImage,
-};
-
-/**
- * Returns a Tailwind text color class for a file extension.
- * Colors match the WrongStack semantic palette — same hues used in
- * syntax highlighting and Monaco editor themes for visual consistency.
- */
-function fileIconColor(
-  name: string,
-  isDirectory: boolean,
-): string {
-  if (isDirectory) {
-    // Special directories get distinct colors
-    const lower = name.toLowerCase();
-    if (lower === '.git') return 'text-orange-500/80 dark:text-orange-400/80';
-    if (lower === 'node_modules') return 'text-red-400/60 dark:text-red-500/60';
-    if (lower === 'src' || lower === 'lib' || lower === 'packages')
-      return 'text-amber-500/70 dark:text-amber-400/70';
-    if (lower === 'tests' || lower === 'test' || lower === '__tests__')
-      return 'text-emerald-500/70 dark:text-emerald-400/70';
-    if (lower === 'dist' || lower === 'build' || lower === '.next')
-      return 'text-muted-foreground/50';
-    return 'text-amber-500/70 dark:text-amber-400/70';
-  }
-
-  const ext = name.split('.').pop()?.toLowerCase() ?? '';
-
-  // ── TypeScript / JavaScript → blue (function/type color) ──
-  if (/^(ts|tsx|js|jsx|mjs|cjs)$/.test(ext))
-    return 'text-blue-500 dark:text-blue-400';
-
-  // ── JSON / lockfiles → amber (number/constant color) ──
-  if (/^(json|lock)$/.test(ext))
-    return 'text-amber-500 dark:text-amber-400';
-
-  // ── CSS / styles → teal (regex color) ──
-  if (/^(css|scss|less|sass)$/.test(ext))
-    return 'text-teal-500 dark:text-teal-400';
-
-  // ── HTML / markup → rose (tag color) ──
-  if (/^(html|htm|xml|svg)$/.test(ext))
-    return 'text-rose-500 dark:text-rose-400';
-
-  // ── Markdown / docs → violet (decorator color) ──
-  if (/^(md|mdx)$/.test(ext))
-    return 'text-violet-500 dark:text-violet-400';
-
-  // ── YAML / TOML / env → green (string color) ──
-  if (/^(yml|yaml|toml|env)$/.test(ext))
-    return 'text-emerald-500 dark:text-emerald-400';
-
-  // ── Shell scripts → warm gray ──
-  if (/^(sh|bash|zsh|fish|ps1|bat)$/.test(ext))
-    return 'text-orange-400 dark:text-orange-300';
-
-  // ── Python → blue-amber gradient feel ──
-  if (/^(py|pyi|pyx)$/.test(ext))
-    return 'text-cyan-500 dark:text-cyan-400';
-
-  // ── Rust → rust orange ──
-  if (ext === 'rs')
-    return 'text-orange-500 dark:text-orange-400';
-
-  // ── Go → go blue ──
-  if (ext === 'go')
-    return 'text-sky-500 dark:text-sky-400';
-
-  // ── Ruby → red ──
-  if (ext === 'rb')
-    return 'text-red-400 dark:text-red-400';
-
-  // ── C / C++ → slate ──
-  if (/^(c|h|cpp|hpp|cc|hh)$/.test(ext))
-    return 'text-slate-500 dark:text-slate-400';
-
-  // ── Images → purple ──
-  if (/^(png|jpe?g|gif|webp|ico|svg)$/.test(ext))
-    return 'text-purple-500 dark:text-purple-400';
-
-  // ── Config files ──
-  if (/^(gitignore|editorconfig|prettierrc|eslintrc)$/.test(ext))
-    return 'text-muted-foreground/60';
-
-  return 'text-muted-foreground';
-}
-
-function fileIcon(
-  name: string,
-): React.ComponentType<{ className?: string }> {
-  const ext = name.split('.').pop()?.toLowerCase() ?? '';
-  return EXT_ICONS[ext] ?? File;
-}
 
 // ── Tree node ──────────────────────────────────────────────────────────
 
@@ -189,6 +27,7 @@ function TreeNodeItem({
   forceExpand,
   onSelect,
   onOpen,
+  onContextMenu,
 }: {
   node: TreeNode;
   depth: number;
@@ -197,6 +36,7 @@ function TreeNodeItem({
   forceExpand: boolean | null;
   onSelect: (filePath: string) => void;
   onOpen: (filePath: string) => void;
+  onContextMenu: (e: React.MouseEvent, node: TreeNode) => void;
 }) {
   const [expanded, setExpanded] = useState(depth < 1); // auto-expand root level
   const activeFilePath = useFileStore((s) => s.activeFilePath);
@@ -217,6 +57,7 @@ function TreeNodeItem({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
+          onContextMenu={(e) => onContextMenu(e, node)}
           className={cn(
             'flex items-center gap-1 w-full text-left px-1 py-0.5 text-[11px] rounded',
             'hover:bg-muted/60 transition-colors',
@@ -247,6 +88,7 @@ function TreeNodeItem({
                 forceExpand={forceExpand}
                 onSelect={onSelect}
                 onOpen={onOpen}
+                onContextMenu={onContextMenu}
               />
             ))}
           </div>
@@ -271,6 +113,7 @@ function TreeNodeItem({
     <button
       type="button"
       onClick={() => onSelect(node.path)}
+      onContextMenu={(e) => onContextMenu(e, node)}
       onDoubleClick={(e) => {
         e.preventDefault();
         onOpen(node.path);
@@ -375,10 +218,42 @@ export function FileExplorer() {
     crumb: CrumbContext;
   } | null>(null);
 
+  // ── Context menu on tree node right-click ────────────────────────────
+  //
+  // Offers "Mention in chat" (files) and "Copy path" (files + dirs). The
+  // file-mention path adds a reference chip to the chat input and switches
+  // to the chat view, mirroring the CodeEditor "send to chat" flow.
+
+  const [nodeMenu, setNodeMenu] = useState<{
+    x: number;
+    y: number;
+    node: TreeNode;
+  } | null>(null);
+
+  const handleNodeContextMenu = useCallback(
+    (e: React.MouseEvent, node: TreeNode) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setNodeMenu({ x: e.clientX, y: e.clientY, node });
+    },
+    [],
+  );
+
+  const handleMentionInChat = useCallback((node: TreeNode) => {
+    if (node.type === 'file') {
+      useFileReferenceStore.getState().addRef({ kind: 'file', path: node.path });
+      showPanel('chat');
+    }
+    setNodeMenu(null);
+  }, []);
+
   // Close context menu on any click outside or Escape
   useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
+    if (!contextMenu && !nodeMenu) return;
+    const close = () => {
+      setContextMenu(null);
+      setNodeMenu(null);
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     window.addEventListener('click', close);
     window.addEventListener('keydown', onKey);
@@ -386,7 +261,7 @@ export function FileExplorer() {
       window.removeEventListener('click', close);
       window.removeEventListener('keydown', onKey);
     };
-  }, [contextMenu]);
+  }, [contextMenu, nodeMenu]);
 
   const handleBreadcrumbContext = useCallback(
     (e: React.MouseEvent, crumb: CrumbContext) => {
@@ -532,7 +407,7 @@ export function FileExplorer() {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       {/* ── Toolbar ── */}
       {tree.length > 0 && dirCount > 0 && (
         <div className="flex items-center gap-0.5 px-2 py-0.5 border-b shrink-0">
@@ -565,7 +440,7 @@ export function FileExplorer() {
           </span>
         </div>
       )}
-      <div className="flex-1 overflow-y-auto py-1">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto py-1">
         {/* ── Breadcrumb bar — clickable path segments ── */}
         {breadcrumbs.length > 0 && (
           <div
@@ -680,6 +555,7 @@ export function FileExplorer() {
             forceExpand={globalExpand}
             onSelect={handleSelect}
             onOpen={handleOpen}
+            onContextMenu={handleNodeContextMenu}
           />
         ))}
         {tree.length === 0 && (
@@ -727,6 +603,39 @@ export function FileExplorer() {
           <div className="border-t border-border/50 mt-0.5 pt-0.5">
             <div className="px-3 py-1 text-[9px] text-muted-foreground/50 truncate max-w-[200px]">
               {contextMenu.crumb.absPath}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tree node right-click context menu ── */}
+      {nodeMenu && (
+        <div
+          className="fixed z-50 min-w-[160px] bg-popover border rounded-md shadow-md py-1 text-[11px]"
+          style={{ left: nodeMenu.x, top: nodeMenu.y }}
+        >
+          {nodeMenu.node.type === 'file' && (
+            <button
+              type="button"
+              onClick={() => handleMentionInChat(nodeMenu.node)}
+              className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-accent transition-colors"
+            >
+              Mention in chat
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard.writeText(nodeMenu.node.path);
+              setNodeMenu(null);
+            }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-accent transition-colors"
+          >
+            Copy path
+          </button>
+          <div className="border-t border-border/50 mt-0.5 pt-0.5">
+            <div className="px-3 py-1 text-[9px] text-muted-foreground/50 truncate max-w-[200px]">
+              {nodeMenu.node.path}
             </div>
           </div>
         </div>

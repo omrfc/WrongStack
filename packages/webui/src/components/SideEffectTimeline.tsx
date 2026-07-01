@@ -151,7 +151,7 @@ export function SideEffectTimeline() {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Header: title + refresh */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
@@ -196,7 +196,7 @@ export function SideEffectTimeline() {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-zinc-900 text-zinc-500">
             <tr>

@@ -112,7 +112,7 @@ export function AgentsPanel() {
           {fleetList.length} total
         </span>
       </div>
-      <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2 space-y-1.5">
         {fleetList.map((a) => (
           <AgentRow key={a.id} agent={a} onClick={() => setSelectedAgentId(a.id)} />
         ))}

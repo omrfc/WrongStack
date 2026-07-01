@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
-import { type SubagentView, useFleetStore } from '@/stores';
+import { AgentTranscript } from '@/components/AgentTranscript';
+import { EMPTY_AGENT_TRANSCRIPT, type SubagentView, useFleetStore } from '@/stores';
 import { compareAgentsByActivity, tallyAgents } from '@/lib/agent-status';
 import { Bot, Check, ChevronDown, ChevronRight, Clock, Copy, Cpu, Crown, Wrench, X, Zap } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
@@ -35,6 +36,7 @@ export function AgentDetail({
   const [copied, setCopied] = useState(false);
   const leaderId = useFleetStore((s) => s.leaderId);
   const isLeader = agent.id === leaderId;
+  const transcript = useFleetStore((s) => s.agentTranscripts.get(agent.id) ?? EMPTY_AGENT_TRANSCRIPT);
   const ctxPct = Math.min(100, Math.max(0, agent.ctxPct));
 
   const handleCopy = useCallback(async (text: string) => {
@@ -54,8 +56,8 @@ export function AgentDetail({
         : 'bg-muted text-muted-foreground';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/40 backdrop-blur-sm">
-      <div className="w-full max-w-xl max-h-[80vh] overflow-y-auto rounded-xl border bg-card shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10dvh] bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-xl max-h-[80dvh] overflow-y-auto rounded-xl border bg-card shadow-2xl">
         {/* Header */}
         <div
           className={cn(
@@ -200,6 +202,13 @@ export function AgentDetail({
               </span>
             </div>
           )}
+
+          <AgentTranscript
+            entries={transcript}
+            agentName={agent.name}
+            compact
+            maxHeightClassName="max-h-80"
+          />
 
           {/* Error */}
           {agent.error && (

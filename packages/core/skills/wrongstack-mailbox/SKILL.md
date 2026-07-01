@@ -374,37 +374,34 @@ setInterval(() => {
 ### Poll, don't long-poll
 
 The bridge does not support long-polling or websockets. Poll for new
-messages on a 5–10 s interval using the `since` filter. Don't poll
-faster than 1 Hz — that's noisy and gives nothing useful.
+messages on a 5–10 s interval. Don't poll faster than 1 Hz — that's noisy
+and gives nothing useful.
+
+For normal inbox catch-up, prefer `/mailbox/check` over manual
+`/mailbox/query` + `/mailbox/ack-many`. It checks direct mail,
+`baseId` alias mail, and broadcasts in one call, dedupes messages, and
+can optionally mark them read or completed via one batch ack.
 
 ```ts
-let lastSeen: string | undefined;
-
 async function pollOnce(): Promise<void> {
-  const args: Record<string, unknown> = {
-    to: agentId,             // mail addressed to me
-    incompleteOnly: true,    // only work I haven't finished
+  const result = await mb('/mailbox/check', {
+    agentId,
+    baseId: 'claude-code',       // optional: your bare alias
     limit: 50,
-  };
-  if (lastSeen !== undefined) args['since'] = lastSeen;
-  const result = await mb('/mailbox/query', args) as { data: MailboxMessage[] };
+  }) as { data: MailboxMessage[] };
 
   for (const m of result.data) {
     console.log(`[${m.type}] from=${m.from} subject=${m.subject}`);
     // ...handle the message...
-    await mb('/mailbox/ack', {
-      messageId: m.id,
-      readerId: agentId,
-      read: true,
-    });
-  }
-  if (result.data.length > 0) {
-    lastSeen = result.data[result.data.length - 1]!.timestamp;
   }
 }
 
 setInterval(pollOnce, 5_000);
 ```
+
+Use `/mailbox/query` directly when you need custom searches such as
+`from`, `type`, `since`, or `minPriority` filters rather than inbox
+catch-up.
 
 ### Reply with `replyTo`
 
@@ -424,11 +421,32 @@ await mb('/mailbox/send', {
 });
 ```
 
+### Complete messages while checking inbox
+
+If handling a message finishes the requested work, mark it completed in the
+same `/mailbox/check` call. This preserves read receipts and completion
+state with one batch ack:
+
+```ts
+const result = await mb('/mailbox/check', {
+  agentId,
+  baseId: 'claude-code',
+  completed: true,
+  outcome: 'handled',
+}) as { data: MailboxMessage[] };
+```
+
+Use `markRead: false` to peek without consuming messages:
+
+```ts
+await mb('/mailbox/check', { agentId, markRead: false });
+```
+
 ### Ack in batches
 
-If you've just consumed a backlog, don't ack them one at a time. Use
-`/mailbox/ack-many` — one HTTP request, one file-lock acquisition, one
-JSONL rewrite inside WrongStack:
+If you've just consumed a backlog through custom `/mailbox/query` filters,
+don't ack them one at a time. Use `/mailbox/ack-many` — one HTTP request,
+one file-lock acquisition, one JSONL rewrite inside WrongStack:
 
 ```ts
 await mb('/mailbox/ack-many', {
@@ -488,6 +506,7 @@ All routes take JSON bodies on POST (or no body on GET). All require
 |--------|------|---------|
 | POST | `/mailbox/send` | Send a message |
 | POST | `/mailbox/query` | Query messages (filters: `to`, `from`, `unreadBy`, `type`, `minPriority`, `incompleteOnly`, `limit`, `since`) |
+| POST | `/mailbox/check` | Read inbox mail for `agentId`/`baseId` plus broadcasts; optionally `markRead=false`, `completed=true`, `outcome` |
 | POST | `/mailbox/ack` | Acknowledge one message |
 | POST | `/mailbox/ack-many` | Acknowledge many in one batch |
 | POST | `/mailbox/unread-count` | Count unread for an agent |

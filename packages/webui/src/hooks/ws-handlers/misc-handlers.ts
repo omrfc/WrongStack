@@ -127,6 +127,12 @@ export function handleGoalUpdated(msg: WSServerMessage) {
 export function handlePrefsUpdated(msg: WSServerMessage) {
   const p = msg.payload as Record<string, unknown>;
   (useLocalPrefs.getState().set as (patch: Record<string, unknown>) => void)(p);
+  if (p['yolo'] === true) {
+    const confirm = useUIStore.getState().confirmInfo;
+    if (confirm && confirm.riskTier !== 'destructive' && confirm.decisionSource !== 'yolo_destructive') {
+      useUIStore.getState().hideConfirm();
+    }
+  }
 }
 
 export function handleBrainStatus(msg: WSServerMessage) {

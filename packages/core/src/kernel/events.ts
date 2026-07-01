@@ -6,8 +6,9 @@
 import type { BrainDecision, BrainDecisionRequest } from '../coordination/brain.js';
 import type { Context } from '../core/context.js';
 import type { MemoryClearedPayload, MemoryConsolidatedPayload, MemoryForgottenPayload, MemoryRememberedPayload } from '../types/memory.js';
+import type { PermissionDecision } from '../types/permission.js';
 import type { Usage } from '../types/provider.js';
-import type { Tool, ToolErrorCategory, ToolProgressEvent } from '../types/tool.js';
+import type { RiskTier, Tool, ToolErrorCategory, ToolProgressEvent } from '../types/tool.js';
 import type { ToolOutputMetadata } from '../types/context-evidence.js';
 
 /**
@@ -212,6 +213,8 @@ export interface EventMap {
     input: unknown;
     toolUseId: string;
     suggestedPattern: string;
+    decisionSource?: PermissionDecision['source'] | undefined;
+    riskTier?: RiskTier | undefined;
     resolve: (decision: 'yes' | 'no' | 'always' | 'deny') => void;
   };
   /**
@@ -368,8 +371,8 @@ export interface EventMap {
     agentName: string;
     /** The assistant text block content, or a tool-call summary. */
     content: string;
-    /** 'text' | 'tool_use' | 'error' | 'status' */
-    kind: 'text' | 'tool_use' | 'error' | 'status';
+    /** Timeline entry kind. */
+    kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'error' | 'status' | 'system';
     /** Iteration index within the subagent's own run. */
     iteration: number;
     /** ISO 8601 timestamp. */

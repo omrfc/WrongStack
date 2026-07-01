@@ -1,5 +1,7 @@
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { resolveProjectDir, wstackGlobalRoot } from '@wrongstack/core';
-import { readLiveLock } from '@wrongstack/core/coordination';
+import { readLiveLock, type MailboxBridgeLock } from '@wrongstack/core/coordination';
 
 export interface MailboxBridgeParams {
   projectRoot: string;
@@ -12,55 +14,149 @@ export interface MailboxBridgeParams {
   ctx: { meta: Record<string, unknown> };
 }
 
+const MAILBOX_BRIDGE_BOOT_TIMEOUT_MS = 5_000;
+
 /**
  * Attempt to discover and join a running mailbox bridge server.
  *
- * Checks the project's live-lock file for an active bridge instance.
- * When found, stores the bridge URL and token in ctx.meta so the
- * backend services can use it. When absent or unhealthy, logs a
- * message and continues without external-agent connectivity.
+ * If no healthy bridge is present, standalone WebUI surfaces try to
+ * spawn `wstack mailbox serve` and wait briefly for the lock to become
+ * healthy. Failure stays non-fatal: the WebUI can run without external
+ * agent HTTP connectivity.
  */
 export async function discoverMailboxBridgeForWebui(params: MailboxBridgeParams): Promise<void> {
   const mode = params.config?.features?.mailboxBridge ?? 'auto';
   if (mode === 'off') return;
 
   const projectDir = resolveProjectDir(params.projectRoot, wstackGlobalRoot());
-  const result = await readLiveLock(projectDir);
+  let result = await readLiveLock(projectDir);
+  let spawnedPid: number | null = null;
+  if (result.kind !== 'live') {
+    spawnedPid = spawnMailboxBridge(params.projectRoot, params.logger);
+    if (spawnedPid !== null) {
+      const live = await waitForLiveMailboxBridge(projectDir, MAILBOX_BRIDGE_BOOT_TIMEOUT_MS);
+      if (live) {
+        stashBridge(params, live, projectDir, 'spawned', spawnedPid);
+        params.logger.debug('webui spawned mailbox bridge', {
+          url: live.url,
+          lockPath: projectDir,
+          childPid: spawnedPid,
+        });
+        return;
+      }
+      result = await readLiveLock(projectDir);
+    }
+  }
   switch (result.kind) {
     case 'live': {
       params.logger.debug('webui joined existing mailbox bridge', {
         url: result.lock.url,
         lockPath: projectDir,
       });
-      params.ctx.meta['mailboxBridge'] = {
-        url: result.lock.url,
-        token: result.lock.token,
-        lockPath: projectDir,
-        childPid: null,
-        source: 'joined',
-      };
+      stashBridge(params, result.lock, projectDir, 'joined', null);
       break;
     }
     case 'probe-failed': {
       params.logger.warn(
         'mailbox bridge present but /healthz unreachable; webui will start without external-agent connectivity',
-        { url: result.lock.url, lockPath: projectDir },
+        { url: result.lock.url, lockPath: projectDir, spawnedPid },
       );
-      params.ctx.meta['mailboxBridge'] = {
-        url: result.lock.url,
-        token: result.lock.token,
-        lockPath: projectDir,
-        childPid: null,
-        source: 'unhealthy',
-      };
+      stashBridge(params, result.lock, projectDir, 'unhealthy', null);
       break;
     }
     case 'absent': {
-      params.logger.info(
-        'no mailbox bridge running; webui will start without external-agent connectivity. Run `wstack mailbox serve` or a CLI surface to bring one up.',
-        { projectDir },
+      params.logger.warn(
+        'mailbox bridge unavailable; webui will start without external-agent connectivity. Run `wstack mailbox serve` or a CLI surface to bring one up.',
+        { projectDir, spawnedPid },
       );
       break;
     }
   }
+}
+
+function stashBridge(
+  params: MailboxBridgeParams,
+  lock: MailboxBridgeLock,
+  lockPath: string,
+  source: 'joined' | 'spawned' | 'unhealthy',
+  childPid: number | null,
+): void {
+  params.ctx.meta['mailboxBridge'] = {
+    url: lock.url,
+    token: lock.token,
+    lockPath,
+    childPid,
+    source,
+  };
+}
+
+async function waitForLiveMailboxBridge(
+  projectDir: string,
+  timeoutMs: number,
+): Promise<MailboxBridgeLock | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(120);
+    const result = await readLiveLock(projectDir);
+    if (result.kind === 'live') return result.lock;
+  }
+  return null;
+}
+
+function spawnMailboxBridge(
+  projectRoot: string,
+  logger: MailboxBridgeParams['logger'],
+): number | null {
+  const invocation = mailboxServeInvocation();
+  try {
+    const child = spawn(invocation.command, invocation.args, {
+      cwd: projectRoot,
+      detached: process.platform !== 'win32',
+      env: process.env,
+      stdio: 'ignore',
+      windowsHide: true,
+      ...(invocation.windowsVerbatimArguments
+        ? { windowsVerbatimArguments: invocation.windowsVerbatimArguments }
+        : {}),
+    });
+    child.once('error', (err) => {
+      logger.warn('failed to spawn mailbox bridge for webui', {
+        command: invocation.command,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+    child.unref();
+    return child.pid ?? null;
+  } catch (err) {
+    logger.warn('failed to spawn mailbox bridge for webui', {
+      command: invocation.command,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+function mailboxServeInvocation(): {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean | undefined;
+} {
+  const explicitCliEntry = process.env['WRONGSTACK_CLI_ENTRY'];
+  if (explicitCliEntry) {
+    return { command: process.execPath, args: [explicitCliEntry, 'mailbox', 'serve'] };
+  }
+  try {
+    const require = createRequire(import.meta.url);
+    const cliEntry = require.resolve('@wrongstack/cli');
+    return { command: process.execPath, args: [cliEntry, 'mailbox', 'serve'] };
+  } catch {
+    return {
+      command: process.platform === 'win32' ? 'wstack.cmd' : 'wstack',
+      args: ['mailbox', 'serve'],
+    };
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

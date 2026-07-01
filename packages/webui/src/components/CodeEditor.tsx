@@ -1,5 +1,7 @@
 import { useFileStore } from '@/stores/file-store';
 import { useConfigStore } from '@/stores/config-store';
+import { useFileReferenceStore } from '@/stores/file-reference-store';
+import { useUIStore } from '@/stores/ui-store';
 import {
   COMPLETION_CACHE_TTL_MS,
   COMPLETION_DOCUMENT_CHARS,
@@ -15,8 +17,9 @@ import {
 } from '@/lib/completion';
 import { getWSClient } from '@/lib/ws-client';
 import { cn } from '@/lib/utils';
-import { X, Circle } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { showPanel } from '@/lib/view-navigation';
+import { X, Circle, Send, FileText } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor, { type OnMount, loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import type { WSCompletionResult } from '@/types';
@@ -144,6 +147,10 @@ export function CodeEditor() {
   const language = activeFilePath ? getLanguage(activeFilePath) : 'plaintext';
   const monacoTheme = getMonacoTheme();
 
+  /** Whether the editor currently has a non-empty text selection. Drives the
+   *  floating "send to chat" toolbar. */
+  const [hasSelection, setHasSelection] = useState(false);
+
   useEffect(() => {
     activeFilePathRef.current = activeFilePath;
   }, [activeFilePath]);
@@ -269,11 +276,97 @@ export function CodeEditor() {
     };
   }, []);
 
-  const handleMount: OnMount = useCallback((editor) => {
-    editorRef.current = editor;
-    // Ensure the editor uses the correct theme on mount
-    monaco.editor.setTheme(getMonacoTheme());
+  /** Grab the active selection (text + line range) from Monaco, or null if
+   *  nothing meaningful is selected. */
+  const captureSelection = useCallback(():
+    | { content: string; startLine: number; endLine: number }
+    | null => {
+    const editor = editorRef.current;
+    if (!editor) return null;
+    const selection = editor.getSelection();
+    if (!selection || selection.isEmpty()) return null;
+    const model = editor.getModel();
+    if (!model) return null;
+    const content = model.getValueInRange(selection);
+    if (!content.trim()) return null;
+    return {
+      content,
+      startLine: selection.startLineNumber,
+      endLine: selection.endLineNumber,
+    };
   }, []);
+
+  /** Switch to the chat view and focus its textarea so the user can keep
+   *  typing the question that pairs with the reference they just added. */
+  const focusChat = useCallback(() => {
+    showPanel('chat');
+    requestAnimationFrame(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(
+        'textarea[placeholder*="agent"], textarea[placeholder*="follow-up"]',
+      );
+      ta?.focus();
+    });
+  }, []);
+
+  /** Send the current editor selection to the chat input as a snippet ref. */
+  const sendSelectionToChat = useCallback(() => {
+    const filePath = activeFilePathRef.current;
+    if (!filePath) return;
+    const sel = captureSelection();
+    if (!sel) return;
+    useFileReferenceStore.getState().addRef({
+      kind: 'snippet',
+      path: filePath,
+      startLine: sel.startLine,
+      endLine: sel.endLine,
+      content: sel.content,
+    });
+    focusChat();
+  }, [captureSelection, focusChat]);
+
+  /** Mention the whole active file in the chat input. */
+  const mentionWholeFile = useCallback(() => {
+    const filePath = activeFilePathRef.current;
+    if (!filePath) return;
+    useFileReferenceStore.getState().addRef({ kind: 'file', path: filePath });
+    focusChat();
+  }, [focusChat]);
+
+  const handleMount: OnMount = useCallback(
+    (editor) => {
+      editorRef.current = editor;
+      // Ensure the editor uses the correct theme on mount
+      monaco.editor.setTheme(getMonacoTheme());
+
+      // Track selection emptiness so the floating "send to chat" toolbar can
+      // appear/disappear as the user selects code.
+      const updateSelection = () => {
+        const sel = editor.getSelection();
+        setHasSelection(!!sel && !sel.isEmpty());
+      };
+      editor.onDidChangeCursorSelection(updateSelection);
+
+      // Right-click context menu action: "Send selection to chat". When
+      // nothing is selected it offers "Mention whole file" instead.
+      editor.addAction({
+        id: 'wrongstack-send-to-chat',
+        label: 'Send selection to chat',
+        contextMenuGroupId: 'wrongstack',
+        contextMenuOrder: 0,
+        precondition: undefined,
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyL],
+        run: (ed) => {
+          const sel = ed.getSelection();
+          if (sel && !sel.isEmpty()) {
+            sendSelectionToChat();
+          } else {
+            mentionWholeFile();
+          }
+        },
+      });
+    },
+    [sendSelectionToChat, mentionWholeFile],
+  );
 
   const handleChange = useCallback(
     (value: string | undefined) => {
@@ -318,7 +411,7 @@ export function CodeEditor() {
 
   if (openFiles.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex h-full min-w-0 items-center justify-center">
         <div className="text-center space-y-2">
           <p className="text-sm text-muted-foreground">
             No files open
@@ -332,9 +425,24 @@ export function CodeEditor() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
       <EditorTabs />
-      <div className="flex-1 relative">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/* Floating "send to chat" toolbar — appears when text is selected,
+            and always offers "mention whole file" for the active tab. */}
+        {(hasSelection || activeFile) && (
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-lg border border-border bg-popover/95 backdrop-blur shadow-md p-1">
+            <button
+              type="button"
+              onClick={hasSelection ? sendSelectionToChat : mentionWholeFile}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-foreground hover:bg-accent transition-colors"
+              title={hasSelection ? 'Send selected lines to chat' : 'Mention this file in chat'}
+            >
+              {hasSelection ? <Send className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+              <span>{hasSelection ? 'Send to chat' : 'Mention file'}</span>
+            </button>
+          </div>
+        )}
         {activeFile ? (
           <Editor
             key={activeFile.path}

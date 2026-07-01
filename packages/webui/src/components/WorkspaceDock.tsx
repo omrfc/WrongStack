@@ -13,6 +13,7 @@
 
 import { Bot, GitBranch, ListTodo, Rocket, SlidersHorizontal, Target, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { openMainView } from '@/lib/view-navigation';
 import { cn } from '@/lib/utils';
 import { useGitInfo } from '@/hooks/useGitInfo';
 import {
@@ -120,7 +121,6 @@ function DockChip({
 export function WorkspaceDock({ sessionId }: { sessionId: string }) {
   const dockSection = useUIStore((s) => s.dockSection);
   const toggleDockSection = useUIStore((s) => s.toggleDockSection);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
   const hiddenChips = useUIStore((s) => s.hiddenChips);
   const toggleChipHidden = useUIStore((s) => s.toggleChipHidden);
   const dockCustomizeOpen = useUIStore((s) => s.dockCustomizeOpen);
@@ -165,12 +165,12 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
     collab: true,
   };
   const visible: Record<DockSection, boolean> = {
-    autophase: hasData.autophase && !hidden.has('autophase'),
-    goal: hasData.goal && !hidden.has('goal'),
-    fleet: hasData.fleet && !hidden.has('fleet'),
-    work: hasData.work && !hidden.has('work'),
-    worktrees: hasData.worktrees && !hidden.has('worktrees'),
-    collab: hasData.collab && !hidden.has('collab'),
+    autophase: (hasData.autophase || dockSection === 'autophase') && !hidden.has('autophase'),
+    goal: (hasData.goal || dockSection === 'goal') && !hidden.has('goal'),
+    fleet: (hasData.fleet || dockSection === 'fleet') && !hidden.has('fleet'),
+    work: (hasData.work || dockSection === 'work') && !hidden.has('work'),
+    worktrees: (hasData.worktrees || dockSection === 'worktrees') && !hidden.has('worktrees'),
+    collab: (hasData.collab || dockSection === 'collab') && !hidden.has('collab'),
   };
   const open = dockSection && visible[dockSection] ? dockSection : null;
 
@@ -188,7 +188,7 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
             pulse={activePhaseId != null}
             // AutoPhase opens straight into the full board view — the inline
             // panel hogged vertical space above the chat history.
-            onClick={() => setCurrentView('autophase')}
+            onClick={() => openMainView('autophase')}
           />
         )}
         {visible.goal && goal && (
@@ -310,7 +310,13 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
 
       {/* ── Expanded section — exactly one, or nothing ── */}
       {open && <div className="border-t border-border/40 pt-2" />}
-      {open === 'goal' && <GoalPanel goal={goal} />}
+      {open === 'goal' && (
+        goal ? (
+          <GoalPanel goal={goal} />
+        ) : (
+          <DockEmptyState title="No active goal" detail="Start a goal from chat or the goal command." />
+        )
+      )}
       {open === 'fleet' && <FleetPanel />}
       {open === 'worktrees' && (
         <div className="space-y-2">
@@ -346,6 +352,21 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
       <div className={cn(open === 'collab' ? 'block' : 'hidden')}>
         <CollabPanel sessionId={sessionId} />
       </div>
+    </div>
+  );
+}
+
+function DockEmptyState({
+  title,
+  detail,
+}: {
+  title: string;
+  detail: string;
+}): React.ReactElement {
+  return (
+    <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs">
+      <div className="font-medium text-foreground">{title}</div>
+      <div className="mt-1 text-muted-foreground">{detail}</div>
     </div>
   );
 }

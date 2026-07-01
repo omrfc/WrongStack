@@ -24,6 +24,7 @@ import { registerShutdownHandlers } from './lifecycle.js';
 import { setupEvents, type FileWatcherMetrics } from './setup-events.js';
 import { resolveSessionLoggingConfig, createSessionEventBridge } from '@wrongstack/core';
 import { getCostRates } from './usage-cost.js';
+import { resolveProviderModelMetadata } from './model-catalog.js';
 import type { ConnectedClient, WebUIOptions } from './types.js';
 import { toErrorMessage } from '@wrongstack/core/utils';
 
@@ -119,7 +120,12 @@ export function createSessionStartPayload(g: SessionStartPayloadGetters): () => 
     let outputCost = 0;
     let cacheReadCost = 0;
     try {
-      const m = await g.modelsRegistry.getModel(config.provider, config.model);
+      const m = await resolveProviderModelMetadata(
+        g.modelsRegistry,
+        config.provider,
+        config.model,
+        config.providers?.[config.provider],
+      );
       maxContext = m?.capabilities?.maxContext ?? 0;
       if (!maxContext) {
         try {

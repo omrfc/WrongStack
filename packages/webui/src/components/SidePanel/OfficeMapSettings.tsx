@@ -90,7 +90,7 @@ export function OfficeMapSettings() {
   const recentEvents = vizEvents.slice(0, 10).length;
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 space-y-4">
+    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 space-y-4">
       {/* Header */}
       <div className="space-y-1">
         <h3 className="text-sm font-semibold">Office Map</h3>

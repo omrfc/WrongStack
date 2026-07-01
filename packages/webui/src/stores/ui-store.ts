@@ -8,14 +8,14 @@ import type { MailboxMessage } from './mailbox-store';
 
 // Activity types shown in the ActivityBar (secondary panel content).
 // One icon = one full panel. 'context' and 'sessions' were folded into
-// 'chat' and 'history' — coerceActivity maps persisted legacy values.
+// 'chat' and 'history'; 'projects' was removed from WebUI because project
+// switching is owned by the launcher/desktop shell.
 export type Activity =
   | 'chat'
   | 'agents'
   | 'history'
   | 'files'
   | 'changes'
-  | 'projects'
   | 'mailbox'
   | 'skills'
   | 'design'
@@ -28,9 +28,9 @@ const ACTIVITIES: readonly Activity[] = [
   'history',
   'files',
   'changes',
-  'projects',
   'mailbox',
   'skills',
+  'design',
   'worktrees',
   'officemap',
 ];
@@ -40,6 +40,7 @@ export function coerceActivity(value: unknown): Activity {
   if (ACTIVITIES.includes(value as Activity)) return value as Activity;
   if (value === 'context') return 'chat';
   if (value === 'sessions') return 'history';
+  if (value === 'projects') return 'chat';
   if (value === 'officemap') return 'officemap';
   return 'chat';
 }
@@ -71,6 +72,14 @@ type View = (typeof VIEWS)[number];
  *  removed in v3) lands on 'chat' rather than crashing the router. */
 export function coerceView(value: unknown): View {
   return (VIEWS as readonly string[]).includes(value as string) ? (value as View) : 'chat';
+}
+
+const DOCK_SECTIONS = ['autophase', 'goal', 'fleet', 'work', 'worktrees', 'collab'] as const;
+
+function coerceDockSection(value: unknown): DockSection | null {
+  return value === null || value === undefined || !DOCK_SECTIONS.includes(value as DockSection)
+    ? null
+    : (value as DockSection);
 }
 
 /** Single source of truth for the secondary panel width bounds. */
@@ -111,6 +120,8 @@ interface UIState {
     toolName: string;
     input: unknown;
     suggestedPattern: string;
+    decisionSource?: string | undefined;
+    riskTier?: 'safe' | 'standard' | 'destructive' | undefined;
   } | null;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
@@ -157,10 +168,13 @@ interface UIState {
   queuePanelOpen: boolean;
   /** Integrated terminal bottom-dock — toggled by Ctrl+` or /terminal. */
   terminalOpen: boolean;
+  /** Monotonic signal consumed by TerminalPanel to create another PTY tab. */
+  terminalCreateNonce: number;
   setProcessMonitorOpen: (open: boolean) => void;
   setQueuePanelOpen: (open: boolean) => void;
   setTerminalOpen: (open: boolean) => void;
   toggleTerminal: () => void;
+  requestTerminalCreate: () => void;
 
   /** Skills panel breadcrumb state — persisted so history survives panel switches. */
   skillsState: {
@@ -250,12 +264,53 @@ interface UIState {
   toggleDockSection: (section: DockSection) => void;
   /** Show/hide a dock chip from the customization menu. */
   toggleChipHidden: (section: DockSection) => void;
+  /** Make a dock chip visible without toggling it off when it is already visible. */
+  showDockChip: (section: DockSection) => void;
   setDockCustomizeOpen: (open: boolean) => void;
   setFleetMonitorOpen: (open: boolean) => void;
   setAgentsMonitorOpen: (open: boolean) => void;
   setInspectorOpen: (open: boolean) => void;
   setInspectorTab: (tab: 'fleet' | 'agents' | 'sideEffects') => void;
   toggleInspector: () => void;
+}
+
+function isDesktopShellStorageContext(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (Boolean((window as unknown as { wrongstackDesktopHost?: unknown }).wrongstackDesktopHost)) {
+    return true;
+  }
+  try {
+    return new URLSearchParams(window.location.search).get('shell') === 'desktop';
+  } catch {
+    return false;
+  }
+}
+
+function homeNavigationStatePatch(
+  options: { sidebarOpen?: boolean | undefined } = {},
+): Partial<UIState> {
+  return {
+    currentView: 'chat',
+    activeActivity: 'chat',
+    sidebarOpen: options.sidebarOpen ?? false,
+    dockSection: null,
+    dockCustomizeOpen: false,
+    fleetMonitorOpen: false,
+    agentsMonitorOpen: false,
+    processMonitorOpen: false,
+    queuePanelOpen: false,
+    inspectorOpen: false,
+    terminalOpen: false,
+    paletteOpen: false,
+    shortcutsOpen: false,
+    searchOpen: false,
+    searchQuery: '',
+    searchActiveMessageId: null,
+    modelSwitcherOpen: false,
+    promptLibraryOpen: false,
+    selectedMailMessage: null,
+    refinePanel: null,
+  };
 }
 
 export const useUIStore = create<UIState>()(
@@ -296,6 +351,7 @@ export const useUIStore = create<UIState>()(
       processMonitorOpen: false,
       queuePanelOpen: false,
       terminalOpen: false,
+      terminalCreateNonce: 0,
       selectedMailMessage: null,
       skillsState: {
         selectedSkill: null,
@@ -310,7 +366,7 @@ export const useUIStore = create<UIState>()(
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setSettingsOpen: (open) => set({ settingsOpen: open }),
-      setCurrentView: (view) => set({ currentView: view }),
+      setCurrentView: (view) => set({ currentView: coerceView(view) }),
       showConfirm: (info) => set({ showConfirmDialog: true, confirmInfo: info }),
       hideConfirm: () => set({ showConfirmDialog: false, confirmInfo: null }),
       setPaletteOpen: (open) => set({ paletteOpen: open }),
@@ -381,6 +437,10 @@ export const useUIStore = create<UIState>()(
             dockSection: !hidden && s.dockSection === section ? null : s.dockSection,
           };
         }),
+      showDockChip: (section) =>
+        set((s) => ({
+          hiddenChips: s.hiddenChips.filter((candidate) => candidate !== section),
+        })),
       setDockCustomizeOpen: (open) => set({ dockCustomizeOpen: open }),
       setFleetMonitorOpen: (open: boolean) => set({ fleetMonitorOpen: open }),
       setAgentsMonitorOpen: (open: boolean) => set({ agentsMonitorOpen: open }),
@@ -391,6 +451,7 @@ export const useUIStore = create<UIState>()(
       setQueuePanelOpen: (open: boolean) => set({ queuePanelOpen: open }),
       setTerminalOpen: (open: boolean) => set({ terminalOpen: open }),
       toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
+      requestTerminalCreate: () => set((s) => ({ terminalCreateNonce: s.terminalCreateNonce + 1 })),
       setSkillsState: (state) => set({ skillsState: state }),
       setSelectedMailMessage: (msg) => set({ selectedMailMessage: msg }),
     }),
@@ -423,16 +484,26 @@ export const useUIStore = create<UIState>()(
         if ('currentView' in p) {
           p.currentView = coerceView(p.currentView);
         }
-        if (
-          'dockSection' in p &&
-          p.dockSection !== null &&
-          !['autophase', 'goal', 'fleet', 'work', 'worktrees', 'collab'].includes(
-            p.dockSection as string,
-          )
-        ) {
-          p.dockSection = null;
+        if ('dockSection' in p) {
+          p.dockSection = coerceDockSection(p.dockSection);
         }
         return p as never as UIState;
+      },
+      merge: (persisted, current) => {
+        const merged = {
+          ...current,
+          ...((persisted ?? {}) as Partial<UIState>),
+        } as UIState;
+        merged.activeActivity = coerceActivity(merged.activeActivity);
+        merged.currentView = coerceView(merged.currentView);
+        merged.dockSection = coerceDockSection(merged.dockSection);
+        merged.sidebarWidth = Math.max(
+          SIDEBAR_MIN_WIDTH,
+          Math.min(SIDEBAR_MAX_WIDTH, merged.sidebarWidth),
+        );
+        return isDesktopShellStorageContext()
+          ? { ...merged, ...homeNavigationStatePatch({ sidebarOpen: false }) }
+          : merged;
       },
       partialize: (s) => ({
         sidebarOpen: s.sidebarOpen,
@@ -455,9 +526,11 @@ export const useUIStore = create<UIState>()(
         // back on whichever main view + dock section they were on. This
         // is the *last-known-good* view; if the active session switches
         // (e.g. resume of a different session), the connection layer is
-        // expected to call setCurrentView('chat') defensively because
+        // expected to navigate back to chat defensively because
         // non-chat views are session-agnostic and can confuse the user
-        // when the session doesn't actually own them.
+        // when the session doesn't actually own them. Navigation callers
+        // should go through `view-navigation` helpers so the side-panel and
+        // main view stay paired.
         //
         // We intentionally do NOT persist overlay open states
         // (processMonitorOpen, queuePanelOpen, terminalOpen, etc.):
@@ -469,3 +542,9 @@ export const useUIStore = create<UIState>()(
     },
   ),
 );
+
+export function resetUiNavigationToHome(
+  options: { sidebarOpen?: boolean | undefined } = {},
+): void {
+  useUIStore.setState(homeNavigationStatePatch(options));
+}

@@ -196,6 +196,17 @@ describe('DefaultPermissionPolicy', () => {
       expect(d.source).toBe('yolo');
     });
 
+    it('yolo auto-approves batch_tool_use instead of surfacing an approval modal', async () => {
+      const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
+      const d = await p.evaluate(
+        tool('batch_tool_use', 'confirm', 'standard'),
+        { calls: [{ tool: 'grep', input: { pattern: 'TODO', path: 'src' } }] },
+        { projectRoot: process.cwd() } as Context,
+      );
+      expect(d.permission).toBe('auto');
+      expect(d.source).toBe('yolo');
+    });
+
     it('yolo auto-approves normal exec tools', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
       const d = await p.evaluate(

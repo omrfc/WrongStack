@@ -1,0 +1,33 @@
+{
+  "name": "@wrongstack/desktop",
+  "version": "0.278.0",
+  "private": true,
+  "license": "MIT",
+  "description": "WrongStack Desktop - Electron shell for managing multiple local WrongStack runtimes.",
+  "type": "module",
+  "main": "./dist/main/main.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "pnpm --filter @wrongstack/tools build && pnpm --filter @wrongstack/webui build && tsup && vite build",
+    "dev": "pnpm run build && electron .",
+    "start": "electron .",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@wrongstack/core": "workspace:*",
+    "@wrongstack/webui": "workspace:*",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "@types/ws": "^8.18.1",
+    "electron": "^43.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0"
+  }
+}

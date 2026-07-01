@@ -228,6 +228,67 @@ describe('parseGoalState — journal', () => {
     expect(parseGoalState({ goal: 'T', journal: {} })!.journal).toBeUndefined();
     expect(parseGoalState({ goal: 'T', journal: 'not-array' })!.journal).toBeUndefined();
   });
+
+  it('drops entries with a missing or non-numeric iteration', () => {
+    // GoalPanel uses entry.iteration as both the React key and the row
+    // label. A malformed entry (missing iteration or a string) would
+    // produce a non-unique key warning and `#{undefined}` in the UI.
+    // The parser must drop such rows instead of passing them through.
+    const raw = {
+      goal: 'T',
+      journal: [
+        { iteration: 1, task: 'valid' },
+        { task: 'no iteration field at all' },
+        { iteration: '2' },
+        { iteration: undefined },
+        null,
+        'not-an-object',
+        { iteration: NaN },
+        { iteration: Infinity },
+      ],
+    };
+    const result = parseGoalState(raw);
+    expect(result!.journal).toEqual([{ iteration: 1, task: 'valid' }]);
+  });
+
+  it('drops entries with wrong-typed optional fields', () => {
+    // Anything that violates the GoalJournalEntry contract — e.g.,
+    // a numeric `task` or a string `progress` — is dropped so we never
+    // hand the panel an entry that would render undefined or crash a
+    // numeric formatter downstream.
+    const raw = {
+      goal: 'T',
+      journal: [
+        { iteration: 1, task: 123 },
+        { iteration: 2, progress: '50' },
+        { iteration: 3, progressNote: 5 },
+        { iteration: 4, timestamp: 1234567890 },
+        // Valid control row
+        { iteration: 5, task: 'ok', progress: 50, timestamp: 'now' },
+      ],
+    };
+    const result = parseGoalState(raw);
+    expect(result!.journal).toEqual([
+      { iteration: 5, task: 'ok', progress: 50, timestamp: 'now' },
+    ]);
+  });
+
+  it('preserves optional string fields that are missing or undefined', () => {
+    // A row with only the required `iteration` field is valid.
+    // Optional fields are allowed to be absent.
+    const raw = {
+      goal: 'T',
+      journal: [
+        { iteration: 1 },
+        { iteration: 2, task: undefined, status: undefined, progress: undefined, progressNote: undefined, timestamp: undefined },
+      ],
+    };
+    const result = parseGoalState(raw);
+    expect(result!.journal).toEqual([
+      { iteration: 1 },
+      { iteration: 2, task: undefined, status: undefined, progress: undefined, progressNote: undefined, timestamp: undefined },
+    ]);
+  });
 });
 
 // ─── lastTask / lastStatus ─────────────────────────────────────────────────────

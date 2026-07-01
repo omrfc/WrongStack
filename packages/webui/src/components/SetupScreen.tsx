@@ -1,8 +1,9 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { useConfigStore, useUIStore } from '@/stores';
+import { useConfigStore } from '@/stores';
 import type { WSServerMessage } from '@/types';
 import { toast } from '@/components/Toaster';
 import { getWSClient } from '@/lib/ws-client';
+import { showPanel } from '@/lib/view-navigation';
 import { trackEvent } from '@/lib/analytics';
 import { recordReferralClick, trackReferralConversion } from '@/lib/analytics';
 import {
@@ -866,7 +867,6 @@ function CustomProviderSection({ onKeySaved }: { onKeySaved: (providerId: string
 // ── Setup Screen ──────────────────────────────────────────────────────────────
 
 export function SetupScreen() {
-  const { setCurrentView } = useUIStore();
   const { provider, model, setProvider, setModel, wsConnected, wsUrl } = useConfigStore();
   useWebSocket();
 
@@ -1144,7 +1144,7 @@ export function SetupScreen() {
       off();
       if (p.success) {
         wsClient.newSession();
-        setCurrentView('chat');
+        showPanel('chat');
       } else {
         toast.error(p.message);
       }
@@ -1155,7 +1155,7 @@ export function SetupScreen() {
       off();
       toast.error('Model switch timed out. Please try again.');
     }, 5000);
-  }, [selectedProvider, selectedModel, setProvider, setModel, wsUrl, setCurrentView]);
+  }, [selectedProvider, selectedModel, setProvider, setModel, wsUrl]);
 
   // Sort providers: popular ones first, then catalog remainder
   const popularIds = new Set(popularProviders.map((p) => p.id));
@@ -1164,7 +1164,7 @@ export function SetupScreen() {
     .sort((a, b) => a.id.localeCompare(b.id));
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b bg-card shrink-0">
         <div className="flex items-center gap-3">
@@ -1187,7 +1187,7 @@ export function SetupScreen() {
       </header>
 
       {/* Content */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         {step === 'keys' ? (
           <div className="p-6 max-w-3xl mx-auto space-y-8">
             {/* Progress steps */}

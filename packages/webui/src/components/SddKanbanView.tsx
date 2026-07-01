@@ -76,11 +76,11 @@ export function SddKanbanView({
   }, [tasks]);
 
   return (
-    <div className="flex h-full gap-3 overflow-x-auto p-4">
+    <div className="flex h-full min-h-0 min-w-0 gap-3 overflow-x-auto p-4">
       {COLUMNS.map((col) => {
         const items = byCol.get(col.key) ?? [];
         return (
-          <div key={col.key} className="flex w-64 shrink-0 flex-col">
+          <div key={col.key} className="flex min-h-0 w-64 shrink-0 flex-col">
             <div className={cn('mb-2 flex items-center gap-2 border-b-2 pb-1.5', col.accent)}>
               <span className={cn('text-xs font-bold uppercase tracking-wide', col.head)}>
                 {col.label}
@@ -89,7 +89,7 @@ export function SddKanbanView({
                 {items.length}
               </span>
             </div>
-            <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
               {items.map((t) => (
                 <KanbanCard
                   key={t.id}

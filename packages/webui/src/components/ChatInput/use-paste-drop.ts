@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { autoFenceCode } from './code-detect.js';
-import type { FileMentionState } from './file-mention-picker.js';
+import { useFileReferenceStore } from '@/stores/file-reference-store.js';
 
 export interface PasteHintState {
   chars: number;
@@ -16,7 +16,6 @@ interface UsePasteDropOptions {
   input: string;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   setInput: (value: string) => void;
-  setAtMention: (value: FileMentionState | null) => void;
 }
 
 /** Read a File into a base64 data-URL. */
@@ -29,7 +28,7 @@ function readFileAsDataURL(file: File): Promise<string> {
   });
 }
 
-export function usePasteDrop({ input, textareaRef, setInput, setAtMention }: UsePasteDropOptions) {
+export function usePasteDrop({ input, textareaRef, setInput }: UsePasteDropOptions) {
   const [pasteHint, setPasteHint] = useState<PasteHintState | null>(null);
   const [draggingOver, setDraggingOver] = useState(false);
 
@@ -123,35 +122,13 @@ export function usePasteDrop({ input, textareaRef, setInput, setAtMention }: Use
       return;
     }
 
-    // Insert `@<filename>` per dropped file at the current cursor, with spaces
-    // between them. Browsers strip the full path for security, so we use the
-    // basename only — the FilePicker can resolve it against the workspace tree.
-    const textarea = textareaRef.current;
-    const insertPos = textarea?.selectionStart ?? input.length;
-    const before = input.slice(0, insertPos);
-    const after = input.slice(insertPos);
-    const needsLeadingSpace = before.length > 0 && !/\s$/.test(before);
-    const lead = needsLeadingSpace ? ' ' : '';
-    const tokens = files.map((file) => `@${file.name}`);
-    const joined = tokens.join(' ');
-    const needsTrailingSpace = after.length === 0 || !/^\s/.test(after);
-    const trail = needsTrailingSpace ? ' ' : '';
-    const insertion = `${lead}${joined}${trail}`;
-    const next = before + insertion + after;
-    setInput(next);
-
-    const lastTokenStart = before.length + lead.length + tokens.slice(0, -1).join(' ').length + (tokens.length > 1 ? 1 : 0);
-    const lastBasename = files[files.length - 1]?.name ?? '';
-    requestAnimationFrame(() => {
-      if (textarea) {
-        const cur = before.length + insertion.length - trail.length;
-        textarea.focus();
-        textarea.setSelectionRange(cur, cur);
-        textarea.style.height = 'auto';
-        textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-      }
-      setAtMention({ start: lastTokenStart, query: lastBasename });
-    });
+    // Add dropped files as reference chips. Browsers strip the full path for
+    // security, so we use the basename only — the user can refine the path
+    // via the @-mention picker if needed.
+    const { addRef } = useFileReferenceStore.getState();
+    for (const file of files) {
+      addRef({ kind: 'file', path: file.name });
+    }
   };
 
   const onTextPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {

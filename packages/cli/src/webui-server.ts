@@ -228,8 +228,10 @@ import {
   handleToolsList,
   handleUserMessage,
   handleWorkingDirSet,
+  resolveAllPendingConfirms,
   type IntrospectionContext,
   type MailboxContext,
+  type PendingConfirm,
   type PrefsContext,
   type ProjectsContext,
   type SessionsContext,
@@ -376,6 +378,8 @@ interface CliWebUIOptions {
    * context.meta and the running loop never changes mode.
    */
   onAutonomySwitch?: ((mode: string) => void) | undefined;
+  /** Forward browser YOLO changes to the host's live permission policy. */
+  onYoloSwitch?: ((enabled: boolean) => void) | undefined;
 }
 
 interface ConnectedClient {
@@ -411,7 +415,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // tool.confirm_needed, we stash its resolver here and forward the prompt to
   // the browser; the client's tool.confirm_result resolves it. This is what
   // makes approvals appear in the WebUI instead of the terminal.
-  const pendingConfirms = new Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>();
+  const pendingConfirms = new Map<string, PendingConfirm>();
   const secretScrubber = new DefaultSecretScrubber();
   let abortController: AbortController | null = null;
   // Per-WebSocket abort controllers. The legacy single-slot `abortController`
@@ -492,6 +496,9 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // Seed agent.ctx.meta from config.json on startup, then snapshot/persist
   // via the prefs handlers. Extracted to prefs-seeding.ts (PR 8 of Issue #30).
   await seedConfigToMeta(opts);
+  if (typeof opts.agent.ctx.meta['yolo'] === 'boolean') {
+    opts.onYoloSwitch?.(opts.agent.ctx.meta['yolo']);
+  }
 
   const { prefSnapshot, persistPrefs } = createPrefsSeeding(opts);
 
@@ -1369,7 +1376,11 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     eventUnsubscribers.push(
       opts.events.on('tool.confirm_needed', (e) => {
         const id = e.toolUseId ?? `confirm_${Date.now()}`;
-        pendingConfirms.set(id, e.resolve);
+        pendingConfirms.set(id, {
+          resolve: e.resolve,
+          decisionSource: e.decisionSource,
+          riskTier: e.riskTier,
+        });
         broadcast({
           type: 'tool.confirm_needed',
           payload: sessionPayload({
@@ -1378,6 +1389,8 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
             toolName: e.tool?.name ?? 'unknown',
             input: secretScrubber.scrubObject(e.input),
             suggestedPattern: e.suggestedPattern,
+            decisionSource: e.decisionSource,
+            riskTier: e.riskTier,
           }),
         });
       }),
@@ -1711,14 +1724,16 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     agent: opts.agent,
     prefSnapshot,
     persistPrefs,
+    onYoloSwitch: opts.onYoloSwitch,
     onAutonomySwitch: opts.onAutonomySwitch,
+    pendingConfirms,
     send,
     broadcast,
     log: (m) => console.log(m),
   };
 
-  // projects.select re-roots the run in place, so `opts` is passed by
-  // reference (the handlers mutate opts.projectRoot / opts.sessionStore).
+  // Project add/select are disabled in WebUI; `opts` remains shared because
+  // projects.list and working_dir.set still read the live project root/config.
   const projectsCtx: ProjectsContext = {
     opts,
     abortControllers,
@@ -1970,10 +1985,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         // it so the agent loop doesn't hang waiting for an answer that will
         // never arrive (the terminal no longer prompts in --webui mode).
         if (clients.size === 0 && pendingConfirms.size > 0) {
-          for (const [id, resolve] of pendingConfirms) {
-            resolve('no');
-            pendingConfirms.delete(id);
-          }
+          resolveAllPendingConfirms(pendingConfirms, 'no');
         }
       });
 

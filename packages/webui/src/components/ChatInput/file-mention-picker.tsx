@@ -1,5 +1,6 @@
 import type React from 'react';
 import { FilePicker } from '../FilePicker';
+import { useFileReferenceStore } from '@/stores/file-reference-store.js';
 
 export interface FileMentionState {
   start: number;
@@ -21,6 +22,8 @@ export function FileMentionPicker({
   setInput,
   setAtMention,
 }: FileMentionPickerProps) {
+  const { addRef } = useFileReferenceStore.getState();
+
   if (!atMention) return null;
 
   return (
@@ -28,19 +31,18 @@ export function FileMentionPicker({
       query={atMention.query}
       onClose={() => setAtMention(null)}
       onPick={(path) => {
-        // Replace the partial `@query` with `@<path> `, then move
-        // the cursor after the inserted space so typing continues
-        // naturally.
+        // Remove the partial `@query` token from the textarea and add the
+        // chosen file as a reference chip instead of plain text.
         const before = input.slice(0, atMention.start);
         const after = input.slice(atMention.start + 1 + atMention.query.length);
-        const inserted = `@${path} `;
-        const next = before + inserted + after;
+        const next = `${before}${after}`.replace(/\s+/g, ' ').trim();
         setInput(next);
         setAtMention(null);
+        addRef({ kind: 'file', path });
         requestAnimationFrame(() => {
           const textarea = textareaRef.current;
           if (textarea) {
-            const pos = before.length + inserted.length;
+            const pos = atMention.start;
             textarea.focus();
             textarea.setSelectionRange(pos, pos);
             textarea.style.height = 'auto';

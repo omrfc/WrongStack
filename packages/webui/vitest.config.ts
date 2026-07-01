@@ -60,6 +60,7 @@ export default defineConfig({
       // Force @wrongstack/core to resolve from source (packages/core/src) instead
       // of going through the package's "exports" field which points to dist/.
       '@wrongstack/core': path.resolve(__dirname, '../../packages/core/src'),
+      '@wrongstack/tools/tool-icons': path.resolve(__dirname, '../../packages/tools/src/tool-icons.ts'),
     },
   },
 });

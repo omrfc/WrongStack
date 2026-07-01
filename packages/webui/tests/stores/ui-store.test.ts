@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   coerceActivity,
+  resetUiNavigationToHome,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
@@ -44,6 +45,7 @@ function resetStore() {
     processMonitorOpen: false,
     queuePanelOpen: false,
     terminalOpen: false,
+    terminalCreateNonce: 0,
     selectedMailMessage: null,
     skillsState: {
       selectedSkill: null,
@@ -60,6 +62,8 @@ beforeEach(() => {
   // Clear localStorage before each test so zustand/persist rehydrates
   // a clean state rather than picking up the previous test's persisted values.
   localStorage.clear();
+  history.pushState(null, '', '/');
+  delete (window as unknown as { wrongstackDesktopHost?: unknown }).wrongstackDesktopHost;
   resetStore();
 });
 
@@ -72,9 +76,12 @@ describe('coerceActivity', () => {
       'agents',
       'history',
       'files',
-      'projects',
+      'changes',
       'mailbox',
       'skills',
+      'design',
+      'worktrees',
+      'officemap',
     ] as const) {
       expect(coerceActivity(a)).toBe(a);
     }
@@ -83,6 +90,7 @@ describe('coerceActivity', () => {
   it('maps removed legacy activities onto their new homes', () => {
     expect(coerceActivity('context')).toBe('chat');
     expect(coerceActivity('sessions')).toBe('history');
+    expect(coerceActivity('projects')).toBe('chat');
   });
 
   it('falls back to chat for garbage values', () => {
@@ -528,9 +536,9 @@ describe('setCurrentView', () => {
     expect(useUIStore.getState().currentView).toBe('files');
   });
 
-  it('sets currentView to agentflow', () => {
+  it('coerces unknown currentView values back to chat', () => {
     useUIStore.getState().setCurrentView('agentflow');
-    expect(useUIStore.getState().currentView).toBe('agentflow');
+    expect(useUIStore.getState().currentView).toBe('chat');
   });
 });
 
@@ -749,5 +757,135 @@ describe('F5 resilience — currentView + dockSection persistence', () => {
     ).persist;
     const result = api?.getOptions?.().migrate?.({ dockSection: 'autophase' }, 5);
     expect(result).toMatchObject({ dockSection: 'autophase' });
+  });
+
+  it('merge() preserves browser F5 view state', () => {
+    const api = (
+      useUIStore as unknown as {
+        persist?: { getOptions?: () => { merge?: (p: unknown, c: unknown) => unknown } };
+      }
+    ).persist;
+    const result = api?.getOptions?.().merge?.(
+      { currentView: 'sessions', activeActivity: 'history', sidebarOpen: true, dockSection: 'work' },
+      useUIStore.getState(),
+    ) as ReturnType<typeof useUIStore.getState>;
+
+    expect(result.currentView).toBe('sessions');
+    expect(result.activeActivity).toBe('history');
+    expect(result.sidebarOpen).toBe(true);
+    expect(result.dockSection).toBe('work');
+  });
+
+  it('merge() coerces corrupt browser navigation state even at the current persist version', () => {
+    const api = (
+      useUIStore as unknown as {
+        persist?: { getOptions?: () => { merge?: (p: unknown, c: unknown) => unknown } };
+      }
+    ).persist;
+    const result = api?.getOptions?.().merge?.(
+      {
+        currentView: 'legacy-agentflow',
+        activeActivity: 'projects',
+        sidebarWidth: -100,
+        dockSection: 'stale-panel',
+      },
+      useUIStore.getState(),
+    ) as ReturnType<typeof useUIStore.getState>;
+
+    expect(result.currentView).toBe('chat');
+    expect(result.activeActivity).toBe('chat');
+    expect(result.sidebarWidth).toBe(SIDEBAR_MIN_WIDTH);
+    expect(result.dockSection).toBeNull();
+  });
+
+  it('merge() drops stale navigation state inside the desktop shell', () => {
+    history.pushState(null, '', '/?shell=desktop');
+    const api = (
+      useUIStore as unknown as {
+        persist?: { getOptions?: () => { merge?: (p: unknown, c: unknown) => unknown } };
+      }
+    ).persist;
+    const result = api?.getOptions?.().merge?.(
+      {
+        currentView: 'officemap',
+        activeActivity: 'officemap',
+        sidebarOpen: true,
+        dockSection: 'work',
+        terminalOpen: true,
+        searchOpen: true,
+        paletteOpen: true,
+      },
+      useUIStore.getState(),
+    ) as ReturnType<typeof useUIStore.getState>;
+
+    expect(result.currentView).toBe('chat');
+    expect(result.activeActivity).toBe('chat');
+    expect(result.sidebarOpen).toBe(false);
+    expect(result.dockSection).toBeNull();
+    expect(result.terminalOpen).toBe(false);
+    expect(result.searchOpen).toBe(false);
+    expect(result.paletteOpen).toBe(false);
+  });
+});
+
+describe('resetUiNavigationToHome', () => {
+  it('returns transient navigation surfaces to the chat home screen', () => {
+    useUIStore.setState({
+      currentView: 'officemap',
+      activeActivity: 'officemap',
+      sidebarOpen: true,
+      dockSection: 'work',
+      dockCustomizeOpen: true,
+      fleetMonitorOpen: true,
+      agentsMonitorOpen: true,
+      processMonitorOpen: true,
+      queuePanelOpen: true,
+      inspectorOpen: true,
+      terminalOpen: true,
+      paletteOpen: true,
+      shortcutsOpen: true,
+      searchOpen: true,
+      searchQuery: 'needle',
+      searchActiveMessageId: 'msg-1',
+      modelSwitcherOpen: true,
+      promptLibraryOpen: true,
+      selectedMailMessage: {
+        id: 'mail-1',
+        from: 'a',
+        to: 'b',
+        type: 'btw',
+        subject: 'hello',
+        body: 'hello',
+        priority: 'normal',
+        readBy: {},
+        readByCount: 0,
+        completed: false,
+        timestamp: '2026-07-01T00:00:00Z',
+      },
+    });
+
+    resetUiNavigationToHome({ sidebarOpen: false });
+
+    expect(useUIStore.getState()).toMatchObject({
+      currentView: 'chat',
+      activeActivity: 'chat',
+      sidebarOpen: false,
+      dockSection: null,
+      dockCustomizeOpen: false,
+      fleetMonitorOpen: false,
+      agentsMonitorOpen: false,
+      processMonitorOpen: false,
+      queuePanelOpen: false,
+      inspectorOpen: false,
+      terminalOpen: false,
+      paletteOpen: false,
+      shortcutsOpen: false,
+      searchOpen: false,
+      searchQuery: '',
+      searchActiveMessageId: null,
+      modelSwitcherOpen: false,
+      promptLibraryOpen: false,
+      selectedMailMessage: null,
+    });
   });
 });

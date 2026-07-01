@@ -1,7 +1,9 @@
 import { toast } from '@/components/Toaster';
+import { isDesktopShell } from '@/lib/desktop-shell';
 import { setFaviconStatus } from '@/lib/favicon';
 import { streamCoalescer } from '@/lib/stream-coalescer';
 import { getWSClient } from '@/lib/ws-client';
+import { navigateToView, showPanel } from '@/lib/view-navigation';
 import type { ChatMessage, SessionHistoryEntry, SubagentView } from '@/stores';
 import {
   useChatStore,
@@ -9,6 +11,7 @@ import {
   useFileStore,
   useFleetStore,
   useHistoryStore,
+  resetUiNavigationToHome,
   useSessionStore,
   useUIStore,
 } from '@/stores';
@@ -174,7 +177,7 @@ export function handleSessionStart(msg: WSServerMessage) {
   const isReset = isNew || payload.reset;
 
   if (payload.needsSetup) {
-    useUIStore.getState().setCurrentView('setup');
+    navigateToView('setup');
   }
 
   if (isReset) {
@@ -209,6 +212,9 @@ export function handleSessionStart(msg: WSServerMessage) {
     model: payload.model,
   });
   if (isReset) {
+    if (!payload.needsSetup && isDesktopShell()) {
+      resetUiNavigationToHome({ sidebarOpen: false });
+    }
     streamCoalescer.dropAll();
     useChatStore.getState().clearMessages();
     useChatStore.getState().setBoundSessionId(payload.sessionId);
@@ -260,8 +266,9 @@ export function handleSessionStart(msg: WSServerMessage) {
           1_000_000,
       });
     }
-    if (useUIStore.getState().currentView !== 'chat') {
-      useUIStore.getState().setCurrentView('chat');
+    if (isReset && !payload.needsSetup) {
+      if (isDesktopShell()) resetUiNavigationToHome({ sidebarOpen: false });
+      else if (useUIStore.getState().currentView !== 'chat') showPanel('chat');
     }
     if (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 768px)').matches) {
       useUIStore.getState().setSidebarOpen(false);

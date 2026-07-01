@@ -82,8 +82,9 @@ import { SpecsWebSocketHandler } from './specs-ws-handler.js';
 import { TerminalWebSocketHandler } from './terminal-ws-handler.js';
 import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
 import { buildSddWizardDeps } from './sdd-wizard-wiring.js';
+import { resolveProviderModelMetadata } from './model-catalog.js';
 import { makeLightSubagentFactory } from '@wrongstack/runtime';
-import type { Config } from '@wrongstack/core/types';
+import type { Config, ProviderConfig } from '@wrongstack/core/types';
 import type { WstackPaths } from '@wrongstack/core/utils';
 import { toErrorMessage } from '@wrongstack/core/utils';
 
@@ -140,7 +141,11 @@ export interface AgentServices {
   terminalHandler: TerminalWebSocketHandler;
   collabHandler: CollaborationWebSocketHandler;
   /** Refresh auto-compaction denominator on model switch. */
-  updateAutoCompactionMaxContext: (newProvider: Provider) => Promise<void>;
+  updateAutoCompactionMaxContext: (
+    newProvider: Provider,
+    providerId?: string,
+    providerCfg?: ProviderConfig | undefined,
+  ) => Promise<void>;
 }
 
 /**
@@ -180,16 +185,13 @@ export async function createAgentServices(input: AgentServicesInput): Promise<Ag
   // are routed to the kernel.
   const collabBus = new CollaborationBusCtor();
   const pipelines = input.pipelines;
-  // prepend (not use) — the pause check must run first, before any
-  // permission/retry middleware that would otherwise proceed.
-  const collabPause = collabPauseMiddleware(collabBus, { logger });
-  Object.defineProperty(collabPause, 'name', { value: 'collab-pause' });
-  pipelines.toolCall.prepend(collabPause as never);
-  // Phase 4 — collab-inject. Installed AFTER collab-pause so the
-  // controller can pause + inject before the next tool runs.
+  // Phase 4 — collab-inject. Install it first, then prepend collab-pause
+  // ahead of it so a controller can pause + inject before the next tool result
+  // flows through the pipeline.
   const collabInject = collabInjectMiddleware(collabBus, { logger });
-  Object.defineProperty(collabInject, 'name', { value: 'collab-inject' });
-  pipelines.toolCall.prepend(collabInject as never);
+  pipelines.toolCall.prepend(collabInject);
+  const collabPause = collabPauseMiddleware(collabBus, { logger });
+  pipelines.toolCall.prepend(collabPause);
   // Design Studio — per-turn UI-intent detection + kit-menu injection.
   installDesignStudioMiddleware({ pipelines, ctx: context });
   const codebaseIndexing = setupWebUICodebaseIndexing({
@@ -216,7 +218,12 @@ export async function createAgentServices(input: AgentServicesInput): Promise<Ag
     let effectiveMaxContext = config.context?.effectiveMaxContext ?? 0;
     if (!effectiveMaxContext) {
       try {
-        const m = await modelsRegistry.getModel(provider.id, context.model);
+        const m = await resolveProviderModelMetadata(
+          modelsRegistry,
+          config.provider,
+          context.model,
+          config.providers?.[config.provider],
+        );
         effectiveMaxContext = m?.capabilities?.maxContext ?? 0;
       } catch {
         // best-effort: fall through to provider capability
@@ -253,15 +260,25 @@ export async function createAgentServices(input: AgentServicesInput): Promise<Ag
   }
 
   /** Refresh AutoCompactionMiddleware denominator when the active model changes. */
-  const updateAutoCompactionMaxContext = async (newProvider: Provider): Promise<void> => {
+  const updateAutoCompactionMaxContext = async (
+    newProvider: Provider,
+    providerId = newProvider.id,
+    providerCfg?: ProviderConfig | undefined,
+  ): Promise<void> => {
     await modelsRegistry.refresh().catch((err) => {
       logger.warn(
-        `models.dev refresh failed for ${newProvider.id}/${context.model}: ${toErrorMessage(err)}; using cached catalog`,
+        `models.dev refresh failed for ${providerId}/${context.model}: ${toErrorMessage(err)}; using cached catalog`,
       );
     });
-    let newMaxContext = config.context?.effectiveMaxContext ?? newProvider.capabilities.maxContext;
+    const currentConfig = input.config;
+    let newMaxContext = currentConfig.context?.effectiveMaxContext ?? newProvider.capabilities.maxContext;
     try {
-      const m = await modelsRegistry.getModel(newProvider.id, context.model);
+      const m = await resolveProviderModelMetadata(
+        modelsRegistry,
+        providerId,
+        context.model,
+        providerCfg ?? currentConfig.providers?.[providerId],
+      );
       newMaxContext = m?.capabilities?.maxContext ?? newMaxContext;
     } catch {
       // best-effort: use provider capability

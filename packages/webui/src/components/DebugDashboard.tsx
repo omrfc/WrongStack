@@ -140,7 +140,7 @@ export function DebugDashboard() {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-background p-6">
+    <div className="h-full min-h-0 min-w-0 flex-1 overflow-y-auto bg-background p-6">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">

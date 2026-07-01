@@ -60,8 +60,13 @@ export const useFileStore = create<FileStoreState>()((set, get) => ({
     const state = get();
     const existing = state.openFiles.find((f) => f.path === filePath);
     if (existing) {
-      // Already open — just switch to it.
-      set({ activeFilePath: filePath });
+      // Already open — refresh it with the latest disk content and switch to it.
+      set({
+        openFiles: state.openFiles.map((file) =>
+          file.path === filePath ? { ...file, content, dirty: false, savedContent: content } : file,
+        ),
+        activeFilePath: filePath,
+      });
       return;
     }
     set({

@@ -1,11 +1,21 @@
 import { getWSClient } from '@/lib/ws-client';
-import { useConfigStore } from '@/stores';
+import { useConfigStore, useSessionStore, useUIStore } from '@/stores';
 import type { WSServerMessage } from '@/types';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { TerminalSquare, X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { Plus, RotateCcw, TerminalSquare, Trash2, X } from 'lucide-react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {
+  clampTerminalHeight,
+  TERMINAL_HEIGHT_STORAGE_KEY,
+} from '@/lib/terminal-dock';
+import { cn } from '@/lib/utils';
 
 /** A reasonable dark palette — terminals read best dark regardless of app theme. */
 const XTERM_THEME = {
@@ -31,8 +41,41 @@ const XTERM_THEME = {
   brightWhite: '#a6adc8',
 };
 
-/** Stable per-mount terminal id. crypto.randomUUID is available in all
- *  browsers that run this app; fall back to a timestamp-random combo. */
+const MAX_TERMINALS = 8;
+
+interface TerminalTab {
+  id: string;
+  name: string;
+  status: 'starting' | 'running' | 'exited';
+  exitCode?: number | undefined;
+}
+
+function defaultTerminalHeight(compact = false): number {
+  if (typeof window === 'undefined') return 300;
+  return clampTerminalHeight(window.innerHeight * (compact ? 0.32 : 0.4));
+}
+
+function readStoredTerminalHeight(compact = false): number {
+  if (typeof window === 'undefined') return defaultTerminalHeight(compact);
+  try {
+    const raw = window.localStorage.getItem(TERMINAL_HEIGHT_STORAGE_KEY);
+    const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+    return Number.isFinite(parsed) ? clampTerminalHeight(parsed) : defaultTerminalHeight(compact);
+  } catch {
+    return defaultTerminalHeight(compact);
+  }
+}
+
+function persistTerminalHeight(height: number): void {
+  try {
+    window.localStorage.setItem(TERMINAL_HEIGHT_STORAGE_KEY, String(clampTerminalHeight(height)));
+  } catch {
+    /* best effort */
+  }
+}
+
+/** Stable terminal id. crypto.randomUUID is available in all browsers that run
+ *  this app; fall back to a timestamp-random combo. */
 function newTerminalId(): string {
   try {
     return crypto.randomUUID();
@@ -41,14 +84,320 @@ function newTerminalId(): string {
   }
 }
 
+function createTerminalTab(index: number): TerminalTab {
+  return {
+    id: newTerminalId(),
+    name: `Terminal ${index}`,
+    status: 'starting',
+  };
+}
+
 /**
- * TerminalPanel — bottom-docked integrated terminal backed by a server-side
- * node-pty session (see server/terminal-ws-handler.ts). xterm.js renders;
- * keystrokes flow over WS as `terminal.input`, output as `terminal.output`.
+ * TerminalPanel — integrated bottom dock backed by server-side node-pty
+ * sessions (see server/terminal-ws-handler.ts). It now manages multiple PTYs
+ * per project WebUI connection through tabs while keeping the dock itself in
+ * the normal flex layout, so the main app remains scrollable.
  */
-export function TerminalPanel({ onClose }: { onClose: () => void }) {
+export function TerminalPanel({
+  desktopShell = false,
+  onClose,
+}: {
+  desktopShell?: boolean | undefined;
+  onClose: () => void;
+}) {
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const terminalCounterRef = useRef(1);
+  const [height, setHeight] = useState(() => readStoredTerminalHeight(desktopShell));
+  const [tabs, setTabs] = useState<TerminalTab[]>(() => [createTerminalTab(1)]);
+  const [activeId, setActiveId] = useState(() => tabs[0]?.id ?? '');
+  const terminalCreateNonce = useUIStore((s) => s.terminalCreateNonce);
+  const lastTerminalCreateNonceRef = useRef(terminalCreateNonce);
+  const projectName = useSessionStore((s) => s.projectName);
+  const cwd = useSessionStore((s) => s.cwd);
+
+  useEffect(() => {
+    const onResize = () => {
+      setHeight((current) => {
+        const next = clampTerminalHeight(current);
+        persistTerminalHeight(next);
+        return next;
+      });
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    resizeCleanupRef.current?.();
+    const startY = event.clientY;
+    const startHeight = height;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const next = clampTerminalHeight(startHeight + startY - moveEvent.clientY);
+      setHeight(next);
+      persistTerminalHeight(next);
+    };
+
+    const cleanup = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', cleanup);
+      window.removeEventListener('pointercancel', cleanup);
+      if (resizeCleanupRef.current === cleanup) {
+        resizeCleanupRef.current = null;
+      }
+    };
+
+    resizeCleanupRef.current = cleanup;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', cleanup, { once: true });
+    window.addEventListener('pointercancel', cleanup, { once: true });
+  };
+
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  const addTerminal = () => {
+    setTabs((current) => {
+      if (current.length >= MAX_TERMINALS) return current;
+      terminalCounterRef.current += 1;
+      const next = createTerminalTab(terminalCounterRef.current);
+      setActiveId(next.id);
+      return [...current, next];
+    });
+  };
+
+  useEffect(() => {
+    if (terminalCreateNonce === lastTerminalCreateNonceRef.current) return;
+    lastTerminalCreateNonceRef.current = terminalCreateNonce;
+    addTerminal();
+  }, [terminalCreateNonce]);
+
+  const closeTerminal = (id: string) => {
+    setTabs((current) => {
+      const index = current.findIndex((tab) => tab.id === id);
+      if (index === -1) return current;
+      const next = current.filter((tab) => tab.id !== id);
+      if (next.length === 0) {
+        queueMicrotask(onClose);
+        return next;
+      }
+      if (activeId === id) {
+        setActiveId(next[Math.max(0, index - 1)]?.id ?? next[0]?.id ?? '');
+      }
+      return next;
+    });
+  };
+
+  const restartTerminal = (id: string) => {
+    const nextId = newTerminalId();
+    setTabs((current) => {
+      let found = false;
+      const next = current.map((tab) => {
+        if (tab.id !== id) return tab;
+        found = true;
+        return {
+          ...tab,
+          id: nextId,
+          status: 'starting' as const,
+          exitCode: undefined,
+        };
+      });
+      if (found) setActiveId(nextId);
+      return next;
+    });
+  };
+
+  const closeAllTerminals = () => {
+    setTabs([]);
+    setActiveId('');
+    queueMicrotask(onClose);
+  };
+
+  const updateTabStatus = (
+    id: string,
+    patch: Pick<TerminalTab, 'status'> & Partial<Pick<TerminalTab, 'exitCode'>>,
+  ) => {
+    setTabs((current) =>
+      current.map((tab) => (tab.id === id ? { ...tab, ...patch } : tab)),
+    );
+  };
+
+  const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0] ?? null;
+
+  return (
+    <div
+      data-terminal-dock
+      style={{ height }}
+      data-shell={desktopShell ? 'desktop' : 'browser'}
+      className={cn(
+        'z-30 flex min-h-0 shrink-0 flex-col border-t border-border bg-[#1e1e2e] shadow-2xl',
+        desktopShell && 'ws-terminal-desktop',
+      )}
+    >
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        title="Resize terminals"
+        onPointerDown={startResize}
+        className="h-1.5 cursor-ns-resize bg-[#181825] hover:bg-primary/35 transition-colors"
+      />
+      <div
+        className={cn(
+          'flex min-w-0 items-center justify-between gap-3 border-b border-border/40 bg-[#181825]',
+          desktopShell ? 'px-2 py-1' : 'px-3 py-1.5',
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-2 text-xs text-[#cdd6f4]">
+          <TerminalSquare className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-medium">{desktopShell ? 'Terminal' : 'Terminals'}</span>
+          <span className="min-w-0 truncate text-[#a6adc8]">
+            {projectName || cwd || 'Project shell'}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={addTerminal}
+            disabled={tabs.length >= MAX_TERMINALS}
+            title={
+              tabs.length >= MAX_TERMINALS
+                ? `Maximum ${MAX_TERMINALS} terminals`
+                : 'New terminal'
+            }
+            className="inline-flex items-center justify-center h-6 w-6 rounded text-[#a6adc8] hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => activeTab && restartTerminal(activeTab.id)}
+            disabled={!activeTab}
+            title="Restart active terminal"
+            className="inline-flex items-center justify-center h-6 w-6 rounded text-[#a6adc8] hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={closeAllTerminals}
+            disabled={tabs.length === 0}
+            title="Close all terminals"
+            className="inline-flex items-center justify-center h-6 w-6 rounded text-[#a6adc8] hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close terminal dock (Ctrl+`)"
+            className="inline-flex items-center justify-center h-6 w-6 rounded text-[#a6adc8] hover:bg-white/10 transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <div
+        className={cn(
+          'flex min-w-0 items-center gap-1 overflow-x-auto border-b border-border/40 bg-[#181825]',
+          desktopShell ? 'px-1.5 py-0.5' : 'px-2 py-1',
+        )}
+      >
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={cn(
+              'group inline-flex items-center rounded border text-xs transition-colors',
+              desktopShell ? 'h-6 min-w-[92px] max-w-[148px]' : 'h-7 min-w-[112px] max-w-[180px]',
+              activeId === tab.id
+                ? 'border-[#89b4fa]/45 bg-[#313244] text-[#cdd6f4]'
+                : 'border-transparent bg-transparent text-[#a6adc8] hover:bg-white/10',
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setActiveId(tab.id)}
+              title={tab.status === 'exited' ? `${tab.name} exited` : tab.name}
+              className="inline-flex min-w-0 flex-1 items-center gap-2 px-2 text-left"
+            >
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full',
+                  tab.status === 'running' && 'bg-[#a6e3a1]',
+                  tab.status === 'starting' && 'bg-[#89b4fa]',
+                  tab.status === 'exited' && 'bg-[#f38ba8]',
+                )}
+              />
+              <span className="min-w-0 flex-1 truncate">
+                {tab.name}
+                {tab.status === 'exited' && typeof tab.exitCode === 'number'
+                  ? ` (${tab.exitCode})`
+                  : ''}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                closeTerminal(tab.id);
+              }}
+              className="mr-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[#a6adc8] opacity-70 hover:bg-white/10 hover:opacity-100"
+              title={`Close ${tab.name}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+      {cwd && !desktopShell && (
+        <div className="min-w-0 truncate border-b border-border/30 bg-[#181825] px-3 py-1 text-[11px] font-mono text-[#6c7086]">
+          {cwd}
+        </div>
+      )}
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        {tabs.map((tab) => (
+          <TerminalSession
+            key={tab.id}
+            id={tab.id}
+            active={tab.id === activeId}
+            onRunning={() => updateTabStatus(tab.id, { status: 'running' })}
+            onExit={(exitCode) =>
+              updateTabStatus(tab.id, { status: 'exited', exitCode })
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TerminalSession({
+  id,
+  active,
+  onRunning,
+  onExit,
+}: {
+  id: string;
+  active: boolean;
+  onRunning: () => void;
+  onExit: (exitCode: number) => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const onRunningRef = useRef(onRunning);
+  const onExitRef = useRef(onExit);
   const wsConnected = useConfigStore((s) => s.wsConnected);
+
+  useEffect(() => {
+    onRunningRef.current = onRunning;
+    onExitRef.current = onExit;
+  }, [onExit, onRunning]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -62,6 +411,8 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
       scrollback: 5000,
     });
     const fit = new FitAddon();
+    termRef.current = term;
+    fitRef.current = fit;
     term.loadAddon(fit);
     term.open(container);
     try {
@@ -70,11 +421,10 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
       /* container not laid out yet */
     }
 
-    const id = newTerminalId();
     const ws = getWSClient(useConfigStore.getState().wsUrl);
 
-    // Create the pty in the current working directory.
     ws.send({ type: 'terminal.create', payload: { id, cols: term.cols, rows: term.rows } });
+    onRunningRef.current();
 
     const offOut = ws.on('terminal.output', (msg: WSServerMessage) => {
       if (msg.type === 'terminal.output' && msg.payload.id === id) {
@@ -84,6 +434,7 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
     const offExit = ws.on('terminal.exit', (msg: WSServerMessage) => {
       if (msg.type === 'terminal.exit' && msg.payload.id === id) {
         term.write(`\r\n\x1b[2m[process exited with code ${msg.payload.exitCode}]\x1b[0m\r\n`);
+        onExitRef.current(msg.payload.exitCode);
       }
     });
 
@@ -91,8 +442,8 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
       ws.send({ type: 'terminal.input', payload: { id, data } });
     });
 
-    // Keep the pty's dimensions in sync with the panel size.
     const syncSize = () => {
+      if (!container.offsetParent) return;
       try {
         fit.fit();
         ws.send({ type: 'terminal.resize', payload: { id, cols: term.cols, rows: term.rows } });
@@ -103,8 +454,6 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
     const ro = new ResizeObserver(syncSize);
     ro.observe(container);
 
-    term.focus();
-
     return () => {
       offOut();
       offExit();
@@ -112,28 +461,39 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
       ro.disconnect();
       ws.send({ type: 'terminal.close', payload: { id } });
       term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
     };
-    // Re-mount the terminal (fresh pty) whenever the WS (re)connects — a
-    // reconnect spawns a new server-side socket with no pty for the old id.
-  }, [wsConnected]);
+    // Re-create the pty after a WebSocket reconnect because the new server-side
+    // socket has no process for the previous terminal id.
+  }, [id, wsConnected]);
+
+  useEffect(() => {
+    if (!active) return;
+    window.requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit();
+        const term = termRef.current;
+        if (term) {
+          getWSClient(useConfigStore.getState().wsUrl).send({
+            type: 'terminal.resize',
+            payload: { id, cols: term.cols, rows: term.rows },
+          });
+          term.focus();
+        }
+      } catch {
+        /* not laid out */
+      }
+    });
+  }, [active, id]);
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 h-[40vh] min-h-[200px] flex flex-col border-t border-border bg-[#1e1e2e] shadow-2xl">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40 bg-[#181825]">
-        <div className="flex items-center gap-2 text-xs text-[#cdd6f4]">
-          <TerminalSquare className="h-3.5 w-3.5" />
-          <span className="font-medium">Terminal</span>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Close terminal (Ctrl+`)"
-          className="inline-flex items-center justify-center h-6 w-6 rounded text-[#a6adc8] hover:bg-white/10 transition-colors"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-      <div ref={containerRef} className="flex-1 overflow-hidden px-2 py-1" />
-    </div>
+    <div
+      ref={containerRef}
+      className={cn(
+        'absolute inset-0 min-h-0 min-w-0 overflow-hidden px-2 py-1',
+        active ? 'block' : 'hidden',
+      )}
+    />
   );
 }

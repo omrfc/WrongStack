@@ -69,12 +69,12 @@ export function CheckpointTimeline({
   return (
     <div
       className={cn(
-        'fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/40 backdrop-blur-sm',
+        'fixed inset-0 z-50 flex items-start justify-center pt-[10dvh] bg-black/40 backdrop-blur-sm',
         className,
       )}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-md rounded-xl border bg-card shadow-2xl max-h-[75vh] flex flex-col animate-in fade-in zoom-in-95">
+      <div className="w-full max-w-md rounded-xl border bg-card shadow-2xl max-h-[75dvh] flex flex-col animate-in fade-in zoom-in-95">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
           <div className="flex items-center gap-2.5">
@@ -104,7 +104,7 @@ export function CheckpointTimeline({
         </div>
 
         {/* Checkpoint timeline */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           {checkpoints.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
               <Clock className="h-10 w-10 opacity-15" />

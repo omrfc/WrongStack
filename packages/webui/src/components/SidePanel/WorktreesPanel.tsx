@@ -133,7 +133,7 @@ export function WorktreesPanel(): React.ReactElement {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <span className="text-[11px] text-muted-foreground">
@@ -180,7 +180,7 @@ export function WorktreesPanel(): React.ReactElement {
       )}
 
       {/* List */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-2 pb-3">
         {rows.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-xs text-muted-foreground">
             <GitBranch className="h-8 w-8 opacity-30" />

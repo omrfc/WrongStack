@@ -1,6 +1,7 @@
 import type { Agent } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
 import type { WsCommon } from './index.js';
+import { resolveYoloEligiblePendingConfirms, type PendingConfirm } from './connection.js';
 
 /**
  * PR 5f of Issue #30: preference WebSocket handlers — `prefs.get`,
@@ -20,8 +21,12 @@ export interface PrefsContext extends WsCommon {
   prefSnapshot: () => Record<string, unknown>;
   /** Persist the durable keys to config.json, fire-and-forget (runWebUI closure). */
   persistPrefs: (payload: Record<string, unknown>) => Promise<void>;
+  /** Flip the host's live YOLO permission policy, if wired. */
+  onYoloSwitch: ((enabled: boolean) => void) | undefined;
   /** Flip the CLI's real autonomy state (same setter the TUI uses), if wired. */
   onAutonomySwitch: ((mode: string) => void) | undefined;
+  /** Pending tool confirmations — drained to yes when YOLO is enabled. */
+  pendingConfirms: Map<string, PendingConfirm>;
 }
 
 function sendResult(ctx: WsCommon, ws: WebSocket, success: boolean, message: string): void {
@@ -47,6 +52,10 @@ export function handlePrefsUpdate(
     ctx.agent.ctx.meta[key] = val;
   }
   void ctx.persistPrefs(payload);
+  if (typeof payload['yolo'] === 'boolean') {
+    ctx.onYoloSwitch?.(payload['yolo']);
+    if (payload['yolo'] === true) resolveYoloEligiblePendingConfirms(ctx.pendingConfirms);
+  }
   ctx.broadcast({ type: 'prefs.updated', payload: ctx.prefSnapshot() });
 }
 

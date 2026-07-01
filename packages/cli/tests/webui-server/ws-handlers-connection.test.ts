@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import {
   type ConfirmDecision,
   type ConnectionContext,
+  type PendingConfirm,
   handleAbort,
   handlePing,
   handleToolConfirmResult,
@@ -32,11 +33,11 @@ function makeCtx(run?: (content: string, opts: { signal: AbortSignal }) => Promi
   ctx: ConnectionContext;
   sent: Array<{ ws: WebSocket; msg: WsServerMessage }>;
   abortControllers: Map<WebSocket, AbortController>;
-  pendingConfirms: Map<string, (d: ConfirmDecision) => void>;
+  pendingConfirms: Map<string, PendingConfirm>;
 } {
   const sent: Array<{ ws: WebSocket; msg: WsServerMessage }> = [];
   const abortControllers = new Map<WebSocket, AbortController>();
-  const pendingConfirms = new Map<string, (d: ConfirmDecision) => void>();
+  const pendingConfirms = new Map<string, PendingConfirm>();
   const ctx: ConnectionContext = {
     opts: {
       agent: {
@@ -166,8 +167,10 @@ describe('handleToolConfirmResult', () => {
   it('resolves and removes the pending confirm', () => {
     const t = makeCtx();
     let got: ConfirmDecision | undefined;
-    t.pendingConfirms.set('c1', (d) => {
-      got = d;
+    t.pendingConfirms.set('c1', {
+      resolve: (d) => {
+        got = d;
+      },
     });
     handleToolConfirmResult(t.ctx, 'c1', 'always');
     expect(got).toBe('always');

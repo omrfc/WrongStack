@@ -19,7 +19,7 @@ import type { WsCommon } from './index.js';
  * The session-swapping handlers (new/resume) and the rewinder mutate the
  * LIVE session writer on `agent.ctx.session` and reset the token counter,
  * exactly as the inline cases did. `opts` is read-only here (no field is
- * reassigned — unlike projects.select), so `SessionsOptions` is just the
+ * reassigned), so `SessionsOptions` is just the
  * subset these handlers read, passed by reference so they see live
  * `agent.ctx.session` / `opts.sessionStore` at call time.
  */

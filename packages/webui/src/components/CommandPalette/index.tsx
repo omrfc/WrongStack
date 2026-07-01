@@ -2,6 +2,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { playCompletionChime } from '@/lib/chime';
 import { streamCoalescer } from '@/lib/stream-coalescer';
 import { cn } from '@/lib/utils';
+import { navigateToView, openMainView, showPanel } from '@/lib/view-navigation';
 import {
   useAutoPhaseStore,
   useChatStore,
@@ -58,7 +59,6 @@ interface PaletteItem {
 export function CommandPalette() {
   const open = useUIStore((s) => s.paletteOpen);
   const setOpen = useUIStore((s) => s.setPaletteOpen);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
   const setTheme = useConfigStore((s) => s.setTheme);
   const { entries: historyEntries } = useHistoryStore();
   const { addMessage, clearMessages } = useChatStore();
@@ -136,7 +136,7 @@ export function CommandPalette() {
         icon: RotateCcw, keywords: ['new', 'fresh', 'session'],
         run: () => {
           ws.client?.newSession?.();
-          setCurrentView('chat');
+          showPanel('chat');
         },
       },
       {
@@ -165,14 +165,13 @@ export function CommandPalette() {
         id: 'history', category: 'Command', label: 'Open history panel',
         icon: HistoryIcon, keywords: ['history', 'sessions'],
         run: () => {
-          useUIStore.getState().setSidebarOpen(true);
-          useUIStore.getState().selectActivity('history');
+          showPanel('history');
         },
       },
       {
         id: 'settings', category: 'Command', label: 'Open settings',
         icon: SettingsIcon, keywords: ['settings', 'config'],
-        run: () => setCurrentView('settings'),
+        run: () => openMainView('settings'),
       },
       {
         id: 'model', category: 'Command', label: 'Change provider/model',
@@ -202,7 +201,7 @@ export function CommandPalette() {
       {
         id: 'autophase-open', category: 'Command', label: 'Open AutoPhase view',
         icon: Rocket, keywords: ['autophase', 'autonomous', 'phases', 'rocket'],
-        run: () => setCurrentView('autophase'),
+        run: () => openMainView('autophase'),
       },
       {
         id: 'autophase-toggle', category: 'Command',
@@ -246,12 +245,12 @@ export function CommandPalette() {
         sendAbort: ws.sendAbort,
         sendMsg,
         setLoading: chat.setLoading,
-        setCurrentView,
+        setCurrentView: (view) => navigateToView(view),
         toggleRefineEnabled: ui.toggleRefineEnabled,
         setProcessMonitorOpen: ui.setProcessMonitorOpen,
         setQueuePanelOpen: ui.setQueuePanelOpen,
         ws,
-        onOpenBreakdown: () => setCurrentView('debug'),
+        onOpenBreakdown: () => navigateToView('debug'),
         handleNextList: () => false,
         handleNextSelect: () => false,
       };
@@ -287,7 +286,7 @@ export function CommandPalette() {
       });
     }
     return base;
-  }, [historyEntries, ws, setCurrentView, setTheme, addMessage, clearMessages]);
+  }, [historyEntries, ws, setTheme, addMessage, clearMessages]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -310,7 +309,7 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-background/60 backdrop-blur-sm flex items-start justify-center pt-[14vh] px-4"
+      className="fixed inset-0 z-50 bg-background/60 backdrop-blur-sm flex items-start justify-center pt-[14dvh] px-4"
       onClick={() => setOpen(false)}
       onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
     >
@@ -336,7 +335,7 @@ export function CommandPalette() {
           <kbd className="text-[10px] text-muted-foreground border rounded px-1.5 py-0.5">Esc</kbd>
         </div>
 
-        <div className="max-h-[60vh] overflow-y-auto">
+        <div className="max-h-[60dvh] overflow-y-auto">
           {filtered.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">No matches for "{query}"</div>
           ) : (

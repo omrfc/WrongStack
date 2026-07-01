@@ -583,7 +583,7 @@ export function ChatView() {
       </header>
 
       {/* Messages */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         <SearchOverlay />
         {!pinnedToBottom && (
           <button
@@ -687,7 +687,7 @@ export function ChatView() {
       {/* Input */}
       <div className="border-t bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50 shrink-0">
         {/* Keyboard shortcut hints — subtle, always visible */}
-        <div className="max-w-5xl mx-auto px-4 pt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground/50 select-none overflow-x-auto">
+        <div className="ws-shortcut-hints max-w-5xl mx-auto px-4 pt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground/50 select-none overflow-x-auto">
           <span title="Enter" className="inline-flex items-center gap-1">
             <kbd>Enter</kbd> send
           </span>
@@ -724,7 +724,7 @@ export function ChatView() {
             <kbd>Ctrl+⇧D</kbd> density
           </span>
         </div>
-        <div className="p-4">
+        <div className="ws-chat-input-wrap p-4">
           <div className="max-w-5xl mx-auto">
             <ChatInput onOpenBreakdown={() => setBreakdownOpen(true)} />
           </div>

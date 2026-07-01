@@ -72,7 +72,7 @@ export function OfficeMapSettingsPanel() {
   const fmtNum = (n?: number) => n?.toLocaleString() ?? '0';
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto p-3 gap-4">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-y-auto p-3">
       {/* Live stats summary */}
       <div>
         <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">

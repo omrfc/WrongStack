@@ -1109,6 +1109,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         needsSetup,
         renderer,
         onAutonomy,
+        applyLiveSettings: deps.applyLiveSettings,
         activeRecoveryLock,
         onModelContextResolved,
         sddSubagentFactory,

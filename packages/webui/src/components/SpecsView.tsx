@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { useSpecsStore, useUIStore, type SpecDetail, type SpecListItem } from '@/stores';
+import { openMainView } from '@/lib/view-navigation';
+import { useSpecsStore, type SpecDetail, type SpecListItem } from '@/stores';
 import { cn } from '@/lib/utils';
 import { ChevronDown, ChevronRight, FileText, LayoutList, Network, Play, X } from 'lucide-react';
 import { Button } from './ui/button';
@@ -35,7 +36,6 @@ export function SpecsView({ onClose }: { onClose: () => void }): React.ReactElem
   const detail = useSpecsStore((s) => s.detail);
   const expandedSpecId = useSpecsStore((s) => s.expandedSpecId);
   const setExpanded = useSpecsStore((s) => s.setExpanded);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
   const [mode, setMode] = useState<'list' | 'graph'>('graph');
 
   // Launch the spec's tasks as a live AutoPhase run (phases = topological
@@ -47,9 +47,9 @@ export function SpecsView({ onClose }: { onClose: () => void }): React.ReactElem
         type: 'autophase.start',
         payload: { title: spec.title, phases: detailToPhases(detail), autonomous: true },
       });
-      setCurrentView('autophase');
+      openMainView('autophase');
     },
-    [detail, client, setCurrentView],
+    [detail, client],
   );
 
   // Pull the spec list on mount.
@@ -77,7 +77,7 @@ export function SpecsView({ onClose }: { onClose: () => void }): React.ReactElem
   };
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       <header className="flex shrink-0 items-center justify-between border-b bg-card px-4 py-2">
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-orange-500" />
@@ -93,7 +93,7 @@ export function SpecsView({ onClose }: { onClose: () => void }): React.ReactElem
         </Button>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {specs.length === 0 ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             No specs found. Use <code className="mx-1 rounded bg-muted px-1">/sdd</code> to create one.

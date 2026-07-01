@@ -135,7 +135,7 @@ export function QuickModelSwitcher() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-background/60 backdrop-blur-sm pt-[15vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-background/60 backdrop-blur-sm pt-[15dvh]"
       onClick={(e) => {
         if (e.target === e.currentTarget) setOpen(false);
       }}
@@ -173,7 +173,7 @@ export function QuickModelSwitcher() {
           />
           <span className="text-[10px] text-muted-foreground font-mono">↑↓ · Enter · Esc</span>
         </div>
-        <div className="max-h-[50vh] overflow-y-auto py-1">
+        <div className="max-h-[50dvh] overflow-y-auto py-1">
           {candidates.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
               {saved.length === 0

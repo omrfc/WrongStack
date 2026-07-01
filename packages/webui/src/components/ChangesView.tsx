@@ -22,7 +22,7 @@ export function ChangesView({ className }: { className?: string }) {
 
   if (!selectedPath) {
     return (
-      <div className={cn('flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground', className)}>
+      <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground', className)}>
         <FileDiff className="h-10 w-10 opacity-30" />
         <p className="text-sm">Select a changed file to view its diff.</p>
       </div>
@@ -32,7 +32,7 @@ export function ChangesView({ className }: { className?: string }) {
   const canEdit = diff && !diff.error && !diff.binary && !diff.tooLarge;
 
   return (
-    <div className={cn('flex-1 flex flex-col overflow-hidden p-3', className)}>
+    <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3', className)}>
       {canEdit && (
         <div className="flex items-center justify-end gap-1 pb-2">
           <button
@@ -60,19 +60,19 @@ export function ChangesView({ className }: { className?: string }) {
         </div>
       )}
       {loadingDiff || !diff ? (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground gap-2 text-sm">
+        <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading diff…
         </div>
       ) : diff.error ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-rose-500">
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-rose-500">
           {diff.error}
         </div>
       ) : diff.binary ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
           Binary file — diff not shown.
         </div>
       ) : diff.tooLarge ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
           File too large to diff.
         </div>
       ) : mode === 'edit' ? (
