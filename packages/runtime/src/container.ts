@@ -114,6 +114,7 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
     paths: wpaths,
     bundledDir: opts.bundledSkillsDir,
     readClaudeSkills: config.skills?.readClaudeSkills,
+    foreignSources: config.skills?.foreignSources,
     extraDirs: config.skills?.extraDirs,
   });
   container.bind(TOKENS.SkillLoader, () => skillLoader);

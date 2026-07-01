@@ -709,6 +709,14 @@ export interface SkillsConfig {
    */
   readClaudeSkills?: boolean | undefined;
   /**
+   * Scan OTHER coding agents' skill directories (`~/.codex/skills`,
+   * `~/.cursor/skills-cursor`, `~/.agents/skills`, `~/.qwen/skills`,
+   * `~/.trae/skills`, … + their `<project>/.<tool>/…` equivalents). Default
+   * `true` (all known tools); pass a tool-id list to restrict, or `false` to
+   * disable. Non-existent dirs are skipped.
+   */
+  foreignSources?: boolean | string[] | undefined;
+  /**
    * How skill bodies reach the system prompt.
    * - `'eager'` (default): inject every discovered skill body into the prompt.
    * - `'progressive'`: inject only the metadata manifest; the agent loads a

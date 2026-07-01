@@ -58,11 +58,13 @@ Skills are discovered at boot in three layers. The first layer with a given `nam
 | Priority | Location | Scope | Use case |
 |---|---|---|---|
 | 1 (highest) | `<project>/.wrongstack/skills/` | Per-project, committed to git | Repo-specific conventions, build system quirks, team standards |
-| 2 | `<project>/.claude/skills/` | Per-project, foreign (read-only) | Skills authored for Claude Code / Codex / Gemini / `asm` / `gh skill` — used without copying |
-| 3 | `~/.wrongstack/skills/` | Per-user, not committed | Personal preferences, cross-project habits |
-| 4 | `~/.claude/skills/` | Per-user, foreign (read-only) | Your Claude Code user-level skills |
-| 5 | `config.skills.extraDirs` | User-config only | Any extra directory (stripped from in-project config) |
-| 6 (lowest) | Bundled with `@wrongstack/core` | Ships with the package | General-purpose skills (git-flow, bug-hunter, etc.) |
+| 2 | `<project>/.claude/skills/` | Per-project, foreign (read-only) | Skills authored for Claude Code |
+| 3 | `<project>/.{codex,cursor,agents,gemini,qwen,trae,windsurf}/skills/` | Per-project, foreign (read-only) | Skills authored for other coding agents (Cursor uses `skills-cursor`) |
+| 4 | `~/.wrongstack/skills/` | Per-user, not committed | Personal preferences, cross-project habits |
+| 5 | `~/.claude/skills/` | Per-user, foreign (read-only) | Your Claude Code user-level skills |
+| 6 | `~/.{codex,cursor,agents,gemini,qwen,trae,windsurf}/skills/` | Per-user, foreign (read-only) | Your skills in other coding agents |
+| 7 | `config.skills.extraDirs` | User-config only | Any extra directory (stripped from in-project config) |
+| 8 (lowest) | Bundled with `@wrongstack/core` | Ships with the package | General-purpose skills (git-flow, bug-hunter, etc.) |
 
 ### Directory structure
 
@@ -77,19 +79,31 @@ The loader scans each directory for subdirectories containing `SKILL.md`. Files 
 
 ---
 
-## Cross-agent compatibility (`.claude/skills`)
+## Cross-agent compatibility (`.claude/skills` + other agents)
 
-WrongStack reads skills authored for other coding agents **natively** — no copying required. The `.claude/skills/` layers (project and user) use the exact same `SKILL.md` format (the [agentskills.io](https://agentskills.io/specification) open standard), so a skill installed by Claude Code, Codex, Gemini CLI, `asm`, or `gh skill` is discovered and injected just like a native one.
+WrongStack reads skills authored for other coding agents **natively** — no copying required. Every agent below uses the same [agentskills.io](https://agentskills.io/specification) `SKILL.md` format, so WrongStack discovers and injects them just like a native skill:
 
-These layers are **read-only** — the installer never writes there. To edit or commit a foreign skill, import it with `/skill-import` (below). A `.wrongstack` skill shadows a `.claude` skill of the same name, so you can always override a foreign skill locally.
+| Tool | User dir | Project dir |
+|---|---|---|
+| Claude Code | `~/.claude/skills` | `<project>/.claude/skills` |
+| OpenAI Codex | `~/.codex/skills` | `<project>/.codex/skills` |
+| Cursor | `~/.cursor/skills-cursor` | `<project>/.cursor/skills-cursor` |
+| Gemini CLI | `~/.gemini/skills` | `<project>/.gemini/skills` |
+| Qwen Code | `~/.qwen/skills` | `<project>/.qwen/skills` |
+| Trae | `~/.trae/skills` | `<project>/.trae/skills` |
+| Windsurf | `~/.windsurf/skills` | `<project>/.windsurf/skills` |
+| Shared (`asm` / agentskills.io) | `~/.agents/skills` | `<project>/.agents/skills` |
 
-Disable foreign discovery with `skills.readClaudeSkills: false` in `~/.wrongstack/config.json`.
+All foreign layers are **read-only** — the installer never writes there. To edit or commit a foreign skill, import it with `/skill-import` (below). A skill discovered earlier in the priority order shadows a same-named one discovered later, so `.wrongstack` always wins over foreign; and deduplication is by name, so the same skill symlinked into several agent dirs appears once.
+
+Control which foreign tools are scanned with `skills.foreignSources` (default: all known tools) and `skills.readClaudeSkills` (default: `true`).
 
 ## Configuration (`config.skills`)
 
 | Field | Default | Description |
 |---|---|---|
 | `readClaudeSkills` | `true` | Read the `.claude/skills/` layers (project + user). |
+| `foreignSources` | `true` (all) | Scan other agents' skill dirs (`~/.codex/skills`, `~/.cursor/skills-cursor`, `~/.agents/skills`, …). Pass a tool-id list to restrict, or `false` to disable. |
 | `mode` | `'eager'` | `'eager'` injects every skill body into the prompt; `'progressive'` injects only a name+trigger manifest (the agent loads bodies via the `skill` tool). |
 | `extraDirs` | `[]` | Extra directories to scan (lowest priority). **User config only** — stripped from a repo-committed `<project>/.wrongstack/config.json`. |
 

@@ -118,6 +118,7 @@ export function buildSkillGeneratorCommand(skillLoader?: SkillLoader): SlashComm
             e.source === 'project' ? '📁'
             : e.source === 'user' ? '👤'
             : e.source === 'claude-project' || e.source === 'claude-user' ? '🌐'
+            : e.source === 'foreign' ? `🌐(${e.originTool ?? '?'})`
             : e.source === 'extra' ? '➕'
             : '📦';
           return `  ${src} ${e.name}\n     ${e.trigger}`;

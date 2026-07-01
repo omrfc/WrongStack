@@ -9,11 +9,13 @@ export interface SkillManifest {
   allowedTools?: string[] | undefined;
   path: string;
   /**
-   * Discovery layer the skill came from. `claude-*` and `extra` are read-only
-   * foreign sources (Claude Code / Codex / Gemini dirs, or `config.skills.extraDirs`);
-   * they are never written to by the skill installer.
+   * Discovery layer the skill came from. `claude-*`, `foreign`, and `extra` are
+   * read-only foreign sources (other coding agents' dirs, or
+   * `config.skills.extraDirs`); they are never written to by the skill installer.
    */
-  source: 'project' | 'user' | 'bundled' | 'claude-project' | 'claude-user' | 'extra';
+  source: 'project' | 'user' | 'bundled' | 'claude-project' | 'claude-user' | 'extra' | 'foreign';
+  /** For `foreign` sources: the originating tool id (codex, cursor, agents, …). */
+  originTool?: string | undefined;
 }
 
 /** Parsed skill entry for structured rendering in system prompt. */
@@ -24,6 +26,8 @@ export interface SkillEntry {
   /** Comma-separated scope items */
   scope: string[];
   source: SkillManifest['source'];
+  /** For `foreign` sources: the originating tool id. */
+  originTool?: string | undefined;
   path: string;
 }
 

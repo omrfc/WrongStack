@@ -14,6 +14,10 @@ import * as path from 'node:path';
 export interface WstackPaths {
   /** ~/.wrongstack — global root. */
   globalRoot: string;
+  /** Absolute project root. */
+  projectRoot: string;
+  /** Home directory (~) — base for foreign tool state (~/.codex, ~/.agents, …). */
+  homeDir: string;
   /**
    * ~/.wrongstack — directory for user-global stateful config files
    * (mode.json, theme.json, …). Currently an alias for `globalRoot`;
@@ -174,6 +178,8 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
   const projectDir = path.join(globalRoot, 'projects', slug);
   return {
     globalRoot,
+    projectRoot: opts.projectRoot,
+    homeDir,
     configDir: globalRoot,
     globalConfig: path.join(globalRoot, 'config.json'),
     secretsKey: path.join(globalRoot, '.key'),

@@ -143,6 +143,7 @@ export async function setupTools(params: ToolsWiringDeps): Promise<ToolsWiringRe
         paths: wpaths,
         bundledDir: resolveBundledSkillsDir(),
         readClaudeSkills: config.skills?.readClaudeSkills,
+        foreignSources: config.skills?.foreignSources,
         extraDirs: config.skills?.extraDirs,
       })
     : undefined;

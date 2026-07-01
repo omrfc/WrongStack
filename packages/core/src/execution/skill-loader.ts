@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { isValidSkillNameFormat, parseSkillFrontmatter } from '../skills/frontmatter.js';
+import { FOREIGN_SKILL_TOOLS, resolveForeignToolIds } from '../skills/foreign-sources.js';
 import type { SkillEntry, SkillLoader, SkillManifest } from '../types/skill.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
 
@@ -69,6 +70,8 @@ export interface SkillLoaderOptions {
   bundledDir?: string | undefined;
   /** Read foreign `.claude/skills` dirs (project + user). Default `true`. */
   readClaudeSkills?: boolean | undefined;
+  /** Scan other agents' skill dirs (codex/cursor/agents/qwen/trae/…). Default `true` (all); `string[]` restricts, `false` disables. */
+  foreignSources?: boolean | string[] | undefined;
   /** Extra skill directories to scan (lowest priority, before bundled). */
   extraDirs?: string[] | undefined;
 }
@@ -88,18 +91,28 @@ export interface SkillLoaderOptions {
  * read-only — the installer never writes there.
  */
 export class DefaultSkillLoader implements SkillLoader {
-  private readonly dirs: { dir: string; source: SkillManifest['source'] }[];
+  private readonly dirs: { dir: string; source: SkillManifest['source']; originTool?: string }[];
   private cache?: SkillManifest[] | undefined;
   private entriesCache?: SkillEntry[] | undefined;
   private readonly bodyCache = new Map<string, string>();
 
   constructor(opts: SkillLoaderOptions) {
     const readClaude = opts.readClaudeSkills !== false;
-    const dirs: { dir: string; source: SkillManifest['source'] }[] = [];
+    const foreignIds = resolveForeignToolIds(opts.foreignSources);
+    const dirs: { dir: string; source: SkillManifest['source']; originTool?: string }[] = [];
+    // Push each enabled foreign tool's dir under `root`, in registry order.
+    const pushForeign = (root: string) => {
+      for (const tool of FOREIGN_SKILL_TOOLS) {
+        if (!foreignIds.includes(tool.id)) continue;
+        dirs.push({ dir: path.join(root, '.' + tool.id, tool.subdir), source: 'foreign', originTool: tool.id });
+      }
+    };
     dirs.push({ dir: opts.paths.inProjectSkills, source: 'project' });
     if (readClaude) dirs.push({ dir: opts.paths.inProjectClaudeSkills, source: 'claude-project' });
+    pushForeign(opts.paths.projectRoot);
     dirs.push({ dir: opts.paths.globalSkills, source: 'user' });
     if (readClaude) dirs.push({ dir: opts.paths.globalClaudeSkills, source: 'claude-user' });
+    pushForeign(opts.paths.homeDir);
     for (const d of opts.extraDirs ?? []) dirs.push({ dir: d, source: 'extra' });
     if (opts.bundledDir) dirs.push({ dir: opts.bundledDir, source: 'bundled' });
     this.dirs = dirs;
@@ -109,7 +122,7 @@ export class DefaultSkillLoader implements SkillLoader {
     if (this.cache) return this.cache;
     const found: SkillManifest[] = [];
     const seen = new Set<string>();
-    for (const { dir, source } of this.dirs) {
+    for (const { dir, source, originTool } of this.dirs) {
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const e of entries) {
@@ -133,6 +146,7 @@ export class DefaultSkillLoader implements SkillLoader {
               allowedTools: fm.allowedTools,
               path: skillFile,
               source,
+              originTool,
             });
           } catch {
             // skip malformed skill
@@ -172,7 +186,7 @@ export class DefaultSkillLoader implements SkillLoader {
       // Parse trigger/scope from the description that list() already parsed —
       // no need to re-read the file; s.description === fm.description.
       const { trigger, scope } = parseDescriptionFromText(s.description ?? '');
-      entries.push({ name: s.name, trigger, scope, source: s.source, path: s.path });
+      entries.push({ name: s.name, trigger, scope, source: s.source, originTool: s.originTool, path: s.path });
     }
     this.entriesCache = entries;
     return entries;
