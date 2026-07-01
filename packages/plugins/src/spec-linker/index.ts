@@ -1,24 +1,29 @@
 /**
- * spec-linker plugin — PostToolUse hook on `write|edit` that scans
- * the file for `[plugin-name]`-style references and surfaces
- * unlinked ones to the LLM via `additionalContext`.
+ * spec-linker plugin — markdown link auditor for plugin references.
  *
- * A reference is "linked" if it appears as a markdown link
- * `[name](...)` or as an HTML link `<a href="...">name</a>`. An
- * "unlinked" reference is the bare name — common when an author
- * types `secret-scanner` inline in prose but forgets the link.
+ * Two hooks:
+ *  1. **PostToolUse** on `write|edit` — READ-ONLY. Scans the saved
+ *     file for unlinked plugin references and surfaces them to the
+ *     LLM via `additionalContext`. The LLM decides whether to fix
+ *     the file in a follow-up edit.
  *
- * The plugin does NOT modify the file (no `modifiedInput` rewrite).
- * It only injects a single, low-noise context block listing the
- * unlinked references and their canonical path. The LLM can then
- * decide whether to fix the file in a follow-up edit.
+ *  2. **PreToolUse** on `write` (NOT `edit`) — AUTO-FIX. When the
+ *     `autoFix` config is `true`, scans the would-be content and
+ *     returns a `modifiedInput.content` where each unlinked plugin
+ *     reference is wrapped in a markdown link. The tool executor
+ *     then writes the fixed content instead of the original.
  *
- * Detection rules:
- *  - Source is `.md` or `.mdx` (markdown)
- *  - The reference matches one of the known plugin names exactly
- *    (case-insensitive, word-boundary)
- *  - It is not already wrapped in a markdown link `[name](` or
- *    inline code `` `name` ``
+ * Why `write` only and not `edit`? The `edit` tool's input shape
+ * is `{ path, old_string, new_string }` — `new_string` is a small
+ * patch, not the whole file. To auto-fix `edit` cleanly we'd have
+ * to either:
+ *   - parse the file, find where `old_string` lives, substitute
+ *     `new_string` with the auto-fixed version, and re-derive
+ *     the new `old_string` (a hard string-diff problem), or
+ *   - reject `edit` and force `write` (bad UX).
+ * Both are too complex for the win. `write` is the common case
+ * for new files; `edit` stays read-only and the PostToolUse
+ * context tells the LLM what to fix.
  *
  * The plugin catalog is sourced from `../catalog.js` (single source
  * of truth — adding a new plugin to the catalog table there is
@@ -30,7 +35,9 @@
  * {
  *   "enabled": true,
  *   "fileGlobs": ["**\/*.md", "**\/*.mdx"],
- *   "maxReferences": 8
+ *   "maxReferences": 8,
+ *   "autoFix": false   // when true, PreToolUse on `write` wraps unlinked
+ *                      // references in markdown links via modifiedInput
  * }
  * ```
  *
@@ -46,9 +53,11 @@ import { PLUGIN_CATALOG, PLUGIN_NAMES } from '../catalog.js';
 // ---------------------------------------------------------------------------
 
 interface LinkerState {
-  /** Total PostToolUse invocations for matching files. */
-  invocationCount: number;
-  /** Times at least one unlinked reference was surfaced. */
+  /** PostToolUse invocations for matching files. */
+  postInvocations: number;
+  /** PreToolUse invocations (autoFix path). */
+  preInvocations: number;
+  /** Times at least one unlinked reference was surfaced (Post). */
   unlinkedCount: number;
   /** Times no references were found (clean file or no plugins mentioned). */
   cleanCount: number;
@@ -56,17 +65,24 @@ interface LinkerState {
   skippedNonMd: number;
   /** Times the file could not be read (missing, etc.). */
   readErrorCount: number;
-  /** Hook handle for teardown. */
-  hookUnregister: null | (() => void);
+  /** Times autoFix was applied and references were wrapped. */
+  autoFixApplied: number;
+  /** Post hook handle for teardown. */
+  postHookUnregister: null | (() => void);
+  /** Pre hook handle for teardown. */
+  preHookUnregister: null | (() => void);
 }
 
 const state: LinkerState = {
-  invocationCount: 0,
+  postInvocations: 0,
+  preInvocations: 0,
   unlinkedCount: 0,
   cleanCount: 0,
   skippedNonMd: 0,
   readErrorCount: 0,
-  hookUnregister: null,
+  autoFixApplied: 0,
+  postHookUnregister: null,
+  preHookUnregister: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -79,12 +95,20 @@ interface SpecLinkerConfig {
   fileGlobs: string[];
   /** Hard cap on the number of unlinked references in the injected context. */
   maxReferences: number;
+  /**
+   * When true, the PreToolUse hook on `write` wraps unlinked
+   * references in markdown links via `modifiedInput.content`.
+   * Default false (read-only by default; opt in for the
+   * auto-fix convenience).
+   */
+  autoFix: boolean;
 }
 
 const DEFAULTS: SpecLinkerConfig = {
   enabled: true,
   fileGlobs: ['**/*.md', '**/*.mdx'],
   maxReferences: 8,
+  autoFix: false,
 };
 
 function readConfig(raw: unknown): SpecLinkerConfig {
@@ -99,6 +123,7 @@ function readConfig(raw: unknown): SpecLinkerConfig {
       typeof r['maxReferences'] === 'number' && r['maxReferences'] > 0
         ? r['maxReferences']
         : DEFAULTS.maxReferences,
+    autoFix: r['autoFix'] === true,
   };
 }
 
@@ -138,6 +163,10 @@ function isWrappedAsLinkOrCode(line: string, name: string): boolean {
   return false;
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Find all unlinked plugin references on the given lines.
  * Returns a list of plugin names in their original casing.
@@ -161,8 +190,82 @@ function findUnlinkedReferences(lines: string[], names: string[]): string[] {
   return [...found.keys()];
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * Replace each unlinked plugin reference in `content` with a
+ * markdown link `[name](path)`. The replacement preserves the
+ * original casing of each plugin name (case-insensitive match,
+ * case-preserving substitution).
+ *
+ * The replacement is done in two passes per occurrence:
+ *  1. Find the match range via the same word-boundary regex
+ *     as `findUnlinkedReferences`.
+ *  2. Skip if the line at the match contains a markdown link
+ *     or inline code wrapping the name.
+ *  3. Otherwise substitute `[name](path)`.
+ *
+ * Returns the rewritten content. If `content` is unchanged, the
+ * returned string is `===` equal to the input — callers can use
+ * that to skip the no-op write.
+ */
+function wrapUnlinkedReferences(content: string): string {
+  const lines = content.split('\n');
+  let changed = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.length === 0) continue;
+    const newLine = wrapLineReferences(line);
+    if (newLine !== line) {
+      lines[i] = newLine;
+      changed = true;
+    }
+  }
+  return changed ? lines.join('\n') : content;
+}
+
+function wrapLineReferences(line: string): string {
+  let out = '';
+  let cursor = 0;
+  // Iterate over all plugin names; for each, walk the line and
+  // find the leftmost non-overlapping match starting from the
+  // current cursor. We rebuild the line as a sequence of
+  // (raw, replacement) segments.
+  type Span = { start: number; end: number; name: string };
+  const spans: Span[] = [];
+
+  for (const name of PLUGIN_NAMES) {
+    // Case-insensitive match but preserve the original substring
+    // for substitution. The `i` flag handles the match; the
+    // capture group around the name lets us pull the original
+    // casing back out without re-implementing the regex.
+    const re = new RegExp(`(^|[^\\w-])(${escapeRegExp(name)})(?![\\w-])`, 'gi');
+    let m: RegExpExecArray | null;
+    re.lastIndex = 0;
+    while ((m = re.exec(line)) !== null) {
+      const leadingLen = m[1]!.length;
+      const nameStart = m.index + leadingLen;
+      const nameEnd = nameStart + m[2]!.length;
+      const originalName = line.slice(nameStart, nameEnd);
+      if (isWrappedAsLinkOrCode(line, originalName)) continue;
+      if (spans.some((s) => !(nameEnd <= s.start || nameStart >= s.end))) {
+        continue;
+      }
+      spans.push({ start: nameStart, end: nameEnd, name: originalName });
+      re.lastIndex = nameEnd;
+    }
+  }
+
+  if (spans.length === 0) return line;
+
+  spans.sort((a, b) => a.start - b.start);
+
+  for (const span of spans) {
+    out += line.slice(cursor, span.start);
+    const path = PLUGIN_CATALOG.get(span.name.toLowerCase()) ?? `./src/${span.name.toLowerCase()}`;
+    out += `[${span.name}](${path})`;
+    cursor = span.end;
+  }
+  out += line.slice(cursor);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,8 +274,9 @@ function escapeRegExp(s: string): string {
 
 const plugin: Plugin = {
   name: 'spec-linker',
-  version: '0.1.0',
-  description: 'PostToolUse hook that scans markdown files for unlinked plugin references and surfaces them to the LLM via additionalContext',
+  version: '0.2.0',
+  description:
+    'Markdown link auditor for plugin references. PostToolUse surfaces unlinked references; PreToolUse on `write` (autoFix) wraps them in markdown links via modifiedInput.',
   apiVersion: '^0.1.10',
   capabilities: { tools: true, hooks: true },
   defaultConfig: { ...DEFAULTS },
@@ -193,50 +297,55 @@ const plugin: Plugin = {
         default: 8,
         description: 'Hard cap on the number of unlinked references in the injected context.',
       },
+      autoFix: {
+        type: 'boolean',
+        default: false,
+        description:
+          'When true, the PreToolUse hook on `write` returns a `modifiedInput.content` where each unlinked plugin reference is wrapped in a markdown link. Default false (opt in).',
+      },
     },
   },
 
   setup(api) {
     // Idempotent re-init (H1 pattern).
-    state.invocationCount = 0;
+    state.postInvocations = 0;
+    state.preInvocations = 0;
     state.unlinkedCount = 0;
     state.cleanCount = 0;
     state.skippedNonMd = 0;
     state.readErrorCount = 0;
-    state.hookUnregister = null;
+    state.autoFixApplied = 0;
+    state.postHookUnregister = null;
+    state.preHookUnregister = null;
 
     const cfg = readConfig(api.config.extensions?.['spec-linker']);
 
-    const hook = async (input: {
+    // ── PostToolUse: read-only audit ─────────────────────────────────
+    const postHook = async (input: {
       toolName?: string | undefined;
       toolInput?: unknown;
       toolResult?: { content: string; isError: boolean } | undefined;
     }): Promise<{ additionalContext?: string } | void> => {
       if (!cfg.enabled) return;
-      // Skip on tool errors.
       if (input.toolResult?.isError) return;
 
       const toolName = input.toolName ?? '';
       if (toolName !== 'write' && toolName !== 'edit') return;
 
-      const inp = (input.toolInput ?? {}) as { path?: string; content?: string };
+      const inp = (input.toolInput ?? {}) as { path?: string };
       const filePath = inp.path;
       if (!filePath || typeof filePath !== 'string') return;
 
-      // Glob filter — only markdown files by default.
       if (!fileMatchesGlobs(filePath, cfg.fileGlobs)) {
         state.skippedNonMd += 1;
         return;
       }
 
-      state.invocationCount += 1;
+      state.postInvocations += 1;
 
-      // Read the file from disk so we get the post-edit state
-      // (the toolInput content might be partial for `edit`).
       if (!existsSync(filePath)) return;
       let content: string;
       try {
-        // Make sure it's a file, not a directory.
         const stat = statSync(filePath);
         if (!stat.isFile()) return;
         content = await fs.readFile(filePath, 'utf-8');
@@ -267,14 +376,45 @@ const plugin: Plugin = {
           `${lines}${overflowNote}`,
       };
     };
+    state.postHookUnregister = api.registerHook('PostToolUse', 'write|edit', postHook as never);
 
-    state.hookUnregister = api.registerHook('PostToolUse', 'write|edit', hook as never);
+    // ── PreToolUse: auto-fix on `write` only ─────────────────────────
+    if (cfg.autoFix) {
+      const preHook = async (input: {
+        toolName?: string | undefined;
+        toolInput?: unknown;
+      }): Promise<{ decision?: 'allow' | 'block'; modifiedInput?: Record<string, unknown>; additionalContext?: string } | void> => {
+        if (!cfg.enabled) return;
+        // Auto-fix targets `write` only — see file-level comment
+        // for why we don't touch `edit` (partial-string complexity).
+        if (input.toolName !== 'write') return;
+
+        const inp = (input.toolInput ?? {}) as { path?: string; content?: string };
+        const filePath = inp.path;
+        if (!filePath || typeof filePath !== 'string') return;
+        if (!fileMatchesGlobs(filePath, cfg.fileGlobs)) return;
+        if (typeof inp.content !== 'string' || inp.content.length === 0) return;
+
+        state.preInvocations += 1;
+        const fixed = wrapUnlinkedReferences(inp.content);
+        if (fixed === inp.content) return; // no-op
+
+        state.autoFixApplied += 1;
+        return {
+          decision: 'allow',
+          modifiedInput: { ...inp, content: fixed, path: filePath },
+          additionalContext:
+            `\n🔗 spec-linker (autoFix): wrapped unlinked plugin reference(s) in '${filePath}'.`,
+        };
+      };
+      state.preHookUnregister = api.registerHook('PreToolUse', 'write', preHook as never);
+    }
 
     // ── spec_linker_status tool ───────────────────────────────────────
     api.tools.register({
       name: 'spec_linker_status',
       description:
-        'Reports spec-linker state: config, counters, and the canonical plugin catalog used for detection.',
+        'Reports spec-linker state: config, counters (post + pre hooks), and the canonical plugin catalog used for detection.',
       inputSchema: { type: 'object', properties: {} },
       permission: 'auto',
       category: 'Diagnostics',
@@ -285,12 +425,15 @@ const plugin: Plugin = {
           enabled: cfg.enabled,
           fileGlobs: cfg.fileGlobs,
           maxReferences: cfg.maxReferences,
+          autoFix: cfg.autoFix,
           counters: {
-            invocations: state.invocationCount,
+            postInvocations: state.postInvocations,
+            preInvocations: state.preInvocations,
             unlinked: state.unlinkedCount,
             clean: state.cleanCount,
             skippedNonMd: state.skippedNonMd,
             readErrors: state.readErrorCount,
+            autoFixApplied: state.autoFixApplied,
           },
           catalogSize: PLUGIN_NAMES.length,
         };
@@ -298,47 +441,57 @@ const plugin: Plugin = {
     });
 
     api.log.info('spec-linker plugin loaded', {
-      version: '0.1.0',
+      version: '0.2.0',
       enabled: cfg.enabled,
       fileGlobs: cfg.fileGlobs,
+      autoFix: cfg.autoFix,
       catalogSize: PLUGIN_NAMES.length,
     });
   },
 
   teardown(api) {
-    if (state.hookUnregister) {
-      try {
-        state.hookUnregister();
-      } catch {
-        // best-effort
+    for (const off of [state.postHookUnregister, state.preHookUnregister]) {
+      if (off) {
+        try {
+          off();
+        } catch {
+          // best-effort
+        }
       }
-      state.hookUnregister = null;
     }
+    state.postHookUnregister = null;
+    state.preHookUnregister = null;
     const final = {
-      invocations: state.invocationCount,
+      postInvocations: state.postInvocations,
+      preInvocations: state.preInvocations,
       unlinked: state.unlinkedCount,
       clean: state.cleanCount,
       skippedNonMd: state.skippedNonMd,
       readErrors: state.readErrorCount,
+      autoFixApplied: state.autoFixApplied,
     };
-    state.invocationCount = 0;
+    state.postInvocations = 0;
+    state.preInvocations = 0;
     state.unlinkedCount = 0;
     state.cleanCount = 0;
     state.skippedNonMd = 0;
     state.readErrorCount = 0;
+    state.autoFixApplied = 0;
     api.log.info('spec-linker: teardown complete', { final });
   },
 
   async health() {
     return {
       ok: true,
-      message: `spec-linker: ${state.invocationCount} invocation(s), ${state.unlinkedCount} unlinked, ${state.cleanCount} clean, ${state.skippedNonMd} non-md skipped`,
+      message: `spec-linker: post=${state.postInvocations} pre=${state.preInvocations}, unlinked=${state.unlinkedCount}, autoFix=${state.autoFixApplied}, clean=${state.cleanCount}, non-md=${state.skippedNonMd}`,
       counters: {
-        invocations: state.invocationCount,
+        postInvocations: state.postInvocations,
+        preInvocations: state.preInvocations,
         unlinked: state.unlinkedCount,
         clean: state.cleanCount,
         skippedNonMd: state.skippedNonMd,
         readErrors: state.readErrorCount,
+        autoFixApplied: state.autoFixApplied,
       },
     };
   },

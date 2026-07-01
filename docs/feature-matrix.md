@@ -68,7 +68,7 @@ fire on `write|edit` either *before* (block / warn) or *after*
 | `import-organizer` | `PostToolUse` `write\|edit` | `biome check --write --unsafe` (sort, group, remove unused) | — |
 | `commit-validator` | `PreToolUse` `bash\|git_autocommit` | conventional-commit format gate | `block` / `warn` |
 | `test-runner-gate` | `PostToolUse` `write\|edit` | runs the matching test file | `block` / `injectOnPass` |
-| `spec-linker` | `PostToolUse` `write\|edit` | surfaces unlinked plugin references in markdown files (no rewrite — read-only) | `enabled` / `fileGlobs` / `maxReferences` |
+| `spec-linker` | `PostToolUse` `write\|edit` + `PreToolUse` `write` (when `autoFix: true`) | surfaces unlinked plugin references in markdown files (read-only by default; opt-in auto-link via PreToolUse) | `enabled` / `fileGlobs` / `maxReferences` / `autoFix` |
 
 **Stacking** the quality chain on `write|edit`:
 `lint-gate` (PreToolUse, block) → `test-runner-gate` (PostToolUse) →

@@ -1,13 +1,24 @@
 /**
  * @wrongstack/plugins — spec-linker plugin tests
  *
- * Covers the PostToolUse hook's:
+ * Covers the PostToolUse (read-only) hook's:
  *  - Markdown glob filtering
  *  - Unlinked reference detection (bare plugin name in prose)
  *  - Wrapped-as-link-or-code exclusion
  *  - additionalContext surfacing with maxReferences cap
  *  - Word-boundary matching (no false-positive on substrings)
  *  - H1 audit pattern (teardown + health + idempotent re-init)
+ *
+ * And the PreToolUse (autoFix) hook's:
+ *  - enabled=false / autoFix=false → no Pre hook
+ *  - autoFix=true → wraps unlinked refs in `[name](path)` via
+ *    modifiedInput.content
+ *  - Skips when content is already clean
+ *  - Skips non-markdown files
+ *  - Decision is always 'allow' (we don't block; we just rewrite)
+ *  - Original casing preserved
+ *  - markdown-link / inline-code detection still works
+ *  - `edit` is NOT auto-fixed (only `write` is)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
@@ -55,14 +66,17 @@ function createMockAPI(): PluginAPI {
   };
 }
 
-function getHook(api: PluginAPI) {
-  const call = vi.mocked(api.registerHook).mock.calls[0];
-  if (!call || !call[2]) throw new Error('hook not registered');
-  return call[2] as (input: {
-    toolName?: string;
-    toolInput?: unknown;
-    toolResult?: { content: string; isError: boolean };
-  }) => Promise<unknown>;
+/** Find a hook by event name (PostToolUse / PreToolUse). */
+function getHook(api: PluginAPI, eventName: string) {
+  const call = vi.mocked(api.registerHook).mock.calls.find((c) => c?.[0] === eventName);
+  if (!call || !call[2]) throw new Error(`hook not registered for event ${eventName}`);
+  return call[2] as (input: unknown) => Promise<unknown>;
+}
+
+function getMatcher(api: PluginAPI, eventName: string): string {
+  const call = vi.mocked(api.registerHook).mock.calls.find((c) => c?.[0] === eventName);
+  if (!call || !call[1]) throw new Error(`hook matcher not registered for event ${eventName}`);
+  return call[1] as string;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,31 +101,40 @@ describe('spec-linker plugin', () => {
       expect(typeof specLinkerPlugin.setup).toBe('function');
     });
 
-    it('registers one tool and one PostToolUse hook on setup', () => {
+    it('registers one tool and one PostToolUse hook by default (autoFix off)', () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
       expect(api.tools.register).toHaveBeenCalledTimes(1);
       const tool = vi.mocked(api.tools.register).mock.calls[0]?.[0] as { name: string };
       expect(tool.name).toBe('spec_linker_status');
       expect(api.registerHook).toHaveBeenCalledTimes(1);
-      const call = vi.mocked(api.registerHook).mock.calls[0];
-      expect(call?.[0]).toBe('PostToolUse');
-      expect(call?.[1]).toBe('write|edit');
+      expect(getMatcher(api, 'PostToolUse')).toBe('write|edit');
     });
 
-    it('configSchema defines enabled, fileGlobs, maxReferences', () => {
+    it('registers a PreToolUse hook when autoFix=true', () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      expect(api.registerHook).toHaveBeenCalledTimes(2);
+      expect(getMatcher(api, 'PreToolUse')).toBe('write');
+      expect(getMatcher(api, 'PostToolUse')).toBe('write|edit');
+    });
+
+    it('configSchema defines enabled, fileGlobs, maxReferences, autoFix', () => {
       const schema = specLinkerPlugin.configSchema as Record<string, { properties?: Record<string, unknown> }>;
       const props = schema.properties;
       expect(props?.enabled).toBeDefined();
       expect(props?.fileGlobs).toBeDefined();
       expect(props?.maxReferences).toBeDefined();
+      expect(props?.autoFix).toBeDefined();
     });
 
-    it('defaultConfig has safe defaults (markdown-only, cap=8)', () => {
+    it('defaultConfig has safe defaults (markdown-only, cap=8, autoFix off)', () => {
       const defaults = specLinkerPlugin.defaultConfig as Record<string, unknown>;
       expect(defaults.enabled).toBe(true);
       expect(defaults.fileGlobs).toEqual(['**/*.md', '**/*.mdx']);
       expect(defaults.maxReferences).toBe(8);
+      expect(defaults.autoFix).toBe(false);
     });
   });
 
@@ -132,7 +155,8 @@ describe('spec-linker plugin', () => {
       specLinkerPlugin.setup(api as never);
       const health = await specLinkerPlugin.health!();
       expect(health.ok).toBe(true);
-      expect(health.message).toContain('0 invocation');
+      expect(health.message).toContain('post=0');
+      expect(health.message).toContain('pre=0');
     });
 
     it('setup is idempotent: counters reset on re-init', async () => {
@@ -141,16 +165,34 @@ describe('spec-linker plugin', () => {
       specLinkerPlugin.teardown!(api as never);
       specLinkerPlugin.setup(api as never);
       const health = await specLinkerPlugin.health!();
-      expect(health.message).toContain('0 invocation');
+      expect(health.message).toContain('post=0');
+    });
+
+    it('teardown unregisters both hooks when autoFix was enabled', () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      const unregisters: number[] = [];
+      api.registerHook = vi.fn((...args: unknown[]) => {
+        // api.registerHook signature: (event, matcher, hook) => () => void
+        void args;
+        const fn = () => {
+          unregisters.push(1);
+        };
+        return fn;
+      }) as never;
+      specLinkerPlugin.setup(api as never);
+      specLinkerPlugin.teardown!(api as never);
+      // Post + Pre = 2 unregisters
+      expect(unregisters.length).toBe(2);
     });
   });
 
   // -------------------------------------------------------------------------
-  describe('hook filtering', () => {
+  describe('PostToolUse hook (read-only)', () => {
     it('skips when toolName is not write/edit', async () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const result = await hook({
         toolName: 'bash',
         toolInput: { path: '/tmp/x.md' },
@@ -162,7 +204,7 @@ describe('spec-linker plugin', () => {
     it('skips when tool result indicates an error', async () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const filePath = path.join(tmpDir, 'err.md');
       await fs.writeFile(filePath, 'see secret-scanner', 'utf-8');
       const result = await hook({
@@ -176,7 +218,7 @@ describe('spec-linker plugin', () => {
     it('skips non-markdown files by default', async () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const tsPath = path.join(tmpDir, 'src.ts');
       await fs.writeFile(tsPath, 'see secret-scanner', 'utf-8');
       const result = await hook({
@@ -186,16 +228,16 @@ describe('spec-linker plugin', () => {
       });
       expect(result).toBeUndefined();
       const tool = vi.mocked(api.tools.register).mock.calls[0]?.[0] as { execute: () => Promise<unknown> };
-      const status = (await tool.execute()) as { counters: { skippedNonMd: number; invocations: number } };
+      const status = (await tool.execute()) as { counters: { skippedNonMd: number; postInvocations: number } };
       expect(status.counters.skippedNonMd).toBe(1);
-      expect(status.counters.invocations).toBe(0);
+      expect(status.counters.postInvocations).toBe(0);
     });
 
     it('does not fire when enabled=false', async () => {
       const api = createMockAPI();
       api.config.extensions = { 'spec-linker': { enabled: false } };
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const filePath = path.join(tmpDir, 'off.md');
       await fs.writeFile(filePath, 'see secret-scanner', 'utf-8');
       await hook({
@@ -204,17 +246,14 @@ describe('spec-linker plugin', () => {
         toolResult: { content: 'ok', isError: false },
       });
       const tool = vi.mocked(api.tools.register).mock.calls[0]?.[0] as { execute: () => Promise<unknown> };
-      const status = (await tool.execute()) as { counters: { invocations: number } };
-      expect(status.counters.invocations).toBe(0);
+      const status = (await tool.execute()) as { counters: { postInvocations: number } };
+      expect(status.counters.postInvocations).toBe(0);
     });
-  });
 
-  // -------------------------------------------------------------------------
-  describe('detection logic', () => {
     it('detects an unlinked plugin reference in prose', async () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const filePath = path.join(tmpDir, 'one.md');
       await fs.writeFile(
         filePath,
@@ -237,7 +276,7 @@ describe('spec-linker plugin', () => {
     it('skips references already wrapped in markdown links', async () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const filePath = path.join(tmpDir, 'linked.md');
       await fs.writeFile(
         filePath,
@@ -259,7 +298,7 @@ describe('spec-linker plugin', () => {
     it('skips references wrapped in inline code', async () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const filePath = path.join(tmpDir, 'code.md');
       await fs.writeFile(filePath, 'Run `secret-scanner` to block credentials.\n', 'utf-8');
       const result = await hook({
@@ -273,7 +312,7 @@ describe('spec-linker plugin', () => {
     it('respects word boundaries (no false-positive on substrings)', async () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const filePath = path.join(tmpDir, 'substring.md');
       await fs.writeFile(
         filePath,
@@ -292,7 +331,7 @@ describe('spec-linker plugin', () => {
       const api = createMockAPI();
       api.config.extensions = { 'spec-linker': { maxReferences: 2 } };
       specLinkerPlugin.setup(api as never);
-      const hook = getHook(api);
+      const hook = getHook(api, 'PostToolUse');
       const filePath = path.join(tmpDir, 'many.md');
       await fs.writeFile(
         filePath,
@@ -312,9 +351,180 @@ describe('spec-linker plugin', () => {
       });
       const ctx = (result as { additionalContext?: string }).additionalContext ?? '';
       expect(ctx).toContain('and 3 more');
-      // Only 2 plugin lines should appear in the body.
       const lines = ctx.split('\n').filter((l) => l.startsWith('- `'));
       expect(lines.length).toBe(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('PreToolUse hook (autoFix)', () => {
+    it('is not registered when autoFix is false (default)', () => {
+      const api = createMockAPI();
+      specLinkerPlugin.setup(api as never);
+      const preCall = vi.mocked(api.registerHook).mock.calls.find((c) => c?.[0] === 'PreToolUse');
+      expect(preCall).toBeUndefined();
+    });
+
+    it('is registered when autoFix=true', () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const preCall = vi.mocked(api.registerHook).mock.calls.find((c) => c?.[0] === 'PreToolUse');
+      expect(preCall).toBeDefined();
+    });
+
+    it('skips when content is already clean', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const hook = getHook(api, 'PreToolUse');
+      const result = await hook({
+        toolName: 'write',
+        toolInput: {
+          path: '/tmp/clean.md',
+          content: 'See [secret-scanner](./src/secret-scanner).',
+        },
+      });
+      expect(result).toBeUndefined();
+      const tool = vi.mocked(api.tools.register).mock.calls[0]?.[0] as { execute: () => Promise<unknown> };
+      const status = (await tool.execute()) as { counters: { preInvocations: number; autoFixApplied: number } };
+      // preInvocations was incremented, autoFixApplied was not.
+      expect(status.counters.preInvocations).toBe(1);
+      expect(status.counters.autoFixApplied).toBe(0);
+    });
+
+    it('wraps unlinked references in modifiedInput.content and returns decision=allow', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const hook = getHook(api, 'PreToolUse');
+      const result = (await hook({
+        toolName: 'write',
+        toolInput: {
+          path: '/tmp/x.md',
+          content: 'The secret-scanner plugin blocks credentials. See token-budget.\n',
+        },
+      })) as { decision: 'allow' | 'block'; modifiedInput: { content: string; path: string }; additionalContext: string };
+
+      expect(result.decision).toBe('allow');
+      expect(result.modifiedInput.path).toBe('/tmp/x.md');
+      expect(result.modifiedInput.content).toContain('[secret-scanner](./src/secret-scanner)');
+      expect(result.modifiedInput.content).toContain('[token-budget](./src/token-budget)');
+      // original bare reference should be gone
+      expect(result.modifiedInput.content).not.toContain(' See secret-scanner plugin');
+      expect(result.additionalContext).toContain('autoFix');
+    });
+
+    it('preserves the original casing of each plugin name', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const hook = getHook(api, 'PreToolUse');
+      const result = (await hook({
+        toolName: 'write',
+        toolInput: {
+          path: '/tmp/x.md',
+          content: 'Use Secret-Scanner and Token-Budget together.\n',
+        },
+      })) as { modifiedInput: { content: string } };
+      expect(result.modifiedInput.content).toContain('[Secret-Scanner]');
+      expect(result.modifiedInput.content).toContain('[Token-Budget]');
+    });
+
+    it('does not auto-fix `edit` (only `write`)', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const hook = getHook(api, 'PreToolUse');
+      const result = await hook({
+        toolName: 'edit',
+        toolInput: {
+          path: '/tmp/x.md',
+          old_string: 'secret-scanner',
+          new_string: 'secret-scanner',
+        },
+      });
+      expect(result).toBeUndefined();
+    });
+
+    it('skips non-markdown files', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const hook = getHook(api, 'PreToolUse');
+      const result = await hook({
+        toolName: 'write',
+        toolInput: {
+          path: '/tmp/x.ts',
+          content: 'see secret-scanner',
+        },
+      });
+      expect(result).toBeUndefined();
+    });
+
+    it('leaves markdown-link and inline-code references alone', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const hook = getHook(api, 'PreToolUse');
+      const result = (await hook({
+        toolName: 'write',
+        toolInput: {
+          path: '/tmp/x.md',
+          content: [
+            'See [secret-scanner](./src/secret-scanner) for the configured linter.',
+            'And run `lint-gate` to enforce it.',
+            'But token-budget is bare.',
+          ].join('\n'),
+        },
+      })) as { modifiedInput: { content: string } };
+
+      // secret-scanner (linked) and lint-gate (code-wrapped) are
+      // untouched; only token-budget is wrapped.
+      expect(result.modifiedInput.content).toContain('[secret-scanner](./src/secret-scanner)');
+      expect(result.modifiedInput.content).toContain('`lint-gate`');
+      expect(result.modifiedInput.content).toContain('[token-budget](./src/token-budget)');
+      // Make sure the original "lint-gate" wasn't double-wrapped.
+      expect(result.modifiedInput.content).not.toContain('`[lint-gate]');
+    });
+
+    it('respects word boundaries in autoFix mode', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const hook = getHook(api, 'PreToolUse');
+      const result = (await hook({
+        toolName: 'write',
+        toolInput: {
+          path: '/tmp/x.md',
+          content: 'secret-scanner-config.json is a config. real-plugin token-budget is real.\n',
+        },
+      })) as { modifiedInput: { content: string } };
+      // secret-scanner-config: substring of longer token → must NOT
+      // match secret-scanner.
+      expect(result.modifiedInput.content).toContain('secret-scanner-config.json');
+      expect(result.modifiedInput.content).not.toContain('[secret-scanner]');
+      // token-budget: standalone token → MUST match.
+      expect(result.modifiedInput.content).toContain('[token-budget](./src/token-budget)');
+    });
+
+    it('updates autoFixApplied counter when at least one reference is wrapped', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const hook = getHook(api, 'PreToolUse');
+      await hook({
+        toolName: 'write',
+        toolInput: { path: '/tmp/x.md', content: 'see secret-scanner' },
+      });
+      await hook({
+        toolName: 'write',
+        toolInput: { path: '/tmp/y.md', content: 'all clean' },
+      });
+      const tool = vi.mocked(api.tools.register).mock.calls[0]?.[0] as { execute: () => Promise<unknown> };
+      const status = (await tool.execute()) as { counters: { preInvocations: number; autoFixApplied: number } };
+      expect(status.counters.preInvocations).toBe(2);
+      expect(status.counters.autoFixApplied).toBe(1);
     });
   });
 
@@ -326,7 +536,7 @@ describe('spec-linker plugin', () => {
       return call[0] as { execute: () => Promise<unknown> };
     }
 
-    it('reports config + counters + catalog size', async () => {
+    it('reports config + counters + catalog size (default config)', async () => {
       const api = createMockAPI();
       specLinkerPlugin.setup(api as never);
       const tool = getStatusTool(api);
@@ -334,16 +544,29 @@ describe('spec-linker plugin', () => {
         enabled: boolean;
         fileGlobs: string[];
         maxReferences: number;
+        autoFix: boolean;
         catalogSize: number;
-        counters: { invocations: number; unlinked: number; clean: number };
+        counters: { postInvocations: number; preInvocations: number; unlinked: number; clean: number; autoFixApplied: number };
       };
       expect(status.enabled).toBe(true);
       expect(status.fileGlobs).toEqual(['**/*.md', '**/*.mdx']);
       expect(status.maxReferences).toBe(8);
-      expect(status.catalogSize).toBe(20);
-      expect(status.counters.invocations).toBe(0);
+      expect(status.autoFix).toBe(false);
+      expect(status.catalogSize).toBe(21);
+      expect(status.counters.postInvocations).toBe(0);
+      expect(status.counters.preInvocations).toBe(0);
       expect(status.counters.unlinked).toBe(0);
       expect(status.counters.clean).toBe(0);
+      expect(status.counters.autoFixApplied).toBe(0);
+    });
+
+    it('reports autoFix=true when enabled', async () => {
+      const api = createMockAPI();
+      api.config.extensions = { 'spec-linker': { autoFix: true } };
+      specLinkerPlugin.setup(api as never);
+      const tool = getStatusTool(api);
+      const status = (await tool.execute()) as { autoFix: boolean };
+      expect(status.autoFix).toBe(true);
     });
   });
 });

@@ -650,18 +650,36 @@ context. Increase `includeTranscriptTail` for more history.
 ### 21 — `spec-linker`
 
 **Tools**: `spec_linker_status`
-**Hooks**: `PostToolUse` (matcher `write|edit`)
+**Hooks**: `PostToolUse` (`write|edit`) + `PreToolUse` (`write`, when `autoFix: true`)
 
-Scans markdown files for *unlinked* references to one of the 20
+Two hooks working together:
+
+**PostToolUse** (always active when the plugin is enabled):
+scans markdown files for *unlinked* references to one of the 21
 known plugins and surfaces them to the LLM via
 `additionalContext`. The plugin does NOT modify the file — it
 only injects a low-noise context block listing the unlinked
 references and their canonical paths so the LLM can fix the file
 in a follow-up edit.
 
-**Detection rules**:
-- Source is `.md` or `.mdx` (configurable via `fileGlobs`)
-- The reference matches one of the 20 known plugin names
+**PreToolUse** (only when `autoFix: true`): scans the would-be
+content of a `write` call and returns a `modifiedInput.content`
+where each unlinked plugin reference is wrapped in a markdown
+link. The tool executor then writes the fixed content instead of
+the original. The fix preserves the original casing
+(`Secret-Scanner` becomes `[Secret-Scanner](./src/secret-scanner)`)
+and leaves markdown-link / inline-code references untouched.
+
+**Why `write` only and not `edit`**: the `edit` tool's input is
+`{ path, old_string, new_string }` — `new_string` is a small
+patch, not the whole file. Auto-fixing `edit` cleanly would
+require re-deriving the new `old_string` after substitution
+(a hard string-diff problem), so `edit` stays read-only and
+the PostToolUse context tells the LLM what to fix.
+
+**Detection rules** (both hooks):
+- Source matches `config.fileGlobs` (default: `**/*.md`, `**/*.mdx`)
+- The reference matches one of the 21 known plugin names
   (case-insensitive)
 - It is NOT already wrapped in a markdown link `[name](...)` or
   inline code `` `name` ``
@@ -674,7 +692,8 @@ in a follow-up edit.
     "spec-linker": {
       "enabled": true,
       "fileGlobs": ["**/*.md", "**/*.mdx"],
-      "maxReferences": 8
+      "maxReferences": 8,
+      "autoFix": false   // set true to enable PreToolUse auto-link
     }
   }
 }
@@ -688,10 +707,11 @@ Consider wrapping them in markdown links to keep the docs navigable:
 - `token-budget` → `[token-budget](./src/token-budget)`
 ```
 
-**Why read-only**: the file might be referenced elsewhere or
-under review. Surfacing a suggestion lets the LLM (or the user)
-decide whether to fix it, instead of silently rewriting the file
-on every save.
+**Why read-only by default**: the file might be referenced
+elsewhere or under review. Surfacing a suggestion lets the
+LLM (or the user) decide whether to fix it, instead of
+silently rewriting the file on every save. Opt into `autoFix`
+once you're confident in the rewrite.
 
 ## Configuration patterns
 
