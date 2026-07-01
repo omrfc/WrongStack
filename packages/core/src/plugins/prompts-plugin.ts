@@ -497,6 +497,7 @@ function parseFlags(input: string): { flags: Record<string, string>; positional:
   const flagRe = /^--([a-zA-Z][\w-]*)(?:=("[^"]*"|'[^']*'|\S+)|\s+("[^"]*"|'[^']*'|\S+))?\s*/;
   let m: RegExpExecArray | null;
   // Only consume flags while the string still starts with `--`.
+  // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic RegExp.exec loop
   while (s.startsWith('--') && (m = flagRe.exec(s))) {
     const name = expectDefined(m[1]);
     const rawVal = m[2] ?? m[3] ?? 'true';

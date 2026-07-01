@@ -867,7 +867,7 @@ function CustomProviderSection({ onKeySaved }: { onKeySaved: (providerId: string
 // ── Setup Screen ──────────────────────────────────────────────────────────────
 
 export function SetupScreen() {
-  const { provider, model, setProvider, setModel, wsConnected, wsUrl } = useConfigStore();
+  const { model, setProvider, setModel, wsConnected, wsUrl } = useConfigStore();
   useWebSocket();
 
   // Step: 'keys' | 'done'

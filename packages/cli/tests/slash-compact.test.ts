@@ -5,7 +5,7 @@ import type { SlashCommandContext } from '../src/slash-commands/index.js';
 
 const makeCtx = (
   compactor?: SlashCommandContext['compactor'],
-  opts?: { maxContext?: number; provider?: Provider },
+  _opts?: { maxContext?: number; provider?: Provider },
 ): SlashCommandContext => {
   const write = vi.fn();
   const writeInfo = vi.fn();

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type FetchError, isParseError } from '@wrongstack/core';
+import { isParseError } from '@wrongstack/core';
 import { expectFetchError } from './helpers/fetch-error.js';
 import {
   isUsableCopilotChatModel,

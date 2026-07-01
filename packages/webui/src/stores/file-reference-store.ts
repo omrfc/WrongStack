@@ -24,7 +24,7 @@ export type FileReference =
 /** Distributive Omit — preserves the discriminated-union shape when stripping
  *  the `id` field, so each variant keeps its own required keys. A plain
  *  `Omit<FileReference, 'id'>` would flatten the union into one loose type. */
-type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 export type FileReferenceInput = DistributiveOmit<FileReference, 'id'>;
 
 interface FileReferenceState {

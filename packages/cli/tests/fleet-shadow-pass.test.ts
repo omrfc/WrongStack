@@ -20,7 +20,6 @@ import {
   DefaultLogger,
   DefaultRetryPolicy,
   DefaultSecretScrubber,
-  type Config,
   type ConfigStore,
   Container,
   EventBus,

@@ -227,27 +227,20 @@ const plugin: Plugin = {
       mutating: true,
       category: 'Project',
       async execute(input: Record<string, unknown>) {
-        // Bump the per-session counter on every invocation. The
-        // health() snapshot below is updated on success so /diag can
-        // answer "what was the last auto_doc call this session?"
+        // Bump the per-session counter on every invocation — before the
+        // call, so failed invocations still count. The health() snapshot
+        // below is updated on success so /diag can answer "what was the
+        // last auto_doc call this session?"
         const inp = input as never as AutoDocInput;
         state.invocationCount += 1;
-        try {
-          const result = await runAutoDoc(inp, api);
-          state.lastInvocation = {
-            when: new Date().toISOString(),
-            files: Array.isArray(inp.files) ? inp.files.length : 0,
-            style: inp.style === 'jsdoc' ? 'jsdoc' : 'tsdoc',
-            dryRun: inp.dry_run === true,
-          };
-          return result;
-        } catch (err) {
-          // Failed invocations still count — the operator wants to
-          // see the count go up when the LLM actually tried to use
-          // the tool, regardless of outcome. Re-raise so the host
-          // tool-error surface is unchanged.
-          throw err;
-        }
+        const result = await runAutoDoc(inp, api);
+        state.lastInvocation = {
+          when: new Date().toISOString(),
+          files: Array.isArray(inp.files) ? inp.files.length : 0,
+          style: inp.style === 'jsdoc' ? 'jsdoc' : 'tsdoc',
+          dryRun: inp.dry_run === true,
+        };
+        return result;
       },
     });
 

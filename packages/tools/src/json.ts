@@ -128,7 +128,6 @@ export const jsonTool: Tool<JsonInput, JsonOutput> = {
         return executeTransform(input, ctx);
       case 'merge':
         return executeMerge(input);
-      case 'parse':
       default:
         return executeParse(input, ctx);
     }

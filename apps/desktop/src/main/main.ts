@@ -281,7 +281,7 @@ function syncActiveWebuiView(): void {
     snapshot.runtimes.filter((runtime) => runtime.status === 'running').map((runtime) => runtime.id),
   );
   const active = snapshot.runtimes.find((runtime) => runtime.id === snapshot.activeRuntimeId);
-  if (!active || active.status !== 'running') {
+  if (active?.status !== 'running') {
     activeWebuiRuntimeId = active?.id ?? null;
     publishWebuiStatus({ runtimeId: active?.id ?? null, status: 'idle' });
     layoutWebuiViews();
@@ -720,7 +720,7 @@ async function openProjectSession(
   const runtime =
     (runtimeId ? snapshot.runtimes.find((candidate) => candidate.id === runtimeId) : undefined) ??
     snapshot.runtimes.find((candidate) => candidate.id === snapshot.activeRuntimeId);
-  if (!runtime || runtime.kind !== 'project') {
+  if (runtime?.kind !== 'project') {
     return openProject();
   }
   await manager.openProject(runtime.root, { forceNew: true });

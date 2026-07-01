@@ -12,7 +12,7 @@ import {
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 function createMockReq(body: unknown, method = 'POST'): IncomingMessage {
-  const chunks: Buffer[] = [];
+  const _chunks: Buffer[] = [];
   const req = {
     method,
     headers: { 'user-agent': 'test-agent' },

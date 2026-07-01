@@ -3,7 +3,7 @@
  * `ACPProtocolHandler` — including a live permission round-trip (the thing a
  * full-duplex WS connection enables that HTTP cannot).
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, } from 'vitest';
 import type { ACPMessage } from '../src/types/acp-messages.js';
 import type { AgentServerTransport } from '../src/agent/stdio-transport.js';
 import { WsBridgeTransport } from '../src/agent/ws-bridge-transport.js';

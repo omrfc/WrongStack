@@ -69,13 +69,13 @@ function createMockAPI(): PluginAPI {
 /** Find a hook by event name (PostToolUse / PreToolUse). */
 function getHook(api: PluginAPI, eventName: string) {
   const call = vi.mocked(api.registerHook).mock.calls.find((c) => c?.[0] === eventName);
-  if (!call || !call[2]) throw new Error(`hook not registered for event ${eventName}`);
+  if (!call?.[2]) throw new Error(`hook not registered for event ${eventName}`);
   return call[2] as (input: unknown) => Promise<unknown>;
 }
 
 function getMatcher(api: PluginAPI, eventName: string): string {
   const call = vi.mocked(api.registerHook).mock.calls.find((c) => c?.[0] === eventName);
-  if (!call || !call[1]) throw new Error(`hook matcher not registered for event ${eventName}`);
+  if (!call?.[1]) throw new Error(`hook matcher not registered for event ${eventName}`);
   return call[1] as string;
 }
 
@@ -532,7 +532,7 @@ describe('spec-linker plugin', () => {
   describe('status tool', () => {
     function getStatusTool(api: PluginAPI): { execute: () => Promise<unknown> } {
       const call = vi.mocked(api.tools.register).mock.calls[0];
-      if (!call || !call[0]) throw new Error('status tool not registered');
+      if (!call?.[0]) throw new Error('status tool not registered');
       return call[0] as { execute: () => Promise<unknown> };
     }
 

@@ -71,9 +71,6 @@ beforeEach(() => {
 function makeOpenAiKey(): string {
   return 'sk-proj-' + 'a'.repeat(36);
 }
-function makeAnthropicKey(): string {
-  return 'sk-ant-api03-' + 'a'.repeat(40);
-}
 function makeGithubPat(): string {
   return 'ghp_' + 'a'.repeat(36);
 }
