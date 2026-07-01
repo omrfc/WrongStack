@@ -16,6 +16,7 @@ This is the on-ramp to the WrongStack documentation. If you're new to the projec
 | Read the architectural decision history | [ADRs](#architecture-decision-records-adrs) |
 | Configure runtime behavior | [configuration.md](configuration.md) |
 | Compare all official plugins at a glance | [feature-matrix.md](feature-matrix.md) |
+| Understand the release gates (`release:check` + `prepublishOnly`) | [release-process.md](release-process.md) |
 | Debug a problem | [troubleshooting.md](troubleshooting.md) |
 | Understand the security posture / report a vulnerability | [SECURITY.md](../SECURITY.md) |
 

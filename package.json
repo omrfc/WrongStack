@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "desktop": "pnpm --filter @wrongstack/desktop dev",
     "test": "vitest run && pnpm --filter webui test",
     "test:watch": "vitest",
     "bench": "vitest bench --run --config vitest.bench.config.ts",
@@ -31,6 +32,8 @@
     "release:check": "pnpm audit --audit-level=moderate && pnpm typecheck && pnpm build && pnpm test",
     "release:dry": "pnpm publish -r --dry-run --no-git-checks --force",
     "release": "pnpm release:check && pnpm publish -r --access public --no-git-checks",
+    "prepublishOnly": "pnpm test:guard",
+    "test:guard": "vitest run packages/plugins/tests/catalog.test.ts packages/plugins/tests/plugin-teardown.test.ts packages/plugins/tests/smoke.test.ts",
     "setup:hooks": "git config core.hooksPath .githooks",
     "postinstall": "git config core.hooksPath .githooks"
   },
