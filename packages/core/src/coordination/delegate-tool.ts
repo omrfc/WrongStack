@@ -314,6 +314,7 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
           let settled = false;
           let timer: ReturnType<typeof setTimeout> | undefined;
           const finish = (value: TaskResult | { __timeout: true } | { __emptyResult: true }) => {
+            /* v8 ignore next -- race-only: finish is only re-entered if the timer fires after awaitTasks settled */
             if (settled) return;
             settled = true;
             if (timer) clearTimeout(timer);
