@@ -60,7 +60,7 @@ import type {
 import type { SessionStore } from '@wrongstack/core';
 type Session = Awaited<ReturnType<SessionStore['create']>>;
 import type { Config } from '@wrongstack/core/types';
-import { MCPRegistry } from '@wrongstack/mcp';
+import type { MCPRegistry } from '@wrongstack/mcp';
 import { makeProviderFromConfig } from '@wrongstack/providers';
 
 import {
@@ -98,13 +98,13 @@ import {
   validatePrefsUpdatePayload,
   validateShellOpenPayload,
 } from './ws-payload-validation.js';
-import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
-import { SpecsWebSocketHandler } from './specs-ws-handler.js';
-import { SddBoardWebSocketHandler } from './sdd-board-ws-handler.js';
-import { SddWizardWebSocketHandler } from './sdd-wizard-ws-handler.js';
-import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
-import { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
-import { TerminalWebSocketHandler } from './terminal-ws-handler.js';
+import type { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
+import type { SpecsWebSocketHandler } from './specs-ws-handler.js';
+import type { SddBoardWebSocketHandler } from './sdd-board-ws-handler.js';
+import type { SddWizardWebSocketHandler } from './sdd-wizard-ws-handler.js';
+import type { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
+import type { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
+import type { TerminalWebSocketHandler } from './terminal-ws-handler.js';
 import { broadcast, errMessage, send, sendResult } from './ws-utils.js';
 import { computeUsageCost, getCostRates } from './usage-cost.js';
 import { createProviderHandlers, projectSavedProviders } from './provider-handlers.js';

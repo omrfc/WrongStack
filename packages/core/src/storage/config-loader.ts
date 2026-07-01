@@ -163,7 +163,7 @@ function fillMissingDefaultsInPlace(
 ): boolean {
   let changed = false;
   for (const [key, defaultValue] of Object.entries(defaults)) {
-    if (!Object.prototype.hasOwnProperty.call(target, key)) {
+    if (!Object.hasOwn(target, key)) {
       target[key] = cloneJsonValue(defaultValue);
       changed = true;
       continue;

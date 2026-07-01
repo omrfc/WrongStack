@@ -217,7 +217,7 @@ export async function createPreContextServices(
   }
 
   // ── Session store + session ──
-  let sessionStore = opts.services?.session ?? new DefaultSessionStore({ dir: wpaths.projectSessions });
+  const sessionStore = opts.services?.session ?? new DefaultSessionStore({ dir: wpaths.projectSessions });
   if (!opts.services?.session) {
     sessionStore.prune(DEFAULT_SESSION_PRUNE_DAYS).then((count) => {
       if (count > 0) logger.info(`Pruned ${count} old session${count === 1 ? '' : 's'}.`);

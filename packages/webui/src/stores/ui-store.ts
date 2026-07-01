@@ -276,7 +276,7 @@ interface UIState {
 
 function isDesktopShellStorageContext(): boolean {
   if (typeof window === 'undefined') return false;
-  if (Boolean((window as unknown as { wrongstackDesktopHost?: unknown }).wrongstackDesktopHost)) {
+  if ((window as unknown as { wrongstackDesktopHost?: unknown }).wrongstackDesktopHost) {
     return true;
   }
   try {

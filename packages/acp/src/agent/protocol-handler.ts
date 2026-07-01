@@ -579,7 +579,7 @@ export class ACPProtocolHandler {
     const p = (params ?? {}) as { sessionId?: unknown; cwd?: unknown; mcpServers?: unknown };
     const sessionId = typeof p.sessionId === 'string' ? p.sessionId : null;
     const loadCwd = typeof p.cwd === 'string' ? p.cwd : undefined;
-    let existing = sessionId ? this.sessions.get(sessionId) : undefined;
+    const existing = sessionId ? this.sessions.get(sessionId) : undefined;
 
     // Cold path: not in memory but persisted (server restarted). Restore the
     // session state + replay its stored history. The agent's own model

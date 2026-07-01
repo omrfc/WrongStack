@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { toErrorMessage } from '@wrongstack/core/utils';
-import { InputBuilder } from '@wrongstack/core';
+import type { InputBuilder } from '@wrongstack/core';
 import type { Action } from '../app-reducer.js';
 import { readClipboardImage, readClipboardText } from '../clipboard.js';
 

@@ -142,7 +142,7 @@ export function looksLikePowerShell(command: string): boolean {
   // pattern is rare in cmd.exe scripts (cmd.exe flags are usually `/x`),
   // so `-eq`, `-like`, etc. are reliable tells. We require a word boundary
   // on each side to avoid matching inside paths like `C:\foo-eq\bar`.
-  if (/(?:^|[\s\[\(\{,;])(?:-eq|-ne|-lt|-gt|-le|-ge|-like|-notlike|-match|-notmatch|-contains|-notcontains|-in|-notin|-and|-or|-not|-band|-bor|-bxor|-replace|-isplit|-csplit|-osplit|-join|-is|-as|-f)(?:$|[\s\]\)\},;])/i.test(trimmed)) {
+  if (/(?:^|[\s[({,;])(?:-eq|-ne|-lt|-gt|-le|-ge|-like|-notlike|-match|-notmatch|-contains|-notcontains|-in|-notin|-and|-or|-not|-band|-bor|-bxor|-replace|-isplit|-csplit|-osplit|-join|-is|-as|-f)(?:$|[\s\])},;])/i.test(trimmed)) {
     return true;
   }
 
@@ -219,7 +219,7 @@ export function looksLikePowerShellExtended(command: string): boolean {
 
   // Common PS-only parameters: -AsPlainText, -PipelineVariable/-pv,
   // -FilterHashtable, -OutVariable/-ov
-  if (/(?:^|\s)[-/\/](?:AsPlainText|PipelineVariable|pv|FilterHashtable|OutVariable|ov)(?:\s|=|$)/i.test(trimmed)) {
+  if (/(?:^|\s)[-//](?:AsPlainText|PipelineVariable|pv|FilterHashtable|OutVariable|ov)(?:\s|=|$)/i.test(trimmed)) {
     return true;
   }
 

@@ -122,11 +122,11 @@ export interface AuthenticateRequest {
   methodId: string;
 }
 
-export interface AuthenticateResponse {}
+export type AuthenticateResponse = {}
 
-export interface LogoutRequest {}
+export type LogoutRequest = {}
 
-export interface LogoutResponse {}
+export type LogoutResponse = {}
 
 // ────────────────────────────────────────────────────────────────────────────
 // MCP server configuration — sent in session lifecycle requests
@@ -199,7 +199,7 @@ export interface CloseSessionRequest {
   sessionId: SessionId;
 }
 
-export interface CloseSessionResponse {}
+export type CloseSessionResponse = {}
 
 export interface ListSessionsRequest {
   cursor?: string | undefined;
@@ -215,7 +215,7 @@ export interface DeleteSessionRequest {
   sessionId: SessionId;
 }
 
-export interface DeleteSessionResponse {}
+export type DeleteSessionResponse = {}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Session config options

@@ -7,14 +7,14 @@
  */
 import * as path from 'node:path';
 import type { WebSocket } from 'ws';
-import {
-  type Context,
+import type {
+  Context,
   DefaultSessionStore,
-  type DefaultMemoryStore,
-  type DefaultModeStore,
-  type DefaultTokenCounter,
-  type SkillLoader,
-  type ToolRegistry,
+  DefaultMemoryStore,
+  DefaultModeStore,
+  DefaultTokenCounter,
+  SkillLoader,
+  ToolRegistry,
 } from '@wrongstack/core';
 import type { ConnectedClient } from './types.js';
 import type { ProjectRouteHandlers } from './project-routes.js';

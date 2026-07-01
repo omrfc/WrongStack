@@ -350,9 +350,9 @@ export async function startWebUI(
   let sessionStore = preContext.sessionStore;
   let session = preContext.session;
   let sessionStartedAt = preContext.sessionStartedAt;
-  let statusTracker = preContext.statusTracker;
+  const statusTracker = preContext.statusTracker;
   let modeId = preContext.modeId;
-  let needsSetup = preContext.needsSetup;
+  const needsSetup = preContext.needsSetup;
 
   // Pref keys + snapshot + persistence live in ./pref-helpers.ts (Phase 1c).
   // Thin closures below keep the original signatures the route layer expects
@@ -485,8 +485,8 @@ export async function startWebUI(
   };
 
   // Event arming + WS error handlers live in ./server-runtime.ts (Phase 1e).
-  let disposeEvents: (() => void) | null = null;
-  let fleetBroadcast: (() => Promise<void>) | null = null;
+  const disposeEvents: (() => void) | null = null;
+  const fleetBroadcast: (() => Promise<void>) | null = null;
   const eventArming = armEvents(wssPrimary, wssSecondary, wsHost, wsPort, {
     events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths,
   }, watcherMetricsRef);
