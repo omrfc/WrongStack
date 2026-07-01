@@ -22,6 +22,7 @@ export default defineConfig({
     'test-runner-gate': 'src/test-runner-gate/index.ts',
     'import-organizer': 'src/import-organizer/index.ts',
     'todo-listener': 'src/todo-listener/index.ts',
+    'session-recap': 'src/session-recap/index.ts',
   },
   format: ['esm'],
   dts: true,

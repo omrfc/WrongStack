@@ -1,7 +1,7 @@
 /**
  * @wrongstack/plugins — Official WrongStack Plugin Suite
  *
- * Exported plugins (19 total):
+ * Exported plugins (20 total):
  *  1. auto-doc         — Auto-generates JSDoc/TSDoc (dryRun for preview)
  *  2. git-autocommit  — AI-powered commit messages (git_autocommit/status_summary removed)
  *  3. shell-check     — Runs shellcheck on files or directories (merged)
@@ -34,6 +34,9 @@
  * 19. todo-listener   — Post-tool hook on `todo` that broadcasts the new list
  *                        to the project mailbox (api.mailbox.send) so other
  *                        agents can see what this one is working on
+ * 20. session-recap   — Stop hook that posts a one-page session summary
+ *                        (tokens, tool calls, commits, transcript tail) to
+ *                        the project mailbox when the agent loop ends
  *
  * Removed (use the equivalent built-in tools instead — see
  * `DEPRECATED_PLUGIN_NAMES` in `packages/cli/src/wiring/plugins.ts`
@@ -71,3 +74,4 @@ export { default as formatOnSavePlugin } from './format-on-save/index.js';
 export { default as testRunnerGatePlugin } from './test-runner-gate/index.js';
 export { default as importOrganizerPlugin } from './import-organizer/index.js';
 export { default as todoListenerPlugin } from './todo-listener/index.js';
+export { default as sessionRecapPlugin } from './session-recap/index.js';

@@ -19,7 +19,7 @@ Guides the creation and maintenance of first-party plugins in
 the `Plugin` interface from `@wrongstack/core`, registering tools,
 hooks, slash commands, or pipelines into the agent's runtime.
 
-There are currently **19 official plugins** in the suite:
+There are currently **20 official plugins** in the suite:
 
 | Plugin | Tools | Hooks | Stateful |
 |--------|-------|-------|----------|
@@ -42,6 +42,7 @@ There are currently **19 official plugins** in the suite:
 | `test-runner-gate` | `test_gate_status` | `PostToolUse` (`write\|edit`) | ✅ teardown+health |
 | `import-organizer` | `import_organizer_status` | `PostToolUse` (`write\|edit`) | ✅ teardown+health |
 | `todo-listener` | `todo_listener_status` | `PostToolUse` (`todo`) | ✅ teardown+health |
+| `session-recap` | `session_recap_status` | `Stop` | ✅ teardown+health |
 
 ## Rules
 

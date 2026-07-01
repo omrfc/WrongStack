@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Nineteen focused, single-purpose plugins ship in this package and load
+Twenty focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -40,6 +40,7 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 17 | [`test-runner-gate`](./src/test-runner-gate) | `test_gate_status` | `PostToolUse` (`write\|edit`) | Runs the relevant test file after every write or edit to a source file |
 | 18 | [`import-organizer`](./src/import-organizer) | `import_organizer_status` | `PostToolUse` (`write\|edit`) | Runs `biome check --write --unsafe` (or `eslint --fix`) on the file after write or edit, re-sorting imports and applying safe fixes |
 | 19 | [`todo-listener`](./src/todo-listener) | `todo_listener_status` | `PostToolUse` (`todo`) | Broadcasts a status update to the project mailbox whenever the `todo` tool is called, so other agents can see what this one is working on |
+| 20 | [`session-recap`](./src/session-recap) | `session_recap_status` | `Stop` | Posts a one-page session summary (tokens, tool calls, commits, last activity) to the project mailbox when the agent loop ends |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -576,6 +577,75 @@ real time.
   logs a one-shot warning and silently no-ops.
 - Subject is truncated to 200 chars to keep the inbox readable.
 
+### 20 — `session-recap`
+
+**Tools**: `session_recap_status`
+**Hooks**: `Stop`
+
+When the agent loop ends, the hook posts a one-page session summary
+to the project mailbox. Other agents (terminals, WebUIs, shadow
+agents) can read the recap stream to see what the previous session
+finished — useful for end-of-day handoff and audit.
+
+The plugin accumulates lightweight metrics from the EventBus during
+the session:
+
+- `provider.response` events → tokens per model
+- `tool.*` events → tool-call counts (top-5 reported)
+- `tool.result` events → commit count (via `git_autocommit` success)
+- First/last activity timestamp → wall-clock duration
+
+```jsonc
+{
+  "extensions": {
+    "session-recap": {
+      "enabled": true,
+      "subjectPrefix": "session recap: ",
+      "includeTranscriptTail": 3,
+      "maxBodyChars": 8000
+    }
+  }
+}
+```
+
+**Recap payload** (mailbox body, JSON):
+```json
+{
+  "session": {
+    "id": "sess-42",
+    "cwd": "/home/user/proj",
+    "startedAt": "2026-06-30T10:00:00Z",
+    "endedAt": "2026-06-30T10:32:18Z",
+    "duration": "32m18s"
+  },
+  "tokens": {
+    "total": { "input": 12345, "output": 6789 },
+    "perModel": [
+      { "model": "gpt-4o", "input": 8000, "output": 5000, "invocations": 12 }
+    ]
+  },
+  "tools": {
+    "totalCalls": 47,
+    "uniqueTools": 8,
+    "top": [["read", 18], ["bash", 12], ["edit", 9]]
+  },
+  "commits": 2,
+  "transcriptTail": [
+    { "type": "user", "ts": "...", "preview": "last user prompt..." }
+  ]
+}
+```
+
+**Transcript tail**: by default the recap includes the last 3 events
+from `api.session.transcriptPath` (the JSONL session log) for
+context. Increase `includeTranscriptTail` for more history.
+
+**Host requirements**:
+- `api.mailbox` — same as `todo-listener`. Without it, the hook
+  logs a one-shot warn and no-ops.
+- `api.session.transcriptPath` — when missing the transcript tail
+  is empty but the metrics summary still publishes.
+
 ## Configuration patterns
 
 There are two surfaces for plugin configuration:
@@ -613,7 +683,7 @@ To disable a single built-in without removing its config:
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
 `todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
-`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`, `test-runner-gate`, `import-organizer`, `todo-listener`) follow a strict lifecycle to survive hot-reload
+`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`, `test-runner-gate`, `import-organizer`, `todo-listener`, `session-recap`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's
