@@ -251,3 +251,115 @@ describe('ToolRegistry', () => {
     expect(clone.get('read')?.description.length).toBeLessThan(full.length);
   });
 });
+
+// ── Disable / enable API + remaining branches ─────────────────────────
+
+describe('ToolRegistry disable/enable', () => {
+  it('disable hides a tool from get/list/listByCategory/listWithOwner', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    r.register(t('b'));
+    expect(r.disable('a')).toBe(true);
+    expect(r.isDisabled('a')).toBe(true);
+    expect(r.get('a')).toBeUndefined();
+    expect(r.list().map((x) => x.name)).toEqual(['b']);
+    expect(r.listByCategory().get('')?.map((x) => x.name)).toEqual(['b']);
+    expect(r.listWithOwner().map((x) => x.tool.name)).toEqual(['b']);
+  });
+
+  it('disable returns false for unknown / already-disabled tools', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    expect(r.disable('ghost')).toBe(false);
+    expect(r.disable('a')).toBe(true);
+    expect(r.disable('a')).toBe(false); // already disabled
+  });
+
+  it('enable restores a disabled tool; returns false if not disabled', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    expect(r.enable('a')).toBe(false); // not disabled
+    r.disable('a');
+    expect(r.enable('a')).toBe(true);
+    expect(r.get('a')?.name).toBe('a');
+    expect(r.isDisabled('a')).toBe(false);
+  });
+
+  it('enableAll re-enables every disabled tool and returns the count', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    r.register(t('b'));
+    expect(r.enableAll()).toBe(0); // none disabled
+    r.disable('a');
+    r.disable('b');
+    expect(r.enableAll()).toBe(2);
+    expect(r.list().map((x) => x.name).sort()).toEqual(['a', 'b']);
+  });
+
+  it('applyDisabled ignores unknown names and returns the count disabled', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    r.register(t('b'));
+    expect(r.applyDisabled(['a', 'ghost', 'b'])).toBe(2);
+    expect(r.list()).toHaveLength(0);
+  });
+
+  it('listDisabled returns tool+owner for disabled entries', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'), 'plugin-x');
+    r.disable('a');
+    const disabled = r.listDisabled();
+    expect(disabled).toHaveLength(1);
+    expect(disabled[0]!.tool.name).toBe('a');
+    expect(disabled[0]!.owner).toBe('plugin-x');
+  });
+
+  it('clone preserves the disabled set', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    r.disable('a');
+    const clone = r.clone();
+    expect(clone.isDisabled('a')).toBe(true);
+    expect(clone.get('a')).toBeUndefined();
+    clone.enable('a');
+    expect(clone.get('a')?.name).toBe('a');
+  });
+});
+
+describe('ToolRegistry registration + mode branches', () => {
+  it('register throws on an invalid inputSchema', () => {
+    const r = new ToolRegistry();
+    expect(() => r.register({ name: 'x', inputSchema: null } as never)).toThrow(/inputSchema/);
+  });
+
+  it('tryRegister returns false on duplicate and on invalid schema', () => {
+    const r = new ToolRegistry();
+    expect(r.tryRegister({ name: 'x', inputSchema: null } as never)).toBe(false);
+    expect(r.tryRegister(t('x'))).toBe(true);
+    expect(r.tryRegister(t('x'))).toBe(false); // duplicate
+  });
+
+  it('setDescriptionMode returns false for an invalid mode or a missing tool', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    expect(r.setDescriptionMode('a', 'garbage')).toBe(false);
+    expect(r.setDescriptionMode('ghost', 'simple')).toBe(false);
+    expect(r.setDescriptionMode('a', 'simple')).toBe(true);
+  });
+
+  it('applyDescriptionModes: invalid skip + applied (registered) + extend-on-missing', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    expect(r.applyDescriptionModes({ a: 'garbage' })).toEqual({ applied: 0, missing: [] }); // 223 skip
+    expect(r.applyDescriptionModes({ a: 'simple' })).toEqual({ applied: 1, missing: [] }); // 225 applied
+    expect(r.applyDescriptionModes({ ghost: 'extend' })).toEqual({ applied: 0, missing: ['ghost'] }); // 228 else-delete
+  });
+
+  it('list() returns a cached snapshot when unchanged', () => {
+    const r = new ToolRegistry();
+    r.register(t('a'));
+    const first = r.list();
+    const second = r.list();
+    expect(second).toBe(first); // same cached ref (no mutation between)
+  });
+});
