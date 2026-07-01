@@ -280,6 +280,7 @@ export class AgentStatusTracker {
         const entry = touch(p.subagentId);
         entry.name = p.name?.trim() || entry.name;
         if (p.model) entry.model = p.model;
+        /* v8 ignore next -- touch() always sets startedAt on creation */
         if (!entry.startedAt) entry.startedAt = new Date().toISOString();
         entry.status = 'running';
         this.flush();
@@ -302,6 +303,7 @@ export class AgentStatusTracker {
         if (!p?.subagentId) return;
         const entry = touch(p.subagentId);
         entry.status = 'running';
+        /* v8 ignore next -- touch() always sets startedAt on creation */
         if (!entry.startedAt) entry.startedAt = new Date().toISOString();
         entry.iterations++;
         this.flush();
@@ -314,6 +316,7 @@ export class AgentStatusTracker {
         if (!p?.subagentId) return;
         const entry = touch(p.subagentId);
         entry.status = 'running';
+        /* v8 ignore next -- touch() always sets startedAt on creation */
         if (!entry.startedAt) entry.startedAt = new Date().toISOString();
         entry.currentTool = p.name;
         entry.toolCalls++;
@@ -336,6 +339,7 @@ export class AgentStatusTracker {
         if (!p?.subagentId) return;
         const entry = touch(p.subagentId);
         entry.status = 'running';
+        /* v8 ignore next -- touch() always sets startedAt on creation */
         if (!entry.startedAt) entry.startedAt = new Date().toISOString();
         if (typeof p.iteration === 'number') entry.iterations = p.iteration;
         if (typeof p.toolCalls === 'number') entry.toolCalls = p.toolCalls;

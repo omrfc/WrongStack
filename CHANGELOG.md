@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Empty — the next batch of changes will land here._
+### Added — Desktop Surface
+
+- **WrongStack Desktop is now covered as a first-class surface** — the root
+  README documents the Electron shell alongside the plain REPL, Ink/React TUI,
+  and standalone/embedded WebUI. Coverage includes `wstack desktop`,
+  `wrongstack --desktop`,
+  `wrongstack-desktop`, `wstack-desktop`, recent/registered project launch,
+  multi-session project runtimes, WebUI embedding, native menu routing,
+  terminal launcher commands, YOLO / next prediction / auto-compact toggles,
+  token-required local runtimes, window/sidebar persistence, browser open,
+  folder reveal, reload, and runtime log visibility.
+
+### Changed — Documentation
+
+- **Root README now documents all four user-facing surfaces** — plain REPL,
+  Ink/React TUI, standalone/embedded WebUI, and the Electron Desktop shell.
+- **README package and command maps updated** — `@wrongstack/desktop`,
+  `@wrongstack/acp`, and `@wrongstack/bench` are listed in the package table;
+  `wrongstack webui`, `wrongstack desktop`, and `wrongstack hq` are listed
+  as subcommands; `--webui`, `--desktop`, `--hq`, `--no-interactive`, and
+  `--open` are included in the flag table.
+- **README plugin section updated to the 21-plugin catalog** — replaces the
+  stale 10-plugin table with the current catalog-backed list and calls out
+  retired plugin names (`web-search`, `json-path`) with their built-in tool
+  replacements.
+- **README observability count corrected** from 28 typed events to 53 typed
+  events, matching the current kernel event map categories.
 
 ## [0.278.0] — 2026-07-01
 

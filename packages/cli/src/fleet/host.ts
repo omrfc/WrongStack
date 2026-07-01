@@ -10,6 +10,7 @@ import type { BrainArbiter, SubagentRunner, TextBlock } from '@wrongstack/core';
 import {
   Agent,
   type AgentFactory,
+  applyModelRuntime,
   AutoApprovePermissionPolicy,
   type Config,
   type ConfigStore,
@@ -25,11 +26,14 @@ import {
   FLEET_ROSTER,
   FleetManager,
   GlobalMailbox,
+  mergeModelRuntime,
   type ModelsRegistry,
   makeDirectorSessionFactory,
   makeFleetEmitTool,
   type Provider,
   type ProviderRegistry,
+  type ReasoningConfig,
+  type Request,
   resolveModelMatrix,
   resolveModelTargetFromEntry,
   type SessionWriter,
@@ -767,7 +771,9 @@ export class MultiAgentHost {
       const effProvider = subCfg.provider ?? matrixTarget?.provider ?? config.provider;
       const effModel = subCfg.model ?? matrixTarget?.model ?? config.model;
       const matrixFallbacks = matrixTarget?.fallbackModels;
+      const runtimeOverride = subCfg.modelRuntime ?? matrixTarget?.modelRuntime;
       const provider = await this.buildSubagentProvider(config, effProvider, effModel);
+      let subReasoningConfig = await this.resolveSubagentReasoningConfig(effProvider, effModel);
 
       // Per-subagent cwd (defaults to the factory cwd). AutoPhase points this
       // at a phase's git worktree so isolated checkouts don't collide.
@@ -903,12 +909,25 @@ export class MultiAgentHost {
         tracer: undefined,
       });
 
+      const subagentConfigStore = this.deps.configStore;
+      const pipelines = createDefaultPipelines();
+      pipelines.request.use({
+        name: 'ModelRuntimeSettings',
+        async handler(req: Request) {
+          return applyModelRuntime(req, {
+            getSettings: () => mergeModelRuntime(subagentConfigStore.get().modelRuntime, runtimeOverride),
+            getReasoningConfig: () => subReasoningConfig,
+            getCapabilities: () => ctx.provider.capabilities,
+          });
+        },
+      });
+
       const agent = new Agent({
         container: this.deps.container,
         tools: baseRegistry,
         providers: this.deps.providerRegistry,
         events,
-        pipelines: createDefaultPipelines(),
+        pipelines,
         context: ctx,
         // Subagents cannot answer interactive permission prompts — they
         // run under a director, not the user. Auto-approve everything
@@ -934,7 +953,10 @@ export class MultiAgentHost {
             if (matrixFallbacks?.length) return { ...live, fallbackModels: matrixFallbacks };
             return live;
           },
-          buildProvider: (id) => this.buildSubagentProvider(config, id, effModel),
+          buildProvider: (id, model) => this.buildSubagentProvider(config, id, model ?? effModel),
+          onModelSwitch: async (id, model) => {
+            subReasoningConfig = await this.resolveSubagentReasoningConfig(id, model);
+          },
           events,
         }),
       );
@@ -1092,6 +1114,7 @@ export class MultiAgentHost {
     const cfgWithType = {
       ...newCfg,
       type: providerId,
+      ...(model ? { model } : {}),
     };
     const provider = this.deps.providerRegistry.has(providerId)
       ? this.deps.providerRegistry.create(cfgWithType)
@@ -1117,6 +1140,18 @@ export class MultiAgentHost {
       if (mc && mc > 0) provider.capabilities.maxContext = mc;
     }
     return provider;
+  }
+
+  private async resolveSubagentReasoningConfig(
+    providerId: string,
+    modelId: string,
+  ): Promise<ReasoningConfig | undefined> {
+    if (!this.deps.modelsRegistry) return undefined;
+    try {
+      return (await this.deps.modelsRegistry.getModel(providerId, modelId))?.capabilities.reasoningConfig;
+    } catch {
+      return undefined;
+    }
   }
 
   async spawnACP(subagentId: string, task: string, config: Config): Promise<string> {

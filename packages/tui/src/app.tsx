@@ -386,6 +386,8 @@ export interface AppProps {
    * provider/model sync.
    */
   getYolo?: (() => boolean) | undefined;
+  /** Set the live YOLO state from TUI-owned controls such as ConfirmPrompt. */
+  onYolo?: ((enabled: boolean) => boolean) | undefined;
   /** Query the live autonomy mode. */
   getAutonomy?: (() => 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel') | undefined;
   /** Query the live agent mode label for the status bar (e.g. "teach"). */
@@ -859,6 +861,7 @@ export function App({
   enhanceDelayMs = 15_000,
   getEnhancerReasoning,
   getYolo,
+  onYolo,
   getAutonomy,
   getEternalEngine,
   getParallelEngine,
@@ -3477,6 +3480,7 @@ export function App({
           input: e.input,
           suggestedPattern: e.suggestedPattern,
           resolve: e.resolve,
+          destructive: e.riskTier === 'destructive' || e.decisionSource === 'yolo_destructive',
         },
       });
     });
@@ -6439,12 +6443,33 @@ export function App({
                 head.resolve(decision);
                 dispatch({ type: 'confirmClose' });
               };
+              // Capital-Y: enable YOLO mode straight from the prompt. Persists
+              // via saveSettings (→ applyLiveSettings → permissionPolicy.setYolo)
+              // and flips the statusline chip live. For non-destructive calls it
+              // also approves THIS call; destructive calls stay for an explicit
+              // y/n/a/d (enabling YOLO never auto-approves destructive work).
+              const onEnableYolo = () => {
+                if (resolved) return;
+                onYolo?.(true);
+                setYoloLive(true);
+                const cur = getSettings?.();
+                if (cur && saveSettings) {
+                  Promise.resolve(saveSettings({ ...cur, yolo: true })).catch(() => {});
+                }
+                if (!head.destructive) {
+                  resolved = true;
+                  head.resolve('yes');
+                  dispatch({ type: 'confirmClose' });
+                }
+              };
               return (
                 <ConfirmPrompt
                   toolName={head.toolName}
                   input={head.input}
                   suggestedPattern={head.suggestedPattern}
                   onDecision={onDecision}
+                  onEnableYolo={onEnableYolo}
+                  destructive={head.destructive}
                 />
               );
             })()}

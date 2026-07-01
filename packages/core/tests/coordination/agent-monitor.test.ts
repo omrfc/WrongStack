@@ -201,7 +201,7 @@ describe('AgentMonitorService', () => {
     expect(timelineEntries).toHaveLength(2);
     expect(timelineEntries[0].kind).toBe('tool_use');
     expect(timelineEntries[0].content).toContain('read');
-    expect(timelineEntries[1].kind).toBe('tool_use'); // tool_result maps to tool_use kind
+    expect(timelineEntries[1].kind).toBe('tool_result');
     expect(timelineEntries[1].content).toContain('read');
     expect(timelineEntries[1].content).toContain('42ms');
   });

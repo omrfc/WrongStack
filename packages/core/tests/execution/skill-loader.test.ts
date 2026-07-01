@@ -67,7 +67,7 @@ describe('DefaultSkillLoader', () => {
   });
 
   it('lists project, user, and bundled skills with shadowing', async () => {
-    const paths = resolveWstackPaths({ projectRoot, globalRoot });
+    const paths = resolveWstackPaths({ projectRoot, globalRoot, userHome: tmp });
     const loader = new DefaultSkillLoader({ paths, bundledDir: bundled });
     const list = await loader.list();
     const names = list.map((s) => s.name).sort();
@@ -82,14 +82,14 @@ describe('DefaultSkillLoader', () => {
 
   it('skips entries missing name/description', async () => {
     await fs.writeFile(path.join(globalRoot, 'skills', 'malformed', 'SKILL.md'), SKILL_NONAME);
-    const paths = resolveWstackPaths({ projectRoot, globalRoot });
+    const paths = resolveWstackPaths({ projectRoot, globalRoot, userHome: tmp });
     const loader = new DefaultSkillLoader({ paths });
     const list = await loader.list();
     expect(list.find((s) => s.name === undefined)).toBeUndefined();
   });
 
   it('find returns specific skill', async () => {
-    const paths = resolveWstackPaths({ projectRoot, globalRoot });
+    const paths = resolveWstackPaths({ projectRoot, globalRoot, userHome: tmp });
     const loader = new DefaultSkillLoader({ paths });
     const beta = await loader.find('beta');
     expect(beta?.description).toBe('short');
@@ -98,7 +98,7 @@ describe('DefaultSkillLoader', () => {
   });
 
   it('manifestText lists skills in markdown', async () => {
-    const paths = resolveWstackPaths({ projectRoot, globalRoot });
+    const paths = resolveWstackPaths({ projectRoot, globalRoot, userHome: tmp });
     const loader = new DefaultSkillLoader({ paths });
     const txt = await loader.manifestText();
     expect(txt).toContain('## Available skills');
@@ -112,6 +112,7 @@ describe('DefaultSkillLoader', () => {
       const paths = resolveWstackPaths({
         projectRoot: path.join(empty, 'p'),
         globalRoot: path.join(empty, 'g'),
+        userHome: empty,
       });
       const loader = new DefaultSkillLoader({ paths });
       const txt = await loader.manifestText();
@@ -122,20 +123,20 @@ describe('DefaultSkillLoader', () => {
   });
 
   it('readBody returns SKILL.md contents', async () => {
-    const paths = resolveWstackPaths({ projectRoot, globalRoot });
+    const paths = resolveWstackPaths({ projectRoot, globalRoot, userHome: tmp });
     const loader = new DefaultSkillLoader({ paths });
     const body = await loader.readBody('beta');
     expect(body).toContain('beta body');
   });
 
   it('readBody throws for unknown skill', async () => {
-    const paths = resolveWstackPaths({ projectRoot, globalRoot });
+    const paths = resolveWstackPaths({ projectRoot, globalRoot, userHome: tmp });
     const loader = new DefaultSkillLoader({ paths });
     await expect(loader.readBody('does-not-exist')).rejects.toThrow(/not found/);
   });
 
   it('listEntries returns structured entries with trigger and scope', async () => {
-    const paths = resolveWstackPaths({ projectRoot, globalRoot });
+    const paths = resolveWstackPaths({ projectRoot, globalRoot, userHome: tmp });
     const loader = new DefaultSkillLoader({ paths, bundledDir: bundled });
     const entries = await loader.listEntries();
     const alpha = entries.find((e) => e.name === 'alpha');

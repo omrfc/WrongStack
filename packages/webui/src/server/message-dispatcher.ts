@@ -16,6 +16,7 @@
  * message shapes, ordering, validation, tripwire throws, and the runLock
  * guard around `agent.run` are all unchanged.
  */
+import path from 'node:path';
 import type { WebSocket } from 'ws';
 
 import type { AllRoutes, WebuiCallbacks, WebuiDeps, WebuiMutableState } from './routes.js';
@@ -140,6 +141,17 @@ export function createMessageDispatcher(
       },
       send: (w, m) => send(w, m),
       broadcast: (m) => broadcast(state.getClients(), m),
+    };
+  }
+
+  function makeSkillsContext() {
+    const projectRoot = state.getProjectRoot();
+    return {
+      skillLoader: deps.skillLoader,
+      skillInstaller: deps.skillInstaller,
+      projectRoot,
+      projectSkillsDir: path.join(projectRoot, '.wrongstack', 'skills'),
+      globalSkillsDir: deps.wpaths.globalSkills,
     };
   }
 
@@ -357,60 +369,28 @@ export function createMessageDispatcher(
 
       // Skills — full request→response cycle lives in skills-handlers.ts.
       case 'skills.list':
-        await handleSkillsList(ws, {
-          skillLoader: deps.skillLoader,
-          skillInstaller: deps.skillInstaller,
-          projectRoot: state.getProjectRoot(),
-        });
+        await handleSkillsList(ws, makeSkillsContext());
         break;
       case 'skills.content':
-        await handleSkillsContent(ws, {
-          skillLoader: deps.skillLoader,
-          skillInstaller: deps.skillInstaller,
-          projectRoot: state.getProjectRoot(),
-        }, msg);
+        await handleSkillsContent(ws, makeSkillsContext(), msg);
         break;
       case 'skills.install':
-        await handleSkillsInstall(ws, {
-          skillLoader: deps.skillLoader,
-          skillInstaller: deps.skillInstaller,
-          projectRoot: state.getProjectRoot(),
-        }, msg);
+        await handleSkillsInstall(ws, makeSkillsContext(), msg);
         break;
       case 'skills.uninstall':
-        await handleSkillsUninstall(ws, {
-          skillLoader: deps.skillLoader,
-          skillInstaller: deps.skillInstaller,
-          projectRoot: state.getProjectRoot(),
-        }, msg);
+        await handleSkillsUninstall(ws, makeSkillsContext(), msg);
         break;
       case 'skills.update':
-        await handleSkillsUpdate(ws, {
-          skillLoader: deps.skillLoader,
-          skillInstaller: deps.skillInstaller,
-          projectRoot: state.getProjectRoot(),
-        }, msg);
+        await handleSkillsUpdate(ws, makeSkillsContext(), msg);
         break;
       case 'skills.create':
-        await handleSkillsCreate(ws, {
-          skillLoader: deps.skillLoader,
-          skillInstaller: deps.skillInstaller,
-          projectRoot: state.getProjectRoot(),
-        }, msg);
+        await handleSkillsCreate(ws, makeSkillsContext(), msg);
         break;
       case 'skills.edit':
-        await handleSkillsEdit(ws, {
-          skillLoader: deps.skillLoader,
-          skillInstaller: deps.skillInstaller,
-          projectRoot: state.getProjectRoot(),
-        }, msg);
+        await handleSkillsEdit(ws, makeSkillsContext(), msg);
         break;
       case 'skills.export':
-        await handleSkillsExport(ws, {
-          skillLoader: deps.skillLoader,
-          skillInstaller: deps.skillInstaller,
-          projectRoot: state.getProjectRoot(),
-        });
+        await handleSkillsExport(ws, makeSkillsContext());
         break;
 
       // Prompt library — shared handlers (prompts-handlers.ts).

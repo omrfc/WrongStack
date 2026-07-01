@@ -100,6 +100,7 @@ export {
 } from './execution/compaction-core.js';
 export {
   applyModelRuntime,
+  mergeModelRuntime,
   resolveModelRuntime,
   resolveReasoningForRequest,
   resolveCacheForRequest,

@@ -247,10 +247,10 @@ describe('reset', () => {
     });
     useLocalPrefs.getState().reset();
     const state = useLocalPrefs.getState();
-    expect(state.autonomy).toBe('off');
+    expect(state.autonomy).toBe('auto');
     expect(state.autonomyDelayMs).toBe(45_000);
     expect(state.autoProceedMaxIterations).toBe(50);
-    expect(state.yolo).toBe(false);
+    expect(state.yolo).toBe(true);
     expect(state.maxIterations).toBe(500);
     expect(state.chime).toBe(false);
     expect(state.confirmExit).toBe(true);
@@ -279,7 +279,7 @@ describe('reset', () => {
     useLocalPrefs.getState().reset();
     useLocalPrefs.getState().reset();
     const state = useLocalPrefs.getState();
-    expect(state.autonomy).toBe('off');
+    expect(state.autonomy).toBe('auto');
     expect(state.maxIterations).toBe(500);
   });
 });
@@ -321,6 +321,23 @@ describe('persistence', () => {
     useLocalPrefs.getState().set({ autonomy: 'eternal' });
     const persisted = getPersisted();
     expect(persisted?.state?.autonomy).toBe('eternal');
+  });
+
+  it('persists route-specific model runtime overrides in modelMatrix', () => {
+    const modelMatrix = {
+      planner: {
+        modelRuntime: {
+          reasoning: { mode: 'on' as const, effort: 'low', preserve: false },
+          cache: { ttl: '5m' as const },
+          parameters: { user: 'planner' },
+        },
+      },
+    };
+
+    useLocalPrefs.getState().set({ modelMatrix });
+
+    expect(useLocalPrefs.getState().modelMatrix).toEqual(modelMatrix);
+    expect(getPersisted()?.state?.modelMatrix).toEqual(modelMatrix);
   });
 
   it('loads persisted state on hydration', () => {

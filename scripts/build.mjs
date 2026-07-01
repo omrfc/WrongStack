@@ -96,13 +96,14 @@ function runBuild(pkgDir, script) {
   console.log(`\n> ${pkgDir} > ${script}`);
   // node_modules/.bin must be on PATH so tsup, tsc, etc. resolve when
   // spawned via cmd.exe (or sh) — the Node process inherits npm's path
-  // resolution but the spawned shell does not. Prepend both the root bin
-  // dir and the package-local bin dir (pnpm isolates bins per-package) to
-  // be safe.
+  // resolution but the spawned shell does not. Prefer the package-local bin:
+  // pnpm places workspace dependency symlinks under each package, and tsup's
+  // DTS worker can resolve workspace types from the wrong context if the root
+  // shim wins first.
   const rootBin = join(root, 'node_modules', '.bin');
   const pkgBin = join(root, pkgDir, 'node_modules', '.bin');
   const pathSep = isWin ? ';' : ':';
-  const envPath = [rootBin, pkgBin, process.env.PATH || process.env.Path || ''].join(pathSep);
+  const envPath = [pkgBin, rootBin, process.env.PATH || process.env.Path || ''].join(pathSep);
   const env = {
     ...process.env,
     PATH: envPath,

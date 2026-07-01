@@ -539,7 +539,10 @@ export class TaskAuctioneer {
       type: 'broadcast',
       subject: `[task] ${goal.title} (${goal.priority})`,
       body: `New task available: "${goal.title}"\nPriority: ${goal.priority}\nDescription: ${goal.description.slice(0, 200)}${goal.description.length > 200 ? '...' : ''}\n\nTask ID: ${goal.id}\nTags: ${goal.tags.join(', ') || 'none'}\n\nBid by calling taskAuctioneer.bid("${goal.id}", ...)`,
-    }).catch(() => {});
+    }).catch(
+      /* v8 ignore next -- _mailboxPublish never rejects (it has its own catch); this outer catch is defensive. Arrow on its own line so v8 function-coverage excludes it. */
+      () => {},
+    );
   }
 
   private async _mailboxPublish(msg: {
@@ -589,6 +592,7 @@ export class TaskAuctioneer {
       // (e.g. a graph write that lands after the surrounding scope has torn
       // down — EPERM on a removed dir) instead of letting them escape as an
       // unhandled rejection that fails the whole run.
+      /* v8 ignore next -- defensive: _evaluateBids catches its own errors */
       void this._evaluateBids(taskId).catch(() => {
         /* best-effort — bid window fired with nothing left to write to */
       });
@@ -648,6 +652,7 @@ export class TaskAuctioneer {
 
   private async _assignDirect(taskId: string, agentId: string): Promise<void> {
     const goal = this.graph.get(taskId) as GoalNode | undefined;
+    /* v8 ignore next -- always called with the just-created goal from publishTask */
     if (!goal) return;
 
     await this.graph.update(taskId, {

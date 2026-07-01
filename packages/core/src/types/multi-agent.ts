@@ -1,5 +1,6 @@
 import type { SubagentBudget } from '../coordination/subagent-budget.js';
 import type { AgentBridge, BridgeMessage } from './agent-bridge.js';
+import type { ModelRuntimeConfig } from './config.js';
 
 export interface SubagentConfig {
   id?: string | undefined;
@@ -77,6 +78,14 @@ export interface SubagentConfig {
    * → the factory's own default fallback behavior (usually the leader's config).
    */
   fallbackModels?: string[] | undefined;
+
+  /**
+   * Runtime request overrides for THIS subagent. When present, these are merged
+   * over the leader's `Config.modelRuntime` before the subagent request pipeline
+   * maps reasoning/cache/parameters onto provider requests. Used by the model
+   * matrix to give roles their own reasoning effort without changing the leader.
+   */
+  modelRuntime?: ModelRuntimeConfig | undefined;
 
   /**
    * Per-subagent session JSONL path. When omitted the orchestrator-

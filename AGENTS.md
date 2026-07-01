@@ -144,7 +144,7 @@ User/plugin-defined hooks that **steer** (not just observe — the EventBus can'
 
 ### Fallback model
 
-`config.fallbackModels` (CLI `--fallback-model a,b,c`) — ordered chain tried when the primary is overloaded (429/529/5xx) after its own retries. Implemented as an `AgentExtension` (`packages/cli/src/fallback-model.ts`) that wraps the provider runner: walks the chain within a single provider call (so it doesn't burn the loop's `recoveryRetries`), cross-provider via `buildProviderForId` (shared with `/model`), and `beforeRun` restores the primary each turn. Emits `provider.fallback`.
+`config.fallbackModels` (CLI `--fallback-model a,b,c`) — ordered chain tried when the primary is overloaded (429/529/5xx) after its own retries. Implemented as an `AgentExtension` (`packages/core/src/core/fallback-model.ts`) that wraps the provider runner: walks the chain within a single provider call (so it doesn't burn the loop's `recoveryRetries`) and supports cross-provider targets via the CLI/runtime provider builder. After a fallback succeeds, the leader stays on that fallback while the primary is cooling down; when the cooldown expires it probes the primary half-open and backs off again on overload. Emits `provider.fallback`.
 
 ### Multi-agent
 
@@ -154,6 +154,13 @@ User/plugin-defined hooks that **steer** (not just observe — the EventBus can'
 - `AgentBridge` for bidirectional parent↔subagent messaging
 - `BudgetExceededError` → `timeout` or `stopped` result status
 - Subagent signal lifecycle: `AbortController` recycled between tasks
+
+Subagent model routing is driven by `config.modelMatrix`: exact role → role phase
+→ `*` → leader model. A matrix entry can set `provider`/`model`, point at a
+`fallbackProfile`, and/or carry `modelRuntime` overrides. Runtime-only entries
+are valid, so a role can inherit the leader model while using its own reasoning
+mode/effort/preserve. CLI `/setmodel` and WebUI Settings → Model Routing both
+persist the same matrix shape.
 
 For director-driven evolution, see `docs/director-architecture.md`.
 

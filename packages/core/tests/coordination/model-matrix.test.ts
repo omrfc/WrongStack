@@ -8,6 +8,7 @@ import {
   matrixKeyKind,
   phaseForRole,
   resolveModelMatrix,
+  resolveModelTargetFromEntry,
 } from '../../src/coordination/model-matrix.js';
 import type { ModelMatrixEntry } from '../../src/types/config.js';
 import * as fs from 'node:fs/promises';
@@ -64,6 +65,16 @@ describe('resolveModelMatrix', () => {
     expect(
       resolveModelMatrix({ [samplePhase]: entry('p') }, 'totally-unknown-role'),
     ).toBeUndefined();
+  });
+});
+
+describe('resolveModelTargetFromEntry', () => {
+  it('preserves runtime-only matrix entries', () => {
+    const target = resolveModelTargetFromEntry(
+      { provider: 'anthropic', model: 'sonnet' } as never,
+      { modelRuntime: { reasoning: { effort: 'low' } } },
+    );
+    expect(target).toEqual({ modelRuntime: { reasoning: { effort: 'low' } } });
   });
 });
 

@@ -214,7 +214,7 @@ export interface WebuiDeps {
   vault: SecretVault;
   globalConfigPath: string;
   /** Per-project layout — expose only the bits the route layer touches. */
-  wpaths: { globalRoot: string };
+  wpaths: { globalRoot: string; globalSkills: string };
   configStore: ConfigStore;
   tokenCounter: DefaultTokenCounter;
   permissionPolicy: PermissionPolicy;

@@ -3,20 +3,25 @@ import * as path from 'node:path';
 import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   type Agent,
+  DefaultSessionStore,
   type MemoryStore,
   type ModeStore,
   type SessionStore,
   type SessionWriter,
   type SkillLoader,
+  resolveWstackPaths,
   wstackGlobalRoot,
 } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
+import { loadManifest, touchProjectInManifest } from '../../slash-commands/project-utils.js';
 import type { WsCommon } from './index.js';
 
 /**
- * WebUI no longer owns project registration or project switching. The launcher
- * / desktop shell owns project selection, and stale WebUI clients receive an
- * explicit disabled response instead of re-rooting the live agent.
+ * CLI-embedded WebUI project handlers.
+ *
+ * The standalone WebUI/desktop launcher owns project selection for that
+ * surface, but the CLI-embedded WebUI still supports in-process registration
+ * and project switching so the browser stays attached to the same live agent.
  */
 
 /** The subset of CliWebUIOptions the project handlers read/mutate. Passed by reference. */
@@ -70,15 +75,86 @@ export async function handleProjectsSelect(
   ws: WebSocket,
   payload: { root: string; name?: string | undefined },
 ): Promise<void> {
-  const { root, name: projectName } = payload;
-  ctx.send(ws, {
-    type: 'projects.selected',
-    payload: {
-      root,
-      name: projectName?.trim() || path.basename(root),
-      message: 'Project switching is disabled in WebUI. Open a project from the launcher or desktop shell instead.',
-    },
-  });
+  const resolved = path.resolve(payload.root);
+  const displayName = payload.name?.trim() || path.basename(resolved);
+  try {
+    const stat = await fs.stat(resolved).catch(() => null);
+    if (!stat?.isDirectory()) {
+      ctx.send(ws, {
+        type: 'projects.selected',
+        payload: { root: resolved, name: displayName, message: `Cannot switch: not a directory: ${resolved}` },
+      });
+      return;
+    }
+
+    const globalRoot = ctx.opts.globalConfigPath
+      ? path.resolve(path.dirname(ctx.opts.globalConfigPath))
+      : wstackGlobalRoot();
+    const nextPaths = resolveWstackPaths({ projectRoot: resolved, globalRoot });
+    const nextSessionStore = new DefaultSessionStore({ dir: nextPaths.projectSessions });
+    const actx = ctx.opts.agent.ctx;
+    const oldWriter = actx.session ?? ctx.opts.session;
+    const oldSessionId = oldWriter?.id ?? ctx.opts.session.id;
+    const oldUsage = actx.tokenCounter?.total?.() ?? { input: 0, output: 0 };
+    const providerId = (actx.provider as { id?: string } | undefined)?.id ?? '';
+    const nextWriter = await nextSessionStore.create({
+      id: '',
+      title: '',
+      model: actx.model,
+      provider: providerId,
+    });
+
+    ctx.abortLegacyRun();
+    for (const ctrl of ctx.abortControllers.values()) ctrl.abort();
+    ctx.abortControllers.clear();
+
+    await touchProjectInManifest({
+      projectRoot: resolved,
+      globalConfigPath: ctx.opts.globalConfigPath,
+      workingDir: resolved,
+      name: displayName,
+    });
+
+    ctx.opts.projectRoot = resolved;
+    ctx.opts.sessionStore = nextSessionStore;
+    ctx.opts.session = nextWriter;
+
+    actx.projectRoot = resolved;
+    actx.cwd = resolved;
+    actx.workingDir = resolved;
+    actx.session = nextWriter;
+    actx.state?.replaceMessages?.([]);
+    actx.state?.replaceTodos?.([]);
+    actx.readFiles?.clear?.();
+    actx.fileMtimes?.clear?.();
+    actx.tokenCounter?.reset?.();
+
+    if (oldWriter && oldWriter !== nextWriter) {
+      const maybeWriter = oldWriter as Partial<SessionWriter>;
+      if (typeof maybeWriter.append === 'function') {
+        await maybeWriter
+          .append({ type: 'session_end', ts: new Date().toISOString(), usage: oldUsage })
+          .catch(() => undefined);
+      }
+      if (typeof maybeWriter.close === 'function') {
+        await maybeWriter.close().catch(() => undefined);
+      }
+    }
+
+    ctx.opts.onSessionSwapped?.(nextWriter.id);
+
+    ctx.send(ws, {
+      type: 'projects.selected',
+      payload: { root: resolved, name: displayName, message: `Switched to ${displayName}` },
+    });
+    const start = await ctx.buildSessionStart({ reset: true, clearedSessionId: oldSessionId });
+    ctx.broadcast({ type: 'session.start', payload: start });
+  } catch (err) {
+    ctx.send(ws, {
+      type: 'projects.selected',
+      payload: { root: resolved, name: displayName, message: `Cannot switch: ${toErrorMessage(err)}` },
+    });
+  }
 }
 
 export async function handleProjectsAdd(
@@ -86,16 +162,42 @@ export async function handleProjectsAdd(
   ws: WebSocket,
   payload: { root: string; name?: string | undefined },
 ): Promise<void> {
-  const { root: addRoot, name: addName } = payload;
-  ctx.send(ws, {
-    type: 'projects.added',
-    payload: {
-      name: addName?.trim() || path.basename(addRoot),
-      root: addRoot,
-      slug: '',
-      message: 'Project registration is disabled in WebUI. Open/register projects from the launcher or desktop shell.',
-    },
-  });
+  const resolved = path.resolve(payload.root);
+  const displayName = payload.name?.trim() || path.basename(resolved);
+  try {
+    const stat = await fs.stat(resolved).catch(() => null);
+    if (!stat?.isDirectory()) {
+      ctx.send(ws, {
+        type: 'projects.added',
+        payload: { name: displayName, root: resolved, slug: '', message: `Not a directory: ${resolved}` },
+      });
+      return;
+    }
+    const before = await loadManifest(ctx.opts.globalConfigPath);
+    const already = before.projects.some((p) => path.resolve(p.root) === resolved);
+    const entry = await touchProjectInManifest({
+      projectRoot: resolved,
+      globalConfigPath: ctx.opts.globalConfigPath,
+      workingDir: resolved,
+      name: displayName,
+    });
+    ctx.send(ws, {
+      type: 'projects.added',
+      payload: {
+        name: entry.name,
+        root: entry.root,
+        slug: entry.slug,
+        message: already
+          ? `Already registered project "${entry.name}"`
+          : `Registered project "${entry.name}"`,
+      },
+    });
+  } catch (err) {
+    ctx.send(ws, {
+      type: 'projects.added',
+      payload: { name: displayName, root: resolved, slug: '', message: toErrorMessage(err) },
+    });
+  }
 }
 
 export async function handleWorkingDirSet(

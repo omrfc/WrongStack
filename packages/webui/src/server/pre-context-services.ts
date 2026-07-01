@@ -72,7 +72,7 @@ import {
   searchMemoryTool,
 } from '@wrongstack/tools';
 import type { WstackPaths } from '@wrongstack/core/utils';
-import { projectHash, toErrorMessage, wstackGlobalRoot } from '@wrongstack/core/utils';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import type { WebUIOptions } from './types.js';
 import type { CustomModeStore } from './custom-context-modes.js';
 import { createCustomModeStore } from './custom-context-modes.js';
@@ -335,10 +335,10 @@ export async function createPreContextServices(
   const skillLoader = config.features.skills ? new DefaultSkillLoader({ paths: wpaths }) : undefined;
   const skillInstaller = config.features.skills
     ? new SkillInstaller({
-        manifestPath: path.join(wstackGlobalRoot(), 'installed-skills.json'),
-        projectSkillsDir: path.join(projectRoot, '.wrongstack', 'skills'),
-        globalSkillsDir: path.join(wstackGlobalRoot(), 'skills'),
-        projectHash: projectHash(projectRoot),
+        manifestPath: path.join(wpaths.globalRoot, 'installed-skills.json'),
+        projectSkillsDir: wpaths.inProjectSkills,
+        globalSkillsDir: wpaths.globalSkills,
+        projectHash: wpaths.projectHash,
         skillLoader,
       })
     : undefined;

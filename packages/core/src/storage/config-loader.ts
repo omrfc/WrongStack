@@ -87,7 +87,12 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
   mcpServers: {},
   fallbackAuto: true,
   maxConcurrent: 4,
-  yolo: false,
+  // YOLO on by default: auto-approve normal project work without a per-call
+  // prompt. Destructive operations still gate through a confirmation. Users
+  // who want the per-call prompts set `yolo: false`. Existing installs whose
+  // config lacks this key pick it up via fillMissingDefaults; an explicit
+  // `false` is preserved by the deep-merge (opt-out respected).
+  yolo: true,
   nextPrediction: false,
   hints: true,
   debugStream: false,
@@ -100,12 +105,19 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
   },
   session: { ...DEFAULT_SESSION_LOGGING_CONFIG },
   autonomy: {
-    defaultMode: 'off',
+    // 'auto' by default: the agent self-drives (picks the top next-step after
+    // each turn). This is a startup default, not a runtime flip — the
+    // autoProceedMaxIterations cap + autoProceedDelayMs cooldown + destructive
+    // gate + Ctrl+C / [GOAL_COMPLETE] stops remain in force. Explicit 'off'
+    // in a config file is preserved (opt-out respected).
+    defaultMode: 'auto',
     autoProceedDelayMs: DEFAULT_AUTONOMY_CONFIG.autoProceedDelayMs,
     autoProceedMaxIterations: 50,
     autonomyNextPrompt: 'auto {{suggestion}}',
     terminalTitleAnimation: true,
-    yolo: false,
+    // Mirrored from the top-level yolo default so the autonomy subsystem
+    // (which reads autonomy.yolo) stays consistent with config.yolo.
+    yolo: true,
     streamFleet: true,
     chime: false,
     confirmExit: true,

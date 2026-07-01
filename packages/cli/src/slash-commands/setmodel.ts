@@ -16,6 +16,7 @@ import {
   noOpVault,
   parseModelRef,
   type ProviderConfig,
+  type ReasoningEffort,
   phaseForRole,
   fallbackProfileChain,
   resolveModelMatrix,
@@ -68,14 +69,50 @@ function parseTarget(
   return { model: only };
 }
 
+const REASONING_EFFORTS: readonly ReasoningEffort[] = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+function isReasoningEffort(value: string | undefined): value is ReasoningEffort {
+  return !!value && (REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
+function isReasoningMode(value: string | undefined): value is 'auto' | 'on' | 'off' {
+  return value === 'auto' || value === 'on' || value === 'off';
+}
+
+function parseBoolWord(value: string | undefined): boolean | undefined {
+  if (value === 'on' || value === 'true' || value === 'yes') return true;
+  if (value === 'off' || value === 'false' || value === 'no') return false;
+  return undefined;
+}
+
+function fmtRuntime(e: ModelMatrixEntry): string {
+  const reasoning = e.modelRuntime?.reasoning;
+  if (!reasoning) return '';
+  const parts = [
+    reasoning.mode ? `mode:${reasoning.mode}` : '',
+    reasoning.effort ? `effort:${reasoning.effort}` : '',
+    reasoning.preserve !== undefined ? `preserve:${reasoning.preserve ? 'on' : 'off'}` : '',
+  ].filter(Boolean);
+  return parts.length ? color.dim(` reasoning(${parts.join(' ')})`) : '';
+}
+
 function fmtEntry(e: ModelMatrixEntry): string {
-  if (e.fallbackProfile && !e.model) return `profile:${e.fallbackProfile}`;
+  const runtime = fmtRuntime(e);
+  if (e.fallbackProfile && !e.model) return `profile:${e.fallbackProfile}${runtime}`;
   if (e.fallbackProfile && e.model) {
     const base = e.provider ? `${e.provider}/${e.model}` : `${e.model} ${color.dim('(leader provider)')}`;
-    return `${base} ${color.dim(`+ profile:${e.fallbackProfile}`)}`;
+    return `${base} ${color.dim(`+ profile:${e.fallbackProfile}`)}${runtime}`;
   }
-  if (!e.model) return color.dim('(unset)');
-  return e.provider ? `${e.provider}/${e.model}` : `${e.model} ${color.dim('(leader provider)')}`;
+  if (!e.model) return `${color.dim('(leader model)')}${runtime}`;
+  return `${e.provider ? `${e.provider}/${e.model}` : `${e.model} ${color.dim('(leader provider)')}`}${runtime}`;
 }
 
 /**
@@ -141,6 +178,9 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
     '  /setmodel set <key> <provider>/<model> Pin a role/phase/* to a model',
     '  /setmodel set <key> <fallbackProfile>  Pin a role/phase/* to a fallback profile',
     '  /setmodel set <key> <model>            Pin to a model on the leader provider',
+    '  /setmodel reasoning <key> auto|on|off [effort]  Set role/phase reasoning mode',
+    '  /setmodel reasoning-effort <key> none|minimal|low|medium|high|xhigh|max',
+    '  /setmodel reasoning-preserve <key> on|off',
     '  /setmodel clear <key>                  Remove a matrix entry',
     '  /setmodel resolve <role>              Walk the resolution chain for one role',
     '  /setmodel doctor                       Validate matrix entries (orphans, typos, missing keys)',
@@ -482,6 +522,79 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
           return { message: `${color.green('✓')} leader → ${color.cyan(`${provider}/${model}`)}` };
         }
 
+        if (sub === 'reasoning' || sub === 'reasoning-effort' || sub === 'reasoning-preserve') {
+          const key = parts[1];
+          if (!key) {
+            return {
+              message: `${color.amber('Usage:')} /setmodel ${sub} <role|phase|*> ${
+                sub === 'reasoning'
+                  ? 'auto|on|off [effort]'
+                  : sub === 'reasoning-effort'
+                    ? REASONING_EFFORTS.join('|')
+                    : 'on|off'
+              }`,
+            };
+          }
+          if (matrixKeyKind(key) === 'unknown') {
+            return {
+              message: `${color.red('Unknown key')}: "${key}". Use * , a phase (${MATRIX_PHASE_KEYS.join(', ')}), or a role. ${color.dim('/setmodel list')}`,
+            };
+          }
+
+          let nextMode: 'auto' | 'on' | 'off' | undefined;
+          let nextEffort: ReasoningEffort | undefined;
+          let nextPreserve: boolean | undefined;
+
+          if (sub === 'reasoning') {
+            nextMode = parts[2] as typeof nextMode;
+            if (!isReasoningMode(nextMode)) {
+              return { message: `${color.amber('Usage:')} /setmodel reasoning ${key} auto|on|off [effort]` };
+            }
+            if (parts[3] !== undefined) {
+              if (!isReasoningEffort(parts[3])) {
+                return {
+                  message: `${color.red('Invalid effort')}: "${parts[3]}". Expected ${REASONING_EFFORTS.join(', ')}.`,
+                };
+              }
+              nextEffort = parts[3];
+            }
+          } else if (sub === 'reasoning-effort') {
+            if (!isReasoningEffort(parts[2])) {
+              return {
+                message: `${color.amber('Usage:')} /setmodel reasoning-effort ${key} ${REASONING_EFFORTS.join('|')}`,
+              };
+            }
+            nextEffort = parts[2];
+          } else {
+            nextPreserve = parseBoolWord(parts[2]);
+            if (nextPreserve === undefined) {
+              return { message: `${color.amber('Usage:')} /setmodel reasoning-preserve ${key} on|off` };
+            }
+          }
+
+          const decrypted = await patchGlobalConfig(globalConfigPath, (cfg) => {
+            const matrix = { ...((cfg.modelMatrix as Record<string, ModelMatrixEntry>) ?? {}) };
+            const entry = { ...(matrix[key] ?? {}) } as ModelMatrixEntry;
+            const modelRuntime = { ...(entry.modelRuntime ?? {}) };
+            const reasoning = { ...(modelRuntime.reasoning ?? {}) };
+            if (nextMode !== undefined) reasoning.mode = nextMode;
+            if (nextEffort !== undefined) reasoning.effort = nextEffort;
+            if (nextPreserve !== undefined) reasoning.preserve = nextPreserve;
+            modelRuntime.reasoning = reasoning;
+            entry.modelRuntime = modelRuntime;
+            matrix[key] = entry;
+            cfg.modelMatrix = matrix;
+          });
+          opts.configStore.update({
+            modelMatrix: decrypted.modelMatrix as Record<string, ModelMatrixEntry>,
+          });
+          return {
+            message: `${color.green('✓')} ${color.amber(key)} → ${fmtEntry(
+              ((decrypted.modelMatrix as Record<string, ModelMatrixEntry>)[key])!,
+            )}`,
+          };
+        }
+
         if (sub === 'set') {
           const key = parts[1];
           if (!key) {
@@ -505,17 +618,20 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
           }
           const decrypted = await patchGlobalConfig(globalConfigPath, (cfg) => {
             const matrix = { ...((cfg.modelMatrix as Record<string, ModelMatrixEntry>) ?? {}) };
+            const previousRuntime = matrix[key]?.modelRuntime;
             matrix[key] = parsed.fallbackProfile && !parsed.model
-              ? { fallbackProfile: parsed.fallbackProfile }
+              ? { fallbackProfile: parsed.fallbackProfile, ...(previousRuntime ? { modelRuntime: previousRuntime } : {}) }
               : parsed.provider
                 ? {
                     provider: parsed.provider,
                     model: parsed.model,
                     ...(parsed.fallbackProfile ? { fallbackProfile: parsed.fallbackProfile } : {}),
+                    ...(previousRuntime ? { modelRuntime: previousRuntime } : {}),
                   }
                 : {
                     model: parsed.model,
                     ...(parsed.fallbackProfile ? { fallbackProfile: parsed.fallbackProfile } : {}),
+                    ...(previousRuntime ? { modelRuntime: previousRuntime } : {}),
                   };
             cfg.modelMatrix = matrix;
           });

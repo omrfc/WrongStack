@@ -68,8 +68,10 @@ vi.mock('../src/utils/term.js', () => ({ writeErr: (s: string) => process.stderr
 
 import { bootConfig, flagsToConfigPatch } from '../src/boot.js';
 import { migratePlaintextSecrets } from '../src/security/secret-vault.js';
+import { DefaultConfigLoader } from '../src/storage/config-loader.js';
 
 const migrateMock = migratePlaintextSecrets as never as ReturnType<typeof vi.fn>;
+const loaderMock = DefaultConfigLoader as never as ReturnType<typeof vi.fn>;
 
 describe('bootConfig (core)', () => {
   beforeEach(() => {
@@ -137,5 +139,85 @@ describe('flagsToConfigPatch — fallbackModels', () => {
   it('omits fallbackModels when the flag is absent or empty', () => {
     expect(flagsToConfigPatch({}).fallbackModels).toBeUndefined();
     expect(flagsToConfigPatch({ 'fallback-model': ' , ' }).fallbackModels).toBeUndefined();
+  });
+});
+
+// ── flagsToConfigPatch — all branches (pure) ─────────────────────────
+
+describe('flagsToConfigPatch — all branches', () => {
+  it('patches provider/model/cwd', () => {
+    expect(flagsToConfigPatch({ provider: 'openai', model: 'gpt', cwd: '/x' })).toMatchObject({
+      provider: 'openai', model: 'gpt', cwd: '/x',
+    });
+  });
+
+  it('log-level wins over verbose/trace; verbose→debug; trace→trace', () => {
+    expect(flagsToConfigPatch({ 'log-level': 'warn', verbose: true, trace: true }).log).toEqual({ level: 'warn' });
+    expect(flagsToConfigPatch({ verbose: true }).log).toEqual({ level: 'debug' });
+    expect(flagsToConfigPatch({ trace: true }).log).toEqual({ level: 'trace' });
+  });
+
+  it('yolo → true', () => {
+    expect(flagsToConfigPatch({ yolo: true }).yolo).toBe(true);
+  });
+
+  it('no-features disables every feature', () => {
+    expect(flagsToConfigPatch({ 'no-features': true }).features).toEqual({
+      mcp: false, plugins: false, memory: false, modelsRegistry: false, skills: false,
+    });
+  });
+
+  it('token-saving-mode → boolean true', () => {
+    expect(flagsToConfigPatch({ 'token-saving-mode': true }).features?.tokenSavingMode).toBe(true);
+  });
+
+  it('token-saving-tier normalises and takes precedence', () => {
+    expect(flagsToConfigPatch({ 'token-saving-tier': 'aggressive' }).features?.tokenSavingMode).toBe('aggressive');
+    // precedence: tier overrides mode
+    expect(
+      flagsToConfigPatch({ 'token-saving-mode': true, 'token-saving-tier': 'light' }).features?.tokenSavingMode,
+    ).toBe('light');
+  });
+});
+
+// ── bootConfig identity-validation catch + sync merge ────────────────
+
+describe('bootConfig identity + sync', () => {
+  it('skipIdentityValidation patches defaults on "no provider configured"', async () => {
+    loaderMock.mockImplementationOnce(function (this: never) {
+      this.load = vi.fn()
+        .mockRejectedValueOnce(new Error('no provider configured'))
+        .mockResolvedValueOnce({ version: 1, provider: 'anthropic', model: 'claude-sonnet-4-6', log: { level: 'info' } });
+      this.loadSyncConfig = vi.fn().mockResolvedValue(null);
+    });
+    const result = await bootConfig({ skipIdentityValidation: true });
+    expect(result.config.provider).toBe('anthropic');
+    expect(result.config.model).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('rethrows non-identity errors', async () => {
+    loaderMock.mockImplementationOnce(function (this: never) {
+      this.load = vi.fn().mockRejectedValue(new Error('disk on fire'));
+      this.loadSyncConfig = vi.fn().mockResolvedValue(null);
+    });
+    await expect(bootConfig()).rejects.toThrow('disk on fire');
+  });
+
+  it('merges a loaded sync config', async () => {
+    loaderMock.mockImplementationOnce(function (this: never) {
+      this.load = vi.fn().mockResolvedValue({ version: 1, provider: 'anthropic', model: 'x', log: { level: 'info' } });
+      this.loadSyncConfig = vi.fn().mockResolvedValue({ category: 'memory', repoUrl: 'gh://x' });
+    });
+    const result = await bootConfig({ loadSyncConfig: true });
+    expect((result.config as never as { sync: unknown }).sync).toEqual({ category: 'memory', repoUrl: 'gh://x' });
+  });
+
+  it('loadSyncConfig=false skips the sync merge', async () => {
+    loaderMock.mockImplementationOnce(function (this: never) {
+      this.load = vi.fn().mockResolvedValue({ version: 1, provider: 'anthropic', model: 'x', log: { level: 'info' } });
+      this.loadSyncConfig = vi.fn().mockResolvedValue({ category: 'memory' });
+    });
+    const result = await bootConfig({ loadSyncConfig: false });
+    expect((result.config as never as { sync?: unknown }).sync).toBeUndefined();
   });
 });

@@ -514,4 +514,97 @@ describe('AgentStatusTracker', () => {
     // Should not throw
     expect(() => events.emit('agent.run.started', {})).not.toThrow();
   });
+
+  // ── Edge coverage ─────────────────────────────────────────────────
+
+  it('getAgents is empty before any flush and populated after', () => {
+    expect(tracker.getAgents()).toEqual([]);
+    tracker.start();
+    events.emit('agent.run.started', { model: 'anthropic/claude-haiku-4-5' });
+    const agents = tracker.getAgents();
+    const leader = agents.find((a: AgentEntry) => a.id === 'leader');
+    expect(leader?.model).toBe('anthropic/claude-haiku-4-5');
+  });
+
+  it('handles iteration.started without ctx, provider.response, and text_delta without text', () => {
+    tracker.start();
+    events.emit('iteration.started', { index: 1 }); // no ctx branch
+    events.emit('provider.text_delta', {}); // no text → return
+    events.emit('provider.response', { ctx: { model: 'anthropic/claude-sonnet-5' } });
+    const call = registry.updateAgents.mock.calls.at(-1)?.[0] as AgentEntry[];
+    const leader = call?.find((a: AgentEntry) => a.id === 'leader');
+    expect(leader?.model).toBe('anthropic/claude-sonnet-5');
+  });
+
+  it('ignores token.accounted with no payload and subagent events without a subagentId', () => {
+    tracker.start();
+    const before = registry.updateAgents.mock.calls.length;
+    events.emit('token.accounted', null);
+    events.emit('subagent.spawned', {}); // no subagentId
+    events.emit('subagent.ctx_pct', { load: 0.5 }); // no subagentId
+    events.emit('subagent.task_started', {}); // no subagentId
+    events.emit('subagent.tool_executed', {}); // no subagentId
+    events.emit('subagent.iteration_summary', {}); // no subagentId
+    events.emit('subagent.task_completed', {}); // no subagentId
+    events.emit('subagent.stopped', {}); // no subagentId → delete returns false → no flush
+    expect(registry.updateAgents.mock.calls.length).toBe(before);
+  });
+
+  it('clamps a non-finite subagent ctx load to 0', () => {
+    tracker.start();
+    events.emit('subagent.spawned', { subagentId: 'sa-nan', name: 'worker' });
+    events.emit('subagent.ctx_pct', { subagentId: 'sa-nan', load: Number.NaN });
+    const call = registry.updateAgents.mock.calls.at(-1)?.[0] as AgentEntry[];
+    expect(call?.find((a: AgentEntry) => a.id === 'sa-nan')?.ctxPct).toBe(0);
+  });
+
+  it('caps an oversized subagent partialText', () => {
+    tracker.start();
+    events.emit('subagent.spawned', { subagentId: 'sa-big', name: 'worker' });
+    events.emit('subagent.iteration_summary', { subagentId: 'sa-big', partialText: 'x'.repeat(2000) });
+    const call = registry.updateAgents.mock.calls.at(-1)?.[0] as AgentEntry[];
+    const sub = call?.find((a: AgentEntry) => a.id === 'sa-big');
+    expect(sub?.partialText?.length).toBe(1200);
+  });
+
+  it('accepts non-object payloads when a sessionId is configured', () => {
+    tracker = new AgentStatusTracker({
+      events: events as never as import('@wrongstack/core').EventBus,
+      registry: registry as never as SessionRegistry,
+      sessionId: 's1',
+    });
+    tracker.start();
+    // Non-object payload → acceptsSession returns true (no sessionId field to check).
+    events.emit('tool.started', 'not-an-object');
+    const call = registry.updateAgents.mock.calls.at(-1)?.[0] as AgentEntry[];
+    expect(call?.find((a: AgentEntry) => a.id === 'leader')).toBeDefined();
+  });
+
+  it('stop() clears a pending partial flush timer', () => {
+    vi.useFakeTimers();
+    try {
+      tracker.start();
+      events.emit('provider.text_delta', { text: 'streaming' }); // schedules partialTimer
+      tracker.stop(); // clears partialTimer + sweepTimer + unsubscribers
+      // No flush fires after stop.
+      const before = registry.updateAgents.mock.calls.length;
+      vi.advanceTimersByTime(500);
+      expect(registry.updateAgents.mock.calls.length).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('onUpdate fires after a successful registry write', async () => {
+    let updated = false;
+    tracker = new AgentStatusTracker({
+      events: events as never as import('@wrongstack/core').EventBus,
+      registry: registry as never as SessionRegistry,
+      onUpdate: () => { updated = true; },
+    });
+    tracker.start();
+    events.emit('agent.run.started', {});
+    // registry.updateAgents resolves → onUpdate fires on the microtask.
+    await vi.waitFor(() => expect(updated).toBe(true));
+  });
 });

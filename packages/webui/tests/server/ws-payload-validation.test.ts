@@ -231,6 +231,13 @@ describe('WebUI WebSocket payload validation', () => {
         modelMatrix: {
           '*': { fallbackProfile: 'default' },
           review: { provider: 'anthropic', model: 'claude-sonnet' },
+          planner: {
+            modelRuntime: {
+              reasoning: { mode: 'on', effort: 'low', preserve: false },
+              cache: { ttl: '5m' },
+              parameters: { user: 'planner' },
+            },
+          },
         },
         fallbackAuto: false,
       };
@@ -268,6 +275,13 @@ describe('WebUI WebSocket payload validation', () => {
       { modelMatrix: [] },
       { modelMatrix: { '*': { provider: 1, model: 'x' } } },
       { modelMatrix: { '*': { provider: 'anthropic' } } },
+      { modelMatrix: { '*': { modelRuntime: [] } } },
+      { modelMatrix: { '*': { modelRuntime: { reasoning: [] } } } },
+      { modelMatrix: { '*': { modelRuntime: { reasoning: { mode: 'yes' } } } } },
+      { modelMatrix: { '*': { modelRuntime: { reasoning: { effort: 'ultra' } } } } },
+      { modelMatrix: { '*': { modelRuntime: { reasoning: { preserve: 'on' } } } } },
+      { modelMatrix: { '*': { modelRuntime: { cache: { ttl: 'default' } } } } },
+      { modelMatrix: { '*': { modelRuntime: { parameters: [] } } } },
       { fallbackAuto: 'yes' },
     ])('rejects unknown keys or invalid preference values %#', (payload) => {
       const result = validatePrefsUpdatePayload(payload);

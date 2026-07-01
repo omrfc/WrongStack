@@ -81,10 +81,12 @@ export interface SkillLoaderOptions {
  * seen, so earlier layers shadow later ones):
  *   1. Project-committed:   <project>/.wrongstack/skills/
  *   2. Project foreign:     <project>/.claude/skills/      (opt-out)
- *   3. User-global:         ~/.wrongstack/skills/
- *   4. User foreign:        ~/.claude/skills/              (opt-out)
- *   5. Extra dirs:          config.skills.extraDirs         (user config only)
- *   6. Bundled with build:  packages/core/skills/
+ *   3. Project foreign:     <project>/.{codex,cursor,agents,…}/skills/
+ *   4. User-global:         ~/.wrongstack/skills/
+ *   5. User foreign:        ~/.claude/skills/              (opt-out)
+ *   6. User foreign:        ~/.{codex,cursor,agents,…}/skills/
+ *   7. Extra dirs:          config.skills.extraDirs         (user config only)
+ *   8. Bundled with build:  packages/core/skills/
  *
  * The `.claude/*` layers let skills authored for other coding agents (Claude
  * Code, Codex, Gemini, `asm`, `gh skill`) be used without copying. They are
@@ -101,7 +103,8 @@ export class DefaultSkillLoader implements SkillLoader {
     const foreignIds = resolveForeignToolIds(opts.foreignSources);
     const dirs: { dir: string; source: SkillManifest['source']; originTool?: string }[] = [];
     // Push each enabled foreign tool's dir under `root`, in registry order.
-    const pushForeign = (root: string) => {
+    const pushForeign = (root: string | undefined) => {
+      if (!root) return;
       for (const tool of FOREIGN_SKILL_TOOLS) {
         if (!foreignIds.includes(tool.id)) continue;
         dirs.push({ dir: path.join(root, '.' + tool.id, tool.subdir), source: 'foreign', originTool: tool.id });
@@ -271,5 +274,3 @@ function parseDescriptionFromText(desc: string): { trigger: string; scope: strin
 
   return { trigger, scope };
 }
-
-

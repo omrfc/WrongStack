@@ -74,7 +74,7 @@ describe('DefaultConfigLoader', () => {
     expect(written.maxConcurrent).toBe(4);
     expect(written.context.mode).toBe('balanced');
     expect(written.context.strategy).toBe('hybrid');
-    expect(written.autonomy.defaultMode).toBe('off');
+    expect(written.autonomy.defaultMode).toBe('auto');
     expect(written.autonomy.autoProceedDelayMs).toBe(45_000);
     expect(written.autonomy.enhanceDelayMs).toBe(60_000);
     expect(written.autonomy.autoProceedMaxIterations).toBe(50);
@@ -130,7 +130,7 @@ describe('DefaultConfigLoader', () => {
       expect(written.provider).toBeUndefined();
       expect(written.model).toBeUndefined();
       expect(written.apiKey).toBeUndefined();
-      expect(written.autonomy.defaultMode).toBe('off');
+      expect(written.autonomy.defaultMode).toBe('auto');
     } finally {
       delete process.env['WRONGSTACK_PROVIDER'];
       delete process.env['WRONGSTACK_API_KEY'];

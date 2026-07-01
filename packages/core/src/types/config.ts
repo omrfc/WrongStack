@@ -433,6 +433,13 @@ export interface ModelMatrixEntry {
   /** Model id to run for the matched role/phase/default. */
   model?: string | undefined;
   /**
+   * Runtime request overrides for subagents matched by this entry. This is
+   * intentionally scoped to subagents: leader requests keep using top-level
+   * `Config.modelRuntime`, while a role/phase can opt into its own reasoning
+   * effort, cache TTL, or gated generation parameters.
+   */
+  modelRuntime?: ModelRuntimeConfig | undefined;
+  /**
    * Named fallback profile to use for the matched role/phase/default. When
    * `model` is omitted, the first model in the profile becomes the primary and
    * the remaining entries become that subagent's fallback chain.
@@ -799,8 +806,9 @@ export interface Config {
    * Ordered list of fallback model references tried, in order, when the
    * primary model is overloaded (HTTP 429/529/5xx) and its own retries are
    * exhausted. Each entry is a model reference: a bare model id (same
-   * provider), `provider/model`, or `provider model`. The primary is always
-   * re-tried first at the start of every user turn. See `createFallbackModelExtension`.
+   * provider), `provider/model`, or `provider model`. After a fallback hop,
+   * the primary is retried only after its cooldown expires. See
+   * `createFallbackModelExtension`.
    */
   fallbackModels?: string[] | undefined;
   /**

@@ -21,6 +21,7 @@ import {
   Agent,
   type AgentFactory,
   type AgentFactoryResult,
+  applyModelRuntime,
   AutoApprovePermissionPolicy,
   type Config,
   type Container,
@@ -28,7 +29,11 @@ import {
   createDefaultPipelines,
   createFallbackModelExtension,
   EventBus,
+  mergeModelRuntime,
+  type ModelsRegistry,
   type ProviderRegistry,
+  type ReasoningConfig,
+  type Request,
   resolveModelMatrix,
   resolveModelTargetFromEntry,
   type SessionWriter,
@@ -48,6 +53,8 @@ export interface LightSubagentFactoryDeps {
   providerRegistry: ProviderRegistry;
   /** Full tool registry — each subagent gets an isolated clone of it. */
   toolRegistry: ToolRegistry;
+  /** Optional models catalog used to gate per-subagent reasoning settings. */
+  modelsRegistry?: ModelsRegistry | undefined;
   /** Parent session writer; subagent events are interleaved via a guarded shim. */
   session: SessionWriter;
   /** Project root anchor. */
@@ -87,6 +94,7 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
   return async (subCfg: SubagentConfig): Promise<AgentFactoryResult> => {
     const events = new EventBus();
     const config = configStore.get();
+    const modelsRegistry = deps.modelsRegistry ?? deps.container.safeResolve(TOKENS.ModelsRegistry);
 
     const matrixEntry = subCfg.model
       ? undefined
@@ -95,6 +103,8 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
     const effProvider = subCfg.provider ?? matrixTarget?.provider ?? config.provider;
     const effModel = subCfg.model ?? matrixTarget?.model ?? config.model;
     const provider = buildProvider(deps.providerRegistry, config, effProvider, effModel);
+    let subReasoningConfig = await resolveReasoningConfig(modelsRegistry, effProvider, effModel);
+    const runtimeOverride = subCfg.modelRuntime ?? matrixTarget?.modelRuntime;
 
     const subCwd = subCfg.cwd ?? deps.cwd ?? deps.projectRoot;
 
@@ -144,6 +154,18 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
     // Store the AbortController so abortLightSubagent() can retrieve it.
     (ctx.meta[_SUBAGENT_ABORT] as AbortController) = ac;
 
+    const pipelines = createDefaultPipelines();
+    pipelines.request.use({
+      name: 'ModelRuntimeSettings',
+      async handler(req: Request) {
+        return applyModelRuntime(req, {
+          getSettings: () => mergeModelRuntime(configStore.get().modelRuntime, runtimeOverride),
+          getReasoningConfig: () => subReasoningConfig,
+          getCapabilities: () => ctx.provider.capabilities,
+        });
+      },
+    });
+
     // Subagents can't answer prompts — auto-approve the wide work capability set
     // (the spawn site may narrow it via allowedCapabilities). `source: 'yolo'`
     // from this policy is the authoritative-auto waiver the ToolExecutor trusts
@@ -166,7 +188,7 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
       tools: subRegistry,
       providers: deps.providerRegistry,
       events,
-      pipelines: createDefaultPipelines(),
+      pipelines,
       context: ctx,
       permissionPolicy,
       toolExecutor,
@@ -187,8 +209,11 @@ export function makeLightSubagentFactory(deps: LightSubagentFactoryDeps): AgentF
           if (matrixFallbacks?.length) return { ...live, fallbackModels: matrixFallbacks };
           return live;
         },
-        buildProvider: (id) =>
-          buildProvider(deps.providerRegistry, configStore.get(), id, effModel),
+        buildProvider: (id, model) =>
+          buildProvider(deps.providerRegistry, configStore.get(), id, model ?? effModel),
+        onModelSwitch: async (id, model) => {
+          subReasoningConfig = await resolveReasoningConfig(modelsRegistry, id, model);
+        },
         events,
       }),
     );
@@ -223,6 +248,19 @@ function buildProvider(
     );
   }
   return registry.create({ ...providerConfig, type: providerId, model });
+}
+
+async function resolveReasoningConfig(
+  registry: ModelsRegistry | undefined,
+  providerId: string,
+  modelId: string,
+): Promise<ReasoningConfig | undefined> {
+  if (!registry) return undefined;
+  try {
+    return (await registry.getModel(providerId, modelId))?.capabilities.reasoningConfig;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

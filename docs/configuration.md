@@ -34,6 +34,10 @@ WrongStack uses a layered configuration system. Settings are merged from multipl
   "log": { /* ... */ },
   "features": { /* ... */ },
   "yolo": false,
+  "modelRuntime": { /* ... */ },
+  "modelMatrix": { /* ... */ },
+  "fallbackModels": [],
+  "fallbackProfiles": { /* ... */ },
   "cwd": ".",
   "extensions": { /* ... */ }
 }
@@ -51,7 +55,13 @@ WrongStack uses a layered configuration system. Settings are merged from multipl
 | `apiKey` | `string` | — | API key for the active provider. Auto-encrypted on first contact. |
 | `baseUrl` | `string` | — | Custom API base URL. Overrides the provider's default endpoint. |
 | `yolo` | `boolean` | `false` | Auto-approve normal project work. Clearly destructive calls still prompt. Overridden by `--yolo` CLI flag. |
-| `fallbackModels` | `string[]` | — | Ordered fallback chain tried when the primary model is overloaded (429/529/5xx) and its own retries are exhausted. Each entry is `model`, `provider/model`, or `provider model`. Cross-provider. The primary is re-tried first each turn. Overridden by `--fallback-model a,b,c`. |
+| `fallbackModels` | `string[]` | — | Ordered fallback chain tried when the primary model is overloaded (429/529/5xx) and its own retries are exhausted. Each entry is `model`, `provider/model`, or `provider model`. Cross-provider. After a fallback hop, the primary is retried only after its cooldown expires. Overridden by `--fallback-model a,b,c`. |
+| `fallbackProfiles` | `Record<string, string[]>` | — | Named fallback chains. `/setmodel` and WebUI Model Routing can point a role/phase/default entry at a profile. |
+| `fallbackAuto` | `boolean` | `true` | Auto-derive a fallback chain from other keyed providers when `fallbackModels` is empty. Toggle with `/fallback auto on\|off`. |
+| `favoriteModels` | `string[]` | `[]` | User-curated model refs prioritized by pickers and smart fallback derivation. |
+| `favoriteModelsOnly` | `boolean` | `false` | Restrict auto-derived fallback chains to `favoriteModels`. Explicit chains/profiles are still honored. |
+| `modelRuntime` | `object` | — | Runtime request controls for the leader/default request path: reasoning, prompt-cache TTL, and gated generation parameters. |
+| `modelMatrix` | `Record<string, ModelMatrixEntry>` | — | Per-role/phase/`*` subagent routing matrix. Entries can override provider/model/fallback profile and role-specific runtime controls. |
 | `hooks` | `object` | — | Lifecycle shell hooks keyed by event. See [`hooks`](#hooks--lifecycle-hooks) below and [hooks.md](./hooks.md). |
 | `cwd` | `string` | `process.cwd()` | Working directory. Overridden by `--cwd` CLI flag. |
 
@@ -272,8 +282,11 @@ For the full preset reference and usage, see [subcommands/mcp.md](subcommands/mc
 
 When the active model returns an overload error (HTTP 429/529/5xx) and its own
 retry policy is exhausted, the agent switches to the next entry in this list and
-retries the same turn. Entries may cross providers. The configured primary is
-always tried first at the start of every new turn.
+retries the same turn. Entries may cross providers. After a successful fallback,
+the agent stays on that fallback while the primary is cooling down instead of
+re-probing it on every new turn. When the cooldown expires, the primary is tried
+as a half-open probe; a successful probe restores the primary, while another
+overload extends the cooldown up to the cap.
 
 ```jsonc
 {
@@ -291,6 +304,89 @@ CLI override (comma-separated): `wrongstack --fallback-model "claude-sonnet-4-6,
 
 A fallback entry whose provider has no resolvable credentials is skipped (with a
 warning) and the chain continues. Each switch emits a `provider.fallback` event.
+
+---
+
+## `modelRuntime` — Request runtime controls
+
+`modelRuntime` applies runtime request knobs across REPL, TUI, and WebUI. The
+request pipeline maps the object into provider `Request` fields and gates every
+field against the active model's advertised capabilities, so unsupported knobs
+are omitted instead of being sent to the provider.
+
+```jsonc
+{
+  "modelRuntime": {
+    "reasoning": {
+      "mode": "auto",        // auto | on | off
+      "effort": "high",      // none | minimal | low | medium | high | xhigh | max
+      "preserve": false
+    },
+    "cache": {
+      "ttl": "1h"            // 5m | 1h
+    },
+    "parameters": {
+      "topK": 40,
+      "frequencyPenalty": 0,
+      "presencePenalty": 0,
+      "seed": 1234,
+      "user": "local-dev"
+    }
+  }
+}
+```
+
+`reasoning.mode: "auto"` means WrongStack does not send an explicit
+enable/disable field and the provider/model default wins. `"on"` requests
+reasoning when supported. `"off"` requests disable only for models that advertise
+safe disable support.
+
+The TUI `/settings` picker and WebUI Settings panel expose the top-level
+reasoning and cache controls. Use `modelMatrix[*].modelRuntime` for
+role-specific subagent overrides.
+
+---
+
+## `modelMatrix` — Per-role subagent routing
+
+`modelMatrix` maps subagent roles, phase names, or `*` to a model target and/or
+runtime override. It is resolved at subagent spawn time in this order:
+
+```
+exact role -> role phase -> * -> leader model
+```
+
+Entries may select a provider/model, use a named fallback profile, override only
+runtime settings, or combine those fields:
+
+```jsonc
+{
+  "fallbackProfiles": {
+    "cheap-review": ["openai/gpt-5-mini", "groq/llama-3.3-70b-versatile"]
+  },
+  "modelMatrix": {
+    "security-scanner": {
+      "provider": "minimax",
+      "model": "minimax-m3",
+      "modelRuntime": { "reasoning": { "mode": "on", "effort": "high" } }
+    },
+    "bug-hunter": {
+      "modelRuntime": { "reasoning": { "mode": "on", "effort": "low" } }
+    },
+    "review": {
+      "fallbackProfile": "cheap-review",
+      "modelRuntime": { "reasoning": { "preserve": false } }
+    },
+    "*": {
+      "model": "claude-haiku-4-5"
+    }
+  }
+}
+```
+
+When `modelRuntime` is present without a model, the subagent inherits the leader
+provider/model but uses the role-specific runtime controls. Configure this from
+the CLI with `/setmodel reasoning ...` or from WebUI Settings -> Model Routing.
 
 ---
 

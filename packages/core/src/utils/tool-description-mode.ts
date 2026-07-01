@@ -65,11 +65,13 @@ export function simplifyToolDescription(
     if (selected.length >= maxSentences || candidate.length >= maxChars) break;
   }
 
+  /* v8 ignore next -- defensive: selected always has ≥1 non-empty sentence so summary is never falsy */
   const summary = selected.join(' ').trim() || normalized;
   if (summary.length <= maxChars) return summary;
 
   const hardLimit = maxChars - 4;
   const boundary = findWordBoundary(summary, hardLimit);
+  /* v8 ignore next -- findWordBoundary always returns >0 (semantic/space/limit floor), so the hardLimit fallback is dead */
   return `${summary.slice(0, boundary > 0 ? boundary : hardLimit).trimEnd()} ...`;
 }
 

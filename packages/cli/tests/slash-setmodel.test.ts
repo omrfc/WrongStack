@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { AGENT_CATALOG, type Config, isConfigError } from '@wrongstack/core';
+import { AGENT_CATALOG, type Config } from '@wrongstack/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SlashCommandContext } from '../src/slash-commands/index.js';
 import { buildSetModelCommand } from '../src/slash-commands/setmodel.js';
@@ -185,6 +185,19 @@ describe('/setmodel slash command', () => {
     expect((readFile().modelMatrix as Record<string, unknown>)[sampleRole]).toEqual({
       fallbackProfile: 'fallback1',
     });
+  });
+
+  it('sets role-specific reasoning runtime without requiring a model override', async () => {
+    const { ctx, store } = makeCtx(baseConfig());
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!(`reasoning ${sampleRole} on low`, undefined);
+    expect(out!.message).toContain('effort:low');
+    const entry = (store.value.modelMatrix as Record<string, unknown>)[sampleRole];
+    expect(entry).toEqual({
+      modelRuntime: { reasoning: { mode: 'on', effort: 'low' } },
+    });
+    const persisted = (readFile().modelMatrix as Record<string, unknown>)[sampleRole];
+    expect(persisted).toEqual(entry);
   });
 
   it('rejects an unknown matrix key', async () => {

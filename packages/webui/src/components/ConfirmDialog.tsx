@@ -1,7 +1,7 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useLocalPrefs } from '@/stores/local-prefs';
 import { useUIStore } from '@/stores';
-import { AlertTriangle, FileEdit, Globe, ShieldAlert, Terminal, Wrench } from 'lucide-react';
+import { AlertTriangle, FileEdit, Globe, ShieldAlert, Terminal, Wrench, Zap } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { DiffView, diffFromToolInput } from './DiffView';
 import { Button } from './ui/button';
@@ -94,7 +94,8 @@ function SmartInputPreview({
 export function ConfirmDialog() {
   const { showConfirmDialog, confirmInfo, hideConfirm } = useUIStore();
   const yolo = useLocalPrefs((s) => s.yolo);
-  const { sendConfirm } = useWebSocket();
+  const setLocalPrefs = useLocalPrefs((s) => s.set);
+  const { sendConfirm, updatePrefs } = useWebSocket();
   const dialogRef = useRef<HTMLDivElement>(null);
   const resolvedRef = useRef(false);
 
@@ -120,6 +121,17 @@ export function ConfirmDialog() {
       return;
     }
     hideConfirm();
+  };
+
+  // One-click "enable YOLO" straight from the approval modal. Flips the local
+  // pref and pushes it to the server. The server's prefs.update handler runs
+  // permissionPolicy.setYolo(true) + resolveYoloEligiblePendingConfirms(), which
+  // auto-approves the CURRENT non-destructive confirm; the broadcast
+  // prefs.updated then hides this dialog. The auto-yolo effect below is the
+  // client-side backstop. Destructive prompts stay for an explicit decision.
+  const enableYolo = () => {
+    setLocalPrefs({ yolo: true });
+    updatePrefs({ yolo: true });
   };
 
   useEffect(() => {
@@ -233,6 +245,28 @@ export function ConfirmDialog() {
                 destructive.
               </div>
             )}
+
+          {!yolo && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+              <Zap className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+              <div className="text-sm min-w-0 flex-1">
+                <div className="font-medium">Skip future approvals</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  Enable YOLO mode and the agent runs without asking. Destructive operations
+                  still prompt.
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={enableYolo}
+                title="Enable YOLO mode (auto-approve this and future non-destructive calls)"
+                className="shrink-0"
+              >
+                Enable YOLO
+              </Button>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2 flex-wrap shrink-0">

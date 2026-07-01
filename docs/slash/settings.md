@@ -31,6 +31,11 @@ command is argument-driven so it works in both the plain REPL and the Ink TUI.
 Settings are persisted to the active config scope: global
 `~/.wrongstack/config.json`, or project `<project>/.wrongstack/config.json`.
 
+The reasoning/cache rows are top-level defaults (`config.modelRuntime`) for the
+leader/default request path. Use `/setmodel reasoning ...` or WebUI Settings ->
+Model Routing when a specific subagent role/phase needs its own reasoning
+budget.
+
 `semver-part` is stored under `extensions["semver-bump"].defaultPart` (the
 semver-bump plugin's config key) and always goes to the **global** config —
 `extensions` is not project-safe, so a project-scope write would drop it.

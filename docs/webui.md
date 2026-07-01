@@ -202,6 +202,18 @@ wstack --webui \
   type, warm-graphite/​warm-paper surfaces, signal-amber accent, status LEDs) is
   defined entirely with HSL CSS variables in `src/index.css`, so both modes stay
   in lockstep. The sidebar brand plate carries a live connection LED.
+- **Settings / Model Routing** — Settings exposes the same durable model controls
+  as the CLI: fallback chain, named fallback profiles, favorite models,
+  smart-fallback auto toggle, and `modelMatrix` routing for role/phase/`*`
+  subagents. The route selector lists `*`, every catalog phase, and every agent
+  role; the target field stays free-form because it can be a bare model,
+  `provider/model`, fallback profile name, or blank when the route only
+  overrides runtime controls.
+  Per-route reasoning mode, effort, and preserve fields are persisted under
+  `modelMatrix[route].modelRuntime.reasoning`, so a role can inherit the leader
+  model while using its own reasoning budget. Both the standalone server and
+  CLI-embedded WebUI persist these prefs to config and apply them to the live
+  agent config.
 - **Plan / todos** — the sidebar renders the backend's live `todos.updated`
   snapshot as a progress rail (amber while a task is in flight, green at 100%)
   with the in-progress task highlighted.
