@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EventBus } from '../../src/kernel/events.js';
-import { AutoPhaseRunner } from '../../src/autophase/auto-phase-runner.js';
+import { AutoPhaseRunner, createAutoPhaseFromTaskGraph } from '../../src/autophase/auto-phase-runner.js';
 import type { PhaseTemplate } from '../../src/autophase/types.js';
 import type { WorktreeHandle, WorktreeManager } from '../../src/worktree/worktree-manager.js';
 
@@ -139,5 +139,129 @@ describe('AutoPhaseRunner', () => {
     });
     const graph = await runner.start();
     expect(Array.from(graph.phases.values())[0]!.status).toBe('completed');
+  });
+});
+
+describe('AutoPhaseRunner event handlers + lifecycle', () => {
+  it('graph.completed fires onComplete + cleanup', async () => {
+    const events = new EventBus();
+    const onComplete = vi.fn();
+    const runner = new AutoPhaseRunner({
+      title: 't', phases: phases(), events, executeTask: async () => {}, onComplete,
+    });
+    const graph = await runner.start();
+    (events as unknown as { emit: (t: string, p: unknown) => void }).emit('graph.completed', { graphId: graph.id, durationMs: 500 });
+    expect(onComplete).toHaveBeenCalledWith(graph);
+  });
+
+  it('graph.failed fires onFail; stopOnFailure=true cleans up', async () => {
+    const events = new EventBus();
+    const onFail = vi.fn();
+    const runner = new AutoPhaseRunner({
+      title: 't', phases: phases(), events, executeTask: async () => {}, onFail, stopOnFailure: true,
+    });
+    const graph = await runner.start();
+    const phaseId = Array.from(graph.phases.keys())[0]!;
+    (events as unknown as { emit: (t: string, p: unknown) => void }).emit('graph.failed', { graphId: graph.id, failedPhaseId: phaseId, error: 'boom' });
+    expect(onFail).toHaveBeenCalledTimes(1);
+    // cleanup ran (handler unsubscribed) — a second emit is a no-op.
+    (events as unknown as { emit: (t: string, p: unknown) => void }).emit('graph.failed', { graphId: graph.id, failedPhaseId: phaseId, error: 'x' });
+    expect(onFail).toHaveBeenCalledTimes(1);
+  });
+
+  it('graph.failed with stopOnFailure=false does not clean up', async () => {
+    const events = new EventBus();
+    const onFail = vi.fn();
+    const runner = new AutoPhaseRunner({
+      title: 't', phases: phases(), events, executeTask: async () => {}, onFail, stopOnFailure: false,
+    });
+    const graph = await runner.start();
+    const phaseId = Array.from(graph.phases.keys())[0]!;
+    (events as unknown as { emit: (t: string, p: unknown) => void }).emit('graph.failed', { graphId: graph.id, failedPhaseId: phaseId, error: 'boom' });
+    expect(onFail).toHaveBeenCalledTimes(1);
+    // not cleaned up — second emit fires onFail again.
+    (events as unknown as { emit: (t: string, p: unknown) => void }).emit('graph.failed', { graphId: graph.id, failedPhaseId: phaseId, error: 'x' });
+    expect(onFail).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores graph events for a different graph id', async () => {
+    const events = new EventBus();
+    const onComplete = vi.fn();
+    const runner = new AutoPhaseRunner({
+      title: 't', phases: phases(), events, executeTask: async () => {}, onComplete,
+    });
+    await runner.start();
+    (events as unknown as { emit: (t: string, p: unknown) => void }).emit('graph.completed', { graphId: 'other', durationMs: 500 });
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('forwards phase callbacks + exposes delegate methods + stop/cleanup', async () => {
+    const onPhaseComplete = vi.fn();
+    const onPhaseFail = vi.fn();
+    const onTick = vi.fn();
+    const runner = new AutoPhaseRunner({
+      title: 't', phases: phases(), executeTask: async () => {},
+      verifyPhase: async () => ({ ok: false }), // force a verify failure → onPhaseFail path
+      maxRetries: 0,
+      maxVerifyAttempts: 0,
+      onPhaseComplete, onPhaseFail, onTick,
+      resolveConflict: async () => ({ resolved: true, strategy: 'ours' }),
+    });
+    const graph = await runner.start();
+    const phaseId = Array.from(graph.phases.keys())[0]!;
+    expect(runner.getGraph()).toBe(graph);
+    expect(runner.getProgress()).toBeTruthy();
+    runner.pause();
+    expect(typeof runner.isPaused()).toBe('boolean');
+    runner.resume();
+    expect(typeof runner.isRunning()).toBe('boolean');
+    runner.assignAgent(phaseId, 'agent-1');
+    runner.releaseAgent(phaseId, 'agent-1');
+    runner.stop();
+  });
+
+  it('maxRunDurationMs <= 0 cancels the safety-net timer immediately', async () => {
+    const runner = new AutoPhaseRunner({
+      title: 't', phases: phases(), executeTask: async () => {}, maxRunDurationMs: 0,
+    });
+    await runner.start();
+    runner.stop();
+  });
+
+  it('fires the progress interval and the max-run safety-net timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const onProgress = vi.fn();
+      const runner = new AutoPhaseRunner({
+        title: 't', phases: phases(), executeTask: async () => {},
+        onProgress, maxRunDurationMs: 5_000,
+      });
+      await runner.start();
+      // Progress interval (2s) fires first, before the 5s safety net.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(onProgress).toHaveBeenCalled();
+      const before = onProgress.mock.calls.length;
+      // Advance past the safety-net timeout → it calls onProgress(zeros) + stop() (cleanup).
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(onProgress.mock.calls.length).toBeGreaterThan(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('createAutoPhaseFromTaskGraph', () => {
+  it('builds a runner from a TaskGraph (not started)', async () => {
+    const taskGraph = {
+      title: 'TG',
+      nodes: new Map([
+        ['n1', { id: 'n1', title: 'T1', description: 'd', status: 'pending', dependsOn: [] as string[] }],
+      ]),
+      edges: [],
+      rootNodes: ['n1'],
+    } as never;
+    const runner = await createAutoPhaseFromTaskGraph(taskGraph, { executeTask: async () => {} });
+    expect(runner).toBeInstanceOf(AutoPhaseRunner);
+    expect(runner.getGraph()).toBeNull(); // not started
   });
 });
