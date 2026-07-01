@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import * as path from 'node:path';
 
 // SkillInstaller is mocked at its internal module path — its real behaviour
 // (GitHub fetch, file extraction) is covered under tests/skills.
@@ -24,6 +25,7 @@ import {
   buildSkillInstallCommand,
   buildSkillUpdateCommand,
   buildSkillUninstallCommand,
+  resolveImportSourceDir,
 } from '../../src/plugins/skills-plugin.js';
 
 function fakeLoader(overrides: Record<string, unknown> = {}) {
@@ -341,5 +343,29 @@ describe('buildSkillUninstallCommand', () => {
     installerMocks.uninstall.mockRejectedValue('reason');
     const res = await buildSkillUninstallCommand(undefined).run('m', fakeCtx());
     expect(res?.message).toContain('reason');
+  });
+});
+
+describe('resolveImportSourceDir (--from <tool>)', () => {
+  it('resolves cursor to its non-standard skills-cursor subdir (project)', () => {
+    expect(resolveImportSourceDir('cursor', { global: false, projectRoot: '/p' })).toBe(
+      path.join('/p', '.cursor', 'skills-cursor'),
+    );
+  });
+
+  it('resolves a tool to the user home when --global', () => {
+    expect(resolveImportSourceDir('codex', { global: true, projectRoot: '/p', homeDir: '/h' })).toBe(
+      path.join('/h', '.codex', 'skills'),
+    );
+  });
+
+  it('resolves claude (the --from-claude alias path)', () => {
+    expect(resolveImportSourceDir('claude', { global: false, projectRoot: '/p' })).toBe(
+      path.join('/p', '.claude', 'skills'),
+    );
+  });
+
+  it('returns undefined for an unknown tool', () => {
+    expect(resolveImportSourceDir('nope', { global: false, projectRoot: '/p' })).toBeUndefined();
   });
 });

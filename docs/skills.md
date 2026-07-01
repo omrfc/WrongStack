@@ -121,11 +121,14 @@ By default (`mode: 'eager'`) every discovered skill body is injected into the sy
 Foreign skills are usable as-is, but to **own, edit, or commit** one, import it into `.wrongstack/skills/`:
 
 ```
-/skill-import --from-claude             # copy project .claude/skills/* → .wrongstack/skills
-/skill-import --from-claude --global    # copy ~/.claude/skills/*
+/skill-import --from cursor             # copy project .cursor/skills-cursor → .wrongstack/skills
+/skill-import --from codex --global     # copy ~/.codex/skills
+/skill-import --from claude             # copy project .claude/skills (--from-claude alias)
 /skill-import /abs/path/to/skills       # copy from any directory
-/skill-import --from-claude --link      # symlink instead of copy (falls back to copy on Windows w/o Dev Mode)
+/skill-import --from trae --link        # symlink instead of copy (falls back to copy on Windows w/o Dev Mode)
 ```
+
+`--from <tool>` resolves each agent's skill dir automatically (cursor's `skills-cursor` included). Known tools: `claude`, `agents`, `codex`, `gemini`, `cursor`, `qwen`, `trae`, `windsurf`.
 
 ---
 

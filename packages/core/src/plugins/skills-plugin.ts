@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { color } from '../utils/color.js';
 import { toErrorMessage } from '../utils/error.js';
 import { projectHash, wstackGlobalRoot } from '../utils/wstack-paths.js';
+import { FOREIGN_SKILL_TOOLS } from '../skills/foreign-sources.js';
 import { SkillInstaller } from '../skills/skill-installer.js';
 import type { Plugin } from '../types/plugin.js';
 import type { SlashCommand, Context } from '../index.js';
@@ -198,42 +199,72 @@ export function buildSkillInstallCommand(skillLoader?: SkillLoader): SlashComman
   };
 }
 
+/** Importable tool sources: Claude plus the other foreign agents. */
+const IMPORT_SOURCE_TOOLS: ReadonlyArray<{ id: string; subdir: string }> = [
+  { id: 'claude', subdir: 'skills' },
+  ...FOREIGN_SKILL_TOOLS,
+];
+
+/**
+ * Resolve a `--from <tool>` source directory for `/skill-import`. Returns the
+ * project-level dir (`<project>/.<tool>/<subdir>`) or user-level (`~/.<tool>/<subdir>`
+ * when `global`), or `undefined` for an unknown tool id. Exported for testing.
+ */
+export function resolveImportSourceDir(
+  tool: string,
+  opts: { global: boolean; projectRoot: string; homeDir?: string },
+): string | undefined {
+  const entry = IMPORT_SOURCE_TOOLS.find((t) => t.id === tool);
+  if (!entry) return undefined;
+  const base = opts.global ? (opts.homeDir ?? os.homedir()) : opts.projectRoot;
+  return path.join(base, '.' + entry.id, entry.subdir);
+}
+
 export function buildSkillImportCommand(skillLoader?: SkillLoader): SlashCommand {
   return {
     name: 'skill-import',
-    description: 'Import skills from a local directory (.claude/skills, etc.) into .wrongstack/skills.',
-    argsHint: '[<src-dir> | --from-claude] [--global] [--link]',
+    description: 'Import skills from a local directory or another agent into .wrongstack/skills.',
+    argsHint: '[<src-dir> | --from <tool> | --from-claude] [--global] [--link]',
     help: [
       '╔═══ Skill Import ═══╗',
       '',
-      'Copy (or symlink) skills from a local directory into .wrongstack/skills',
-      'so you can edit and commit them. Foreign skills are already readable',
-      'without importing — this takes ownership.',
+      'Copy (or symlink) skills into .wrongstack/skills so you can edit and commit',
+      'them. Foreign skills are already readable without importing — this takes ownership.',
       '',
       'Usage:',
-      '  /skill-import --from-claude             Import project .claude/skills',
-      '  /skill-import --from-claude --global    Import ~/.claude/skills',
-      '  /skill-import /path/to/skills           Import from any directory',
-      '  /skill-import --from-claude --link      Symlink instead of copy',
+      '  /skill-import --from cursor              Import project .cursor/skills-cursor',
+      '  /skill-import --from codex --global      Import ~/.codex/skills',
+      '  /skill-import --from claude              Import project .claude/skills (--from-claude alias)',
+      '  /skill-import /path/to/skills            Import from any directory',
+      '  /skill-import --from trae --link         Symlink instead of copy',
       '',
+      `Known tools: ${IMPORT_SOURCE_TOOLS.map((t) => t.id).join(', ')}.`,
       'Each subdirectory with a valid SKILL.md is imported.',
     ].join('\n'),
     async run(args: string, ctx: Context) {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const isGlobal = parts.includes('--global');
       const link = parts.includes('--link');
-      const fromClaude = parts.includes('--from-claude');
-      const positional = parts.find((p) => !p.startsWith('--'));
+      const fromIdx = parts.indexOf('--from');
+      let tool: string | undefined;
+      if (fromIdx !== -1) tool = parts[fromIdx + 1];
+      else if (parts.includes('--from-claude')) tool = 'claude';
+      const positional = parts.find((p) => !p.startsWith('--') && p !== tool);
 
       let srcDir: string | undefined;
-      if (fromClaude) {
-        srcDir = isGlobal
-          ? path.join(os.homedir(), '.claude', 'skills')
-          : path.join(ctx.projectRoot, '.claude', 'skills');
+      if (tool) {
+        srcDir = resolveImportSourceDir(tool, { global: isGlobal, projectRoot: ctx.projectRoot });
+        if (!srcDir) {
+          return {
+            message: `Unknown tool "${tool}". Known: ${IMPORT_SOURCE_TOOLS.map((t) => t.id).join(', ')}`,
+          };
+        }
       } else if (positional) {
         srcDir = path.resolve(ctx.projectRoot, positional);
       } else {
-        return { message: 'Usage: /skill-import <src-dir> | --from-claude [--global] [--link]' };
+        return {
+          message: 'Usage: /skill-import <src-dir> | --from <tool> | --from-claude [--global] [--link]',
+        };
       }
 
       const installer = makeInstaller(skillLoader, ctx.projectRoot);
