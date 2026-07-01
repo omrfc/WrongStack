@@ -53,7 +53,7 @@ Everything after the frontmatter delimiter (`---`) is the skill content. This is
 
 ## Discovery
 
-Skills are discovered at boot in three layers. The first layer with a given `name` wins — project skills shadow user skills, which shadow bundled skills.
+Skills are discovered at boot across the layers below. The first layer with a given `name` wins — `.wrongstack` skills shadow foreign and bundled ones.
 
 | Priority | Location | Scope | Use case |
 |---|---|---|---|
@@ -131,7 +131,7 @@ Foreign skills are usable as-is, but to **own, edit, or commit** one, import it 
 
 ## Bundled skills
 
-WrongStack ships with 22 bundled skills:
+WrongStack ships with 23 bundled skills:
 
 | Skill | Description |
 |---|---|
@@ -146,6 +146,7 @@ WrongStack ships with 22 bundled skills:
 | `node-modern` | Node.js ≥ 22 idioms: ESM-only, native fetch, AbortSignal patterns |
 | `observability` | Structured logging, traces, metrics, redaction, instrumentation |
 | `output-standards` | Output formatting standards, `<next_steps>` conventions |
+| `plugin-author` | Creating, reviewing, or refactoring a WrongStack plugin |
 | `prompt-engineering` | System prompt design, tool descriptions, trigger sentences |
 | `react-modern` | React 19+ Server Components, useTransition, Suspense, the `use` hook |
 | `refactor-planner` | Dependency mapping, risk assessment, phased planning, migration strategy |

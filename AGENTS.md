@@ -28,7 +28,7 @@ packages/runtime/     — Default runtime wiring: makeDefaultRuntime()
 packages/telegram/    — Telegram bridge plugin
 packages/webui/       — Vite+React web UI: standalone `webui` binary + CLI `--webui` (see docs/webui.md)
 packages/plugins/     — Built-in plugin host: cron, file-watcher, session-tracker, subagent
-packages/skills/      — Bundled skill registry (20 SKILL.md files shipped in core/skills/)
+packages/skills/      — Reserved stub package (no-op build); the 23 bundled skills actually ship in `packages/core/skills/` (resolved by `resolveBundledSkillsDir`)
 packages/bench/       — Model-independent benchmark harness (Aider polyglot + SWE-bench Verified); see docs/subcommands/bench.md
 apps/wrongstack/      — bin entry (wrongstack / wstack)
 ```
@@ -462,7 +462,7 @@ Slash commands are documented in `docs/slash/`. When adding a new one:
 
 **Currently registered (33):** `help`, `init`, `clear`, `compact`, `context`, `tools`, `plugin`, `mcp`, `diag`, `stats`, `spawn`, `agents`, `director`, `fleet`, `memory`, `todos`, `sdd`, `save`, `load`, `yolo`, `autonomy`, `goal`, `brain`, `btw`, `next`, `mode`, `exit`, `fix`, `autophase`, `worktree`, `settings`, `collab`, `statusline`.
 
-Previously-planned but not yet implemented: `git`, `health`, `metrics`, `plan`, `security`, `skill-gen`, `skills`. Their `docs/slash/*.md` files were deleted in 2026-06-13 (H13 from the 2026-06-03 audit). If any of them become priorities, add them via a `buildXxxCommand` registered in `packages/cli/src/slash-commands/index.ts` first, then write a fresh `docs/slash/<name>.md` describing the actual implementation.
+Previously-planned but not yet implemented: `git`, `health`, `metrics`, `plan`, `security`. Their `docs/slash/*.md` files were deleted in 2026-06-13 (H13 from the 2026-06-03 audit). If any of them become priorities, add them via a `buildXxxCommand` registered in `packages/cli/src/slash-commands/index.ts` first, then write a fresh `docs/slash/<name>.md` describing the actual implementation. (The skill commands — `/skill`, `/skill-gen`, `/skill-install`, `/skill-import`, `/skill-update`, `/skill-uninstall` — are implemented as a first-party plugin, `createSkillsPlugin` in `packages/core/src/plugins/skills-plugin.ts`, not as builtin slash commands.)
 
 ## Issue tracking
 
@@ -472,13 +472,18 @@ These files are the **in-repo equivalent of a GitHub issue**. When opening the c
 
 ## Skill system
 
-Skills are `SKILL.md` files loaded by `DefaultSkillLoader` from three scopes (first-seen wins by name):
+Skills are `SKILL.md` files (agentskills.io format: YAML frontmatter `name`/`description` + markdown body) loaded by `DefaultSkillLoader` (`execution/skill-loader.ts`, bound at `TOKENS.SkillLoader`). Discovery, first-seen wins by name:
 
-| Priority | Location |
-|---|---|
-| 1 | `<project>/.wrongstack/skills/` |
-| 2 | `~/.wrongstack/skills/` |
-| 3 | `packages/core/skills/` (bundled) |
+| Priority | Location | source |
+|---|---|---|
+| 1 | `<project>/.wrongstack/skills/` | `project` |
+| 2 | `<project>/.claude/skills/` | `claude-project` |
+| 3 | `<project>/.{codex,cursor,agents,gemini,qwen,trae,windsurf}/skills/` (cursor uses `skills-cursor`) | `foreign` |
+| 4 | `~/.wrongstack/skills/` | `user` |
+| 5 | `~/.claude/skills/` | `claude-user` |
+| 6 | `~/.{codex,cursor,agents,gemini,qwen,trae,windsurf}/skills/` | `foreign` |
+| 7 | `config.skills.extraDirs` (user config only) | `extra` |
+| 8 | `packages/core/skills/` (bundled) | `bundled` |
 
 Format:
 ```markdown
@@ -513,6 +518,12 @@ One-line description of what this skill does.
 ## Skills in scope
 - `other-skill` — for delegation when this skill needs help
 ```
+
+Foreign layers (`.claude`, other agents, `extra`) are read-only — never written; a skill present in several agent dirs appears once (dedup by name). Frontmatter is parsed by the shared `skills/frontmatter.ts` (`validateSkillName` enforces the agentskills.io name rules; CRLF/quote-robust); the loader follows symlinks (Claude Code symlinks `~/.claude/skills/*` → `~/.agents/skills/*`).
+
+**Injection:** `DefaultSystemPromptBuilder` injects skill bodies into the prompt. `config.skills.mode: 'progressive'` injects only a name+trigger manifest and registers a `skill` tool (`packages/tools/src/skill.ts`, `makeSkillTool`) that loads a body + `scripts/`|`references/`|`assets/` on demand (emits `skill_activated`); default `'eager'` injects all bodies.
+
+**Commands** (first-party `createSkillsPlugin`, not builtin slash commands): `/skill`, `/skill-gen`, `/skill-install <user/repo>`, `/skill-import [--from-claude] [--global] [--link]`, `/skill-update`, `/skill-uninstall`. Config: `config.skills = { readClaudeSkills, foreignSources (true|string[]|false), mode, extraDirs }`; `extraDirs` is stripped from in-project config.
 
 Bundled skills: `api-design`, `audit-log`, `bug-hunter`, `docker-deploy`, `git-flow`, `multi-agent`, `node-modern`, `observability`, `prompt-engineering`, `react-modern`, `refactor-planner`, `sdd`, `security-scanner`, `skill-creator`, `testing`, `typescript-strict`.
 
