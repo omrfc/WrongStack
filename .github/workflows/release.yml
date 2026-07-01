@@ -47,6 +47,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Build all packages so `tsc --noEmit` during typecheck can
+      # find cross-package declarations (e.g. packages/bench
+      # imports @wrongstack/core and needs core/dist/index.d.ts).
+      # Without this step, `pnpm -r typecheck` fails on packages
+      # that import another workspace package.
+      - name: Build workspace packages
+        run: pnpm -r build
+
       # Layer 1 — broad correctness sweep. Mirrors the local
       # `pnpm release:check` script: audit + typecheck + build + test.
       - name: Layer 1 — release:check (audit + typecheck + build + test)
