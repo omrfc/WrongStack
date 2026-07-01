@@ -60,6 +60,8 @@ cost on every publish.
 | `pnpm release:check` alone | ✅ | ❌ (use this if you want to inspect without publishing) |
 | `pnpm test:guard` alone | ❌ | ❌ (use this for fast feedback during plugin development) |
 | `pnpm test` alone | ❌ | ❌ (full vitest, not a release gate) |
+| **CI tag push** (`.github/workflows/release.yml`) | ✅ (explicit step) | ✅ (explicit step + automatic on `pnpm release`) |
+| **CI manual dispatch** (`workflow_dispatch`) | ✅ if `dry_run=false` | ✅ if `dry_run=false` (skipped on `dry_run=true`) |
 
 ## Adding a new guard
 
@@ -103,3 +105,4 @@ publish was invoked.
 - [`packages/plugins/src/catalog.ts`](../packages/plugins/src/catalog.ts) — what the catalog test guards
 - [`docs/feature-matrix.md`](feature-matrix.md) — the 21 plugins the H1 teardown test covers
 - [`packages/plugins/README.md`](../packages/plugins/README.md) — the plugin contract
+- [`.github/workflows/release.yml`](../.github/workflows/release.yml) — the CI workflow that runs both layers on tag push and (optionally) on manual dispatch

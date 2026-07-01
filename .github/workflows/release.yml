@@ -1,0 +1,86 @@
+name: Release
+
+# Triggers on version tags (e.g. v0.278.0). Manual dispatch is also
+# allowed for dry-runs against main without bumping a tag.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run the release gates without publishing (uses pnpm release:dry).'
+        type: boolean
+        default: true
+
+# Cancel in-flight runs for the same tag — no point releasing stale
+# code. workflow_dispatch runs are not cancelled.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Tag pushes run on the runner; manual dispatches also run here.
+    # `github.event_name == 'workflow_dispatch'` is checked in the
+    # `publish` step to decide between `pnpm release` and `pnpm release:dry`.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Tag-push runs only fire on tag refs, but workflow_dispatch can
+    # target any branch. Restrict tag-push to the main branch's tags
+    # by checking the ref explicitly below.
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          # Tag pushes need full history for semver/audit, and
+          # the lockfile lives at the repo root.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 (resolved 2026-05-29)
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Layer 1 — broad correctness sweep. Mirrors the local
+      # `pnpm release:check` script: audit + typecheck + build + test.
+      - name: Layer 1 — release:check (audit + typecheck + build + test)
+        run: pnpm release:check
+
+      # Layer 2 — narrow invariant guards. Mirrors `pnpm prepublishOnly`
+      # which npm fires automatically before `pnpm publish`. We run it
+      # explicitly here so the gate fires even if `pnpm publish` is
+      # bypassed at the CI level (e.g. someone swaps the publish step
+      # for a direct registry upload).
+      - name: Layer 2 — prepublishOnly (catalog + H1 teardown + smoke)
+        run: pnpm prepublishOnly
+
+      # Publish step. The npm/pnpm lifecycle auto-runs `prepublishOnly`
+      # AGAIN before the actual upload — so Layer 2 fires twice in
+      # CI (explicit step + automatic). That's intentional belt-and-
+      # braces: the explicit step is documented and visible in the
+      # GitHub Actions UI; the automatic one is the standard npm
+      # safety net.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual run: respect the dry_run input.
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "::notice::Manual dispatch with dry_run=true — running pnpm release:dry"
+              pnpm release:dry
+            else
+              echo "::notice::Manual dispatch with dry_run=false — running pnpm release"
+              pnpm release
+            fi
+          else
+            # Tag push: full release.
+            echo "::notice::Tag ${{ github.ref_name }} — running pnpm release"
+            pnpm release
+          fi
