@@ -135,6 +135,7 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
             projectDir: wpaths.inProjectInstructions,
           },
           skillMode: config.skills?.mode,
+          skillEagerMaxChars: config.skills?.eagerMaxChars,
           ...opts.systemPrompt,
         }),
     );

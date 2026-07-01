@@ -98,6 +98,7 @@ import { wireContainer } from './boot/container-wiring.js';
 import { bindSystemPromptBuilder } from './boot/system-prompt-builder.js';
 import { subscribeBrainDecisionLog } from './boot/brain-decision-log.js';
 import { handleHelpVersionShortCircuit } from './boot/short-circuit-flags.js';
+import { handleDesktopShortCircuit } from './boot/short-circuit-desktop.js';
 import { handleHqShortCircuit } from './boot/short-circuit-hq.js';
 import { refreshRuntimeModelCatalog, resolveRuntimeMaxContext } from './context-limit.js';
 import { type ExecutionDeps, execute } from './execution.js';
@@ -178,6 +179,12 @@ export async function main(argv: string[]): Promise<number> {
   const earlyFlags = parseArgs(argv).flags;
   const earlyExit = await handleHelpVersionShortCircuit(argv);
   if (earlyExit !== null) return earlyExit;
+
+  // --desktop starts the Electron shell and owns its own project/session
+  // runtime management. Short-circuit before boot() so it does not require a
+  // configured provider or current project.
+  const desktopExit = await handleDesktopShortCircuit(earlyFlags, argv);
+  if (desktopExit !== null) return desktopExit;
 
   // --hq starts the HQ command center server (no project root, no agent).
   // Short-circuit before boot() — HQ is project-independent.
@@ -340,6 +347,7 @@ export async function main(argv: string[]): Promise<number> {
     modelCapabilities: () => modelCapabilitiesRef.current,
     skillsEnabled: config.features.skills,
     skillMode: config.skills?.mode,
+    skillEagerMaxChars: config.skills?.eagerMaxChars,
     tokenSavingMode: config.features.tokenSavingMode,
     paths: {
       projectGoal: wpaths.projectGoal,

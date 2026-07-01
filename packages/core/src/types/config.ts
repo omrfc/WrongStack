@@ -728,6 +728,14 @@ export interface SkillsConfig {
    * layers). Honored only from the user config; stripped from in-project config.
    */
   extraDirs?: string[] | undefined;
+  /**
+   * In eager mode, the maximum total chars of skill bodies injected into the
+   * prompt (highest-priority skills first; the rest are listed as a manifest the
+   * agent loads via the `skill` tool). Bounds prompt cost when many skills are
+   * discovered. Default 24000 (~6k tokens). Set very high to disable. Ignored in
+   * progressive mode (which injects only the manifest anyway).
+   */
+  eagerMaxChars?: number | undefined;
 }
 
 export interface Config {

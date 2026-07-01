@@ -101,11 +101,13 @@ describe('DefaultSystemPromptBuilder — I-area skill injection', () => {
       | boolean
       | undefined,
     skills: SkillLoader,
+    extra: Record<string, unknown> = {},
   ): Promise<string> {
     const b = new DefaultSystemPromptBuilder({
       todayIso: '2026-06-27',
       tokenSavingMode: mode,
       skillLoader: skills,
+      ...extra,
     });
     const blocks = await b.build({
       cwd: tmp,
@@ -296,17 +298,17 @@ describe('DefaultSystemPromptBuilder — I-area skill injection', () => {
   });
 
   describe('I-totals — multiple skills aggregate without dedup', () => {
-    it('five skills each with 10 KB body = ~50 KB in prompt at off tier', async () => {
-      // Five 10 KB skills with DISTINCT bodies so the test can verify
-      // each one appears in the prompt. Off tier, no per-skill cap,
-      // no total cap — so the aggregate body content is ~50 KB.
+    it('five skills each with 10 KB body aggregate without dedup (budget disabled)', async () => {
+      // Five 10 KB skills with DISTINCT bodies so the test can verify each one
+      // appears in the prompt. The default eager budget would move the overflow
+      // into a manifest; here we disable it to test raw aggregation/dedup.
       const skills = Array.from({ length: 5 }, (_, i) => ({
         name: `skill${i}`,
         trigger: `Use when testing skill number ${i}.`,
-        body: `body-${i}-${'z'.repeat(10_000)}`,  // unique prefix per skill
+        body: `body-${i}-${'z'.repeat(10_000)}`, // unique prefix per skill
       }));
       const loader = mkSkillLoader(skills);
-      const p = await buildWithSkills('off', loader);
+      const p = await buildWithSkills('off', loader, { skillEagerMaxChars: 200_000 });
       // Each skill's distinct body content appears exactly once
       for (const s of skills) {
         expect(p.split(s.body).length - 1).toBe(1);

@@ -86,3 +86,40 @@ describe('DefaultSystemPromptBuilder — progressive skill mode', () => {
     expect(prompt).toContain('DOCKER RULES BODY');
   });
 });
+
+describe('DefaultSystemPromptBuilder — eager body budget', () => {
+  let tmp: string;
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-budget-'));
+  });
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  async function build(opts: { skillEagerMaxChars: number; skills: SkillLoader }): Promise<string> {
+    const b = new DefaultSystemPromptBuilder({
+      todayIso: '2026-07-01',
+      skillLoader: opts.skills,
+      skillEagerMaxChars: opts.skillEagerMaxChars,
+    });
+    const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
+    return blocks.map((bl) => bl.text).join('\n');
+  }
+
+  it('injects highest-priority bodies up to the budget; the rest become a manifest', async () => {
+    const loader = mkSkillLoader([
+      { name: 'keep-me', trigger: 'Use when A.', body: 'BODY-KEEP' },
+      { name: 'overflow1', trigger: 'Use when B.', body: 'BODY-OVF1' },
+      { name: 'overflow2', trigger: 'Use when C.', body: 'BODY-OVF2' },
+    ]);
+    const prompt = await build({ skillEagerMaxChars: 35, skills: loader }); // tiny budget: only the first body fits
+
+    expect(prompt).toContain('BODY-KEEP'); // first (highest-priority) body injected
+    expect(prompt).not.toContain('BODY-OVF1'); // overflow bodies NOT injected
+    expect(prompt).not.toContain('BODY-OVF2');
+    // but their names are listed for on-demand loading
+    expect(prompt).toContain('overflow1');
+    expect(prompt).toContain('overflow2');
+    expect(prompt).toContain('`skill` tool');
+  });
+});

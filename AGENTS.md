@@ -523,7 +523,7 @@ Foreign layers (`.claude`, other agents, `extra`) are read-only — never writte
 
 **Injection:** `DefaultSystemPromptBuilder` injects skill bodies into the prompt. `config.skills.mode: 'progressive'` injects only a name+trigger manifest and registers a `skill` tool (`packages/tools/src/skill.ts`, `makeSkillTool`) that loads a body + `scripts/`|`references/`|`assets/` on demand (emits `skill_activated`); default `'eager'` injects all bodies.
 
-**Commands** (first-party `createSkillsPlugin`, not builtin slash commands): `/skill`, `/skill-gen`, `/skill-install <user/repo>`, `/skill-import [--from-claude] [--global] [--link]`, `/skill-update`, `/skill-uninstall`. Config: `config.skills = { readClaudeSkills, foreignSources (true|string[]|false), mode, extraDirs }`; `extraDirs` is stripped from in-project config.
+**Commands** (first-party `createSkillsPlugin`, not builtin slash commands): `/skill`, `/skill-gen`, `/skill-install <user/repo>`, `/skill-import [--from <tool>|--from-claude] [--global] [--link]`, `/skill-update`, `/skill-uninstall`. Config: `config.skills = { readClaudeSkills, foreignSources (true|string[]|false), mode, eagerMaxChars, extraDirs }`; `extraDirs` is stripped from in-project config. Eager mode bounds total injected skill chars to `eagerMaxChars` (default 24000, highest-priority first; overflow → manifest the agent loads via the `skill` tool).
 
 Bundled skills: `api-design`, `audit-log`, `bug-hunter`, `docker-deploy`, `git-flow`, `multi-agent`, `node-modern`, `observability`, `prompt-engineering`, `react-modern`, `refactor-planner`, `sdd`, `security-scanner`, `skill-creator`, `testing`, `typescript-strict`.
 

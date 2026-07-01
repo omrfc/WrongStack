@@ -117,6 +117,12 @@ export interface DefaultSystemPromptBuilderOptions {
    * (the agentskills.io progressive-disclosure model).
    */
   skillMode?: 'eager' | 'progressive' | undefined;
+  /**
+   * In eager mode, cap the total chars of injected skill bodies (highest-priority
+   * skills first); the rest become a load-on-demand manifest. Bounds prompt
+   * cost when many skills are discovered. Default ~24k chars.
+   */
+  skillEagerMaxChars?: number | undefined;
   modeStore?: ModeStore | undefined;
   /** Pre-resolved active mode id — shown in environment block. */
   modeId?: string | undefined;
@@ -954,34 +960,49 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
     }
   }
 
-  /** Build full skill bodies (token-saving OFF). */
+  /** Build full skill bodies (token-saving OFF), bounded by an overall budget. */
   private async buildFullSkillBodies(): Promise<void> {
     try {
       const skills = await this.opts.skillLoader!.list();
-      if (skills.length > 0) {
-        const bodies: string[] = [];
-        for (const s of skills) {
-          try {
-            const raw = await this.opts.skillLoader!.readBody(s.name);
-            const body = stripFrontmatter(raw);
-            const trimmed = body.trim();
-            if (trimmed) {
-              // I5 audit (Sprint 3): cap each skill body at
-              // MAX_SKILL_BODY_CHARS so a misconfigured multi-MB
-              // skill file can't bloat the prompt. Real-world
-              // SKILL.md files are <5 KB; 16 KB is generous.
-              bodies.push(
-                `## Skill: ${s.name}\n\n${capSkillBody(trimmed)}`,
-              );
-            }
-          } catch {
-            // skip unreadable skill
-          }
-        }
-        this.skillBodyCache = bodies.length > 0 ? bodies.join('\n\n---\n\n') : '';
-      } else {
+      if (skills.length === 0) {
         this.skillBodyCache = '';
+        return;
       }
+      // Overall budget: the loader returns skills highest-priority first, so the
+      // most relevant (project, then user) skills get a full body; the rest are
+      // listed as a manifest the agent loads on demand via the `skill` tool.
+      // Without this, discovering many skills (foreign agents add a lot) would
+      // bloat every prompt with every skill body.
+      const budget = this.opts.skillEagerMaxChars ?? 24_000;
+      const bodies: string[] = [];
+      const overflow: string[] = [];
+      let used = 0;
+      for (const s of skills) {
+        try {
+          const raw = await this.opts.skillLoader!.readBody(s.name);
+          const trimmed = stripFrontmatter(raw).trim();
+          if (!trimmed) continue;
+          // Per-skill cap (I5 audit): a misconfigured multi-MB file can't bloat.
+          const entry = `## Skill: ${s.name}\n\n${capSkillBody(trimmed)}`;
+          if (used + entry.length <= budget) {
+            bodies.push(entry);
+            used += entry.length;
+          } else {
+            overflow.push(`- ${s.name}`);
+          }
+        } catch {
+          // skip unreadable skill
+        }
+      }
+      let out = bodies.join('\n\n---\n\n');
+      if (overflow.length > 0) {
+        const note =
+          overflow.length === skills.length
+            ? '## Available skills (load with the `skill` tool)'
+            : '## Other available skills (not injected — load with the `skill` tool)';
+        out += `${out ? '\n\n---\n\n' : ''}${note}\n${overflow.join('\n')}`;
+      }
+      this.skillBodyCache = out;
     } catch {
       this.skillBodyCache = '';
     }

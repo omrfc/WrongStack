@@ -107,6 +107,7 @@ Control which foreign tools are scanned with `skills.foreignSources` (default: a
 | `readClaudeSkills` | `true` | Read the `.claude/skills/` layers (project + user). |
 | `foreignSources` | `true` (all) | Scan other agents' skill dirs (`~/.codex/skills`, `~/.cursor/skills-cursor`, `~/.agents/skills`, …). Pass a tool-id list to restrict, or `false` to disable. |
 | `mode` | `'eager'` | `'eager'` injects every skill body into the prompt; `'progressive'` injects only a name+trigger manifest (the agent loads bodies via the `skill` tool). |
+| `eagerMaxChars` | `24000` | In eager mode, the total chars of skill bodies injected (highest-priority first); the rest become a load-on-demand manifest. Bounds prompt cost when many skills are discovered. Ignored in progressive mode. |
 | `extraDirs` | `[]` | Extra directories to scan (lowest priority). **User config only** — stripped from a repo-committed `<project>/.wrongstack/config.json`. |
 
 ## Progressive disclosure & the `skill` tool

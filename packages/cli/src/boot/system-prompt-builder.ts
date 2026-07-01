@@ -130,6 +130,8 @@ export interface BindSystemPromptBuilderDeps {
   skillsEnabled: boolean;
   /** `config.skills.mode` — `'progressive'` injects only a skill manifest (the agent loads bodies via the `skill` tool). */
   skillMode?: 'eager' | 'progressive' | undefined;
+  /** `config.skills.eagerMaxChars` — total skill-body budget in eager mode. */
+  skillEagerMaxChars?: number | undefined;
   /** `config.features.tokenSavingMode` — forwarded so prompt guidance matches tool tiering. */
   tokenSavingMode?: TokenSavingTier | boolean | undefined;
   paths: SystemPromptBuilderPaths;
@@ -165,6 +167,7 @@ export function bindSystemPromptBuilder(deps: BindSystemPromptBuilderDeps): void
         memoryStore: deps.memoryStore as never,
         skillLoader: deps.skillsEnabled ? (deps.skillLoader as never) : undefined,
         skillMode: deps.skillMode,
+        skillEagerMaxChars: deps.skillEagerMaxChars,
         modeStore: deps.modeStore as never,
         modeId: deps.modeId,
         modePrompt: deps.modePrompt,

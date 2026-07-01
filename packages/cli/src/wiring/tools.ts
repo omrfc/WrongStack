@@ -168,6 +168,7 @@ export async function setupTools(params: ToolsWiringDeps): Promise<ToolsWiringRe
     memoryStore,
     skillLoader,
     skillMode: config.skills?.mode,
+    skillEagerMaxChars: config.skills?.eagerMaxChars,
     modeStore,
     modeId,
     modePrompt,
