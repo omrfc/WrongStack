@@ -59,6 +59,11 @@ describe('helpCmd', () => {
     expect(output).toContain('--yolo');
     expect(output).toContain('--confirm-destructive');
     expect(output).toContain('destructive calls still prompt');
+    expect(output).toContain('wstack desktop');
+    expect(output).toContain('--desktop');
+    expect(output).toContain('wstack webui');
+    expect(output).toContain('wstack hq');
+    expect(output).toContain('--hq');
   });
 });
 

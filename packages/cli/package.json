@@ -59,6 +59,9 @@
     "@wrongstack/webui": "workspace:*",
     "ws": "^8.21.0"
   },
+  "optionalDependencies": {
+    "@wrongstack/desktop": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^26.0.1",
     "@types/ws": "^8.18.1",

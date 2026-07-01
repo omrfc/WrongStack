@@ -10,13 +10,16 @@ Most users don't depend on this package directly — they install [`wrongstack`]
 npm install -g wrongstack
 ```
 
-The `wrongstack` umbrella package transitively installs `@wrongstack/cli` along with `core`, `runtime`, `providers`, `tools`, `mcp`, `plug-lsp`, `telegram`, `tui`, and `webui`.
+The `wrongstack` umbrella package transitively installs `@wrongstack/cli` along with `core`, `runtime`, `providers`, `tools`, `mcp`, `plug-lsp`, `telegram`, `tui`, `webui`, and optional desktop support.
 
 ## Commands
 
 ```bash
 wstack                        # interactive REPL — no flags = default
 wstack --tui                  # Ink-based TUI
+wstack desktop                # Electron desktop app (same as --desktop)
+wstack webui                  # project WebUI (same as --webui)
+wstack hq                     # project-independent HQ dashboard (same as --hq)
 wstack --yolo                 # auto-approve normal project work; destructive calls still prompt
 wstack "refactor src/auth.ts" # one-shot query (no interactive loop)
 
@@ -95,6 +98,9 @@ API keys are encrypted at rest with AES-256-GCM and the key file at `~/.wrongsta
 | Flag | Effect |
 |------|--------|
 | `--tui` / `--no-tui` | Force/disable Ink TUI |
+| `--desktop` | Open WrongStack Desktop (also `wstack desktop`) |
+| `--webui` | Serve the project WebUI (also `wstack webui`) |
+| `--hq` | Start the project-independent HQ dashboard (also `wstack hq`) |
 | `--yolo` | Auto-approve normal in-project tool calls |
 | `--confirm-destructive` | Deprecated; destructive confirmations are always on in YOLO |
 | `--yolo-destructive` | Deprecated compatibility flag; destructive calls still prompt |

@@ -11,7 +11,6 @@
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as path from 'node:path';
-import * as readline from 'node:readline';
 import { color, resolveHqDataDir } from '@wrongstack/core';
 import { DEFAULT_PORT } from '../hq-server.js';
 
@@ -71,34 +70,6 @@ async function isPortInUse(host: string, port: number): Promise<boolean> {
 }
 
 /**
- * Ask the user for a port, accepting Enter to use the default.
- * Returns the chosen port number.
- */
-async function promptPort(defaultPort: number): Promise<number> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  try {
-    const answer: string = await new Promise((resolve) => {
-      rl.question(
-        `  ${color.cyan('?')} HQ server port ${color.dim(`[${defaultPort}]`)}: `,
-        resolve,
-      );
-    });
-    const trimmed = answer.trim();
-    if (trimmed === '') return defaultPort;
-    const parsed = Number.parseInt(trimmed, 10);
-    if (Number.isFinite(parsed) && parsed > 0 && parsed < 65536) return parsed;
-    // Invalid input — retry
-    process.stdout.write(`${color.red('✗')} Invalid port. Must be 1–65535.\n`);
-    return promptPort(defaultPort);
-  } finally {
-    rl.close();
-  }
-}
-
-/**
  * Check for --hq flag and start the HQ server if present.
  *
  * Returns 0 when the server started, or null when --hq was not set.
@@ -111,7 +82,9 @@ export async function handleHqShortCircuit(
   const { startHqServer } = await import('../hq-server.js');
   const host = typeof flags['host'] === 'string' ? flags['host'] : '127.0.0.1';
 
-  // Port: use --port flag if explicitly given, otherwise prompt interactively.
+  // Port: use --port flag if explicitly given; otherwise use the documented
+  // default without prompting so `wstack --hq` and `wstack hq` are direct
+  // launch commands.
   let port: number;
   if (typeof flags['port'] === 'string' && flags['port'].trim() !== '') {
     const parsed = Number.parseInt(flags['port'], 10);
@@ -121,9 +94,7 @@ export async function handleHqShortCircuit(
       process.stderr.write(`${color.red('✗')} Invalid --port value: ${flags['port']}\n`);
       return 1;
     }
-  } else {
-    port = await promptPort(DEFAULT_PORT);
-  }
+  } else port = DEFAULT_PORT;
 
   const dataDir = typeof flags['data-dir'] === 'string' ? flags['data-dir'] : undefined;
   // User explicitly chose a port if they either passed --port OR accepted

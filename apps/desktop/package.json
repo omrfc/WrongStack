@@ -1,12 +1,32 @@
 {
   "name": "@wrongstack/desktop",
   "version": "0.278.0",
-  "private": true,
   "license": "MIT",
   "description": "WrongStack Desktop - Electron shell for managing multiple local WrongStack runtimes.",
+  "keywords": [
+    "wrongstack",
+    "desktop",
+    "electron",
+    "ai",
+    "coding-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WrongStack/WrongStack.git",
+    "directory": "apps/desktop"
+  },
+  "homepage": "https://github.com/WrongStack/WrongStack#readme",
+  "bugs": {
+    "url": "https://github.com/WrongStack/WrongStack/issues"
+  },
   "type": "module",
   "main": "./dist/main/main.js",
+  "bin": {
+    "wrongstack-desktop": "./bin/wrongstack-desktop.js",
+    "wstack-desktop": "./bin/wrongstack-desktop.js"
+  },
   "files": [
+    "bin",
     "dist"
   ],
   "scripts": {
@@ -20,14 +40,17 @@
   "dependencies": {
     "@wrongstack/core": "workspace:*",
     "@wrongstack/webui": "workspace:*",
+    "electron": "^43.0.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
     "@types/ws": "^8.18.1",
-    "electron": "^43.0.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vite": "^8.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

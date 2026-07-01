@@ -52,6 +52,33 @@ describe('parseArgs', () => {
     expect(r.positional).toContain('prompt');
   });
 
+  it('treats --desktop as a boolean flag', () => {
+    expect(BOOLEAN_FLAGS.has('desktop')).toBe(true);
+    const r = parseArgs(['--desktop', 'next']);
+    expect(r.flags.desktop).toBe(true);
+    expect(r.positional).toEqual(['next']);
+  });
+
+  it('normalizes desktop, webui, and hq launcher subcommands to flags', () => {
+    expect(parseArgs(['desktop'])).toEqual({ flags: { desktop: true }, positional: [] });
+    expect(parseArgs(['webui', '--open'])).toEqual({
+      flags: { webui: true, open: true },
+      positional: [],
+    });
+    expect(parseArgs(['hq'])).toEqual({ flags: { hq: true }, positional: [] });
+    expect(parseArgs(['hq', 'serve', '--port', '4000'])).toEqual({
+      flags: { hq: true, port: '4000' },
+      positional: [],
+    });
+  });
+
+  it('keeps hq token management as a real subcommand', () => {
+    const r = parseArgs(['hq', 'token', 'list', '--client']);
+    expect(r.flags.client).toBe(true);
+    expect(r.flags.hq).toBeUndefined();
+    expect(r.positional).toEqual(['hq', 'token', 'list']);
+  });
+
   it('parses --fallback-model as a value flag (comma list preserved)', () => {
     expect(BOOLEAN_FLAGS.has('fallback-model')).toBe(false);
     const r = parseArgs(['--fallback-model', 'sonnet,haiku']);
@@ -91,6 +118,7 @@ describe('parseArgs', () => {
     expect(BOOLEAN_FLAGS.has('yolo-destructive')).toBe(true);
     expect(BOOLEAN_FLAGS.has('force-all-yolo')).toBe(true);
     expect(BOOLEAN_FLAGS.has('version')).toBe(true);
+    expect(BOOLEAN_FLAGS.has('desktop')).toBe(true);
   });
 });
 

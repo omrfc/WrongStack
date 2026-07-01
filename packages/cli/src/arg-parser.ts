@@ -23,6 +23,7 @@ export const BOOLEAN_FLAGS = new Set([
   'prompt',
   'metrics',
   'webui',
+  'desktop',
   'open',
   'webui-require-token',
   'require-token',
@@ -85,7 +86,33 @@ export function parseArgs(argv: string[]): ParsedArgs {
       positional.push(a);
     }
   }
+  normalizeSurfaceAliases(flags, positional);
   return { flags, positional };
+}
+
+/**
+ * Keep the user-facing launch shapes equivalent:
+ *   wstack --webui      == wstack webui
+ *   wstack --desktop    == wstack desktop
+ *   wstack --hq         == wstack hq / wstack hq serve
+ *
+ * HQ token management remains a real subcommand (`wstack hq token ...`), so
+ * only the bare and explicit serve forms are normalized here.
+ */
+function normalizeSurfaceAliases(
+  flags: Record<string, string | boolean>,
+  positional: string[],
+): void {
+  const first = positional[0];
+  if (first === 'webui' || first === 'desktop') {
+    flags[first] = true;
+    positional.splice(0, 1);
+    return;
+  }
+  if (first === 'hq' && (positional.length === 1 || positional[1] === 'serve')) {
+    flags['hq'] = true;
+    positional.splice(0, positional[1] === 'serve' ? 2 : 1);
+  }
 }
 
 // --------------------------------------------------------------- auth flags
