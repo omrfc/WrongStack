@@ -706,6 +706,7 @@ function joinSections(sections: Array<string | undefined>): string {
 }
 
 function formatInlineValue(value: unknown): string {
+  /* v8 ignore next -- no renderHeader field is ever an array (all callers pass scalars) */
   if (Array.isArray(value)) return `[${value.map(formatInlineValue).join(',')}]`;
   if (isScalar(value)) return String(value);
   return oneLineJson(value);
