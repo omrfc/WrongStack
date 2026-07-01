@@ -10,6 +10,7 @@ import type { Config } from './config.js';
 import type { HookEvent, HookMatcher, InProcessHook } from './hooks.js';
 import type { Logger } from './logger.js';
 import type { ModelsRegistry, WireFamily } from './models-registry.js';
+import type { Mailbox } from '../coordination/mailbox-types.js';
 import type { Provider, Request, Response } from './provider.js';
 import type { SlashCommand } from './slash-command.js';
 import type { SystemPromptContributor } from './system-prompt-contributor.js';
@@ -157,6 +158,14 @@ export interface PluginAPI {
    * otherwise.
    */
   modelsRegistry?: ModelsRegistry | undefined;
+  /**
+   * The host's project-level mailbox. Optional — minimal hosts (tests,
+   * standalone CLI invocations, the LSP server) may not construct one.
+   * Plugins that publish status to other agents (todo-listener,
+   * session-recap) should treat this as the preferred source when present
+   * and gracefully no-op otherwise.
+   */
+  mailbox?: Mailbox | undefined;
 }
 
 /**

@@ -11,6 +11,7 @@ import type { ToolWrapper } from '../registry/tool-registry.js';
 import type { Config } from '../types/config.js';
 import type { Logger } from '../types/logger.js';
 import type { ModelsRegistry } from '../types/models-registry.js';
+import type { Mailbox } from '../coordination/mailbox-types.js';
 import type {
   MCPRegistryView,
   MetricsSinkView,
@@ -71,6 +72,12 @@ export interface PluginAPIInit {
    * omit it.
    */
   modelsRegistry?: ModelsRegistry | undefined;
+  /**
+   * The host's project-level mailbox. When provided, plugins that publish
+   * to other agents (todo-listener, session-recap) can call `api.mailbox.send`.
+   * When not provided, those plugins should gracefully no-op.
+   */
+  mailbox?: Mailbox | undefined;
   config: Config;
   /**
    * The host's ConfigStore. Used to wire `api.onConfigChange()`.
@@ -107,6 +114,7 @@ export class DefaultPluginAPI implements PluginAPI {
   readonly config: Config;
   readonly log: Logger;
   readonly modelsRegistry: ModelsRegistry | undefined;
+  readonly mailbox: Mailbox | undefined;
   private readonly configStore:
     | { watch(cb: (next: unknown, prev: unknown) => void): () => void }
     | undefined;
@@ -127,6 +135,7 @@ export class DefaultPluginAPI implements PluginAPI {
     this.session = init.sessionWriter ?? noopSession;
     this.metrics = init.metricsSink ? scopedMetrics(init.metricsSink, owner) : noopMetrics;
     this.modelsRegistry = init.modelsRegistry;
+    this.mailbox = init.mailbox;
 
     // Convert concrete pipelines to read-only views before passing to plugins.
     const pipelines = init.pipelines as never as Record<string, Pipeline<unknown>>;

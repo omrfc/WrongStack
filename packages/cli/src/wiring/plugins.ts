@@ -112,6 +112,12 @@ export interface PluginsWiringDeps {
    * (cost-tracker, billing reports). Optional — minimal hosts may omit.
    */
   modelsRegistry?: ModelsRegistry | undefined;
+  /**
+   * Project-level mailbox (GlobalMailbox). Forwarded to plugins that
+   * publish to other agents (todo-listener, session-recap). Optional —
+   * minimal hosts (tests, the LSP server) may omit.
+   */
+  mailbox?: import('@wrongstack/core').Mailbox | undefined;
   /** Health registry — injected so the observability built-in can run /health. */
   healthRegistry?: HealthRegistry | undefined;
   /** Skill loader — injected so the skills built-in can list/read skills. */
@@ -203,6 +209,7 @@ export const BUILTIN_PLUGIN_FACTORIES: (() => Promise<Plugin>)[] = [
   async () => (await import('@wrongstack/plugins/format-on-save')).default,
   async () => (await import('@wrongstack/plugins/test-runner-gate')).default,
   async () => (await import('@wrongstack/plugins/import-organizer')).default,
+  async () => (await import('@wrongstack/plugins/todo-listener')).default,
   // ── LSP plugin ──────────────────────────────────────────────────────
   async () => (await import('@wrongstack/plug-lsp')).default,
   // ── Telegram plugin ─────────────────────────────────────────────────
@@ -223,6 +230,7 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
     sessionWriter,
     metricsSink,
     modelsRegistry,
+    mailbox,
     healthRegistry,
     skillLoader,
     promptLoader,
@@ -338,6 +346,7 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
         extensions: agent.extensions,
         hookRegistry,
         modelsRegistry,
+        mailbox,
         sessionWriter: {
           transcriptPath: sessionWriter.transcriptPath,
           append: (e: Record<string, unknown> & { type: string; ts: string }) =>

@@ -21,6 +21,7 @@ export default defineConfig({
     'format-on-save': 'src/format-on-save/index.ts',
     'test-runner-gate': 'src/test-runner-gate/index.ts',
     'import-organizer': 'src/import-organizer/index.ts',
+    'todo-listener': 'src/todo-listener/index.ts',
   },
   format: ['esm'],
   dts: true,

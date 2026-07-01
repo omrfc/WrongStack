@@ -1,7 +1,7 @@
 # @wrongstack/plugins
 
 First-party plugin collection for [WrongStack](https://github.com/WrongStack/WrongStack).
-Eighteen focused, single-purpose plugins ship in this package and load
+Nineteen focused, single-purpose plugins ship in this package and load
 automatically for every `wstack` session.
 
 ## What this is
@@ -39,6 +39,7 @@ under the `BUILTIN_PLUGIN_FACTORIES` array. To opt out, add
 | 16 | [`format-on-save`](./src/format-on-save) | `format_on_save_status` | `PostToolUse` (`write\|edit`) | Runs `biome format --write` on the file after every write or edit |
 | 17 | [`test-runner-gate`](./src/test-runner-gate) | `test_gate_status` | `PostToolUse` (`write\|edit`) | Runs the relevant test file after every write or edit to a source file |
 | 18 | [`import-organizer`](./src/import-organizer) | `import_organizer_status` | `PostToolUse` (`write\|edit`) | Runs `biome check --write --unsafe` (or `eslint --fix`) on the file after write or edit, re-sorting imports and applying safe fixes |
+| 19 | [`todo-listener`](./src/todo-listener) | `todo_listener_status` | `PostToolUse` (`todo`) | Broadcasts a status update to the project mailbox whenever the `todo` tool is called, so other agents can see what this one is working on |
 
 ### Removed plugins (use built-in tools instead)
 
@@ -524,6 +525,57 @@ type-only imports, which is a no-op at runtime but can break tooling
 that introspects import statements). If you prefer the safe-only mode,
 omit `--unsafe`.
 
+### 19 — `todo-listener`
+
+**Tools**: `todo_listener_status`
+**Hooks**: `PostToolUse` (matcher `todo`)
+
+When the built-in `todo` tool is called, broadcasts a structured
+status update to the project mailbox so other agents (terminals,
+WebUIs, shadow agents) can see what this agent is working on in
+real time.
+
+```jsonc
+{
+  "extensions": {
+    "todo-listener": {
+      "enabled": true,
+      "subjectPrefix": "todo: ",
+      "broadcastOnChange": true,
+      "cooldownMs": 5000
+    }
+  }
+}
+```
+
+**Payload shape** (mailbox body, JSON):
+```json
+{
+  "count": 4,
+  "inProgress": { "id": "auth-flow", "content": "implement OAuth callback" },
+  "pending": 2,
+  "completed": 1,
+  "items": [
+    { "id": "auth-flow", "status": "in_progress", "content": "..." }
+  ]
+}
+```
+
+**Dedup + rate limiting**:
+- `broadcastOnChange: true` (default) — identical consecutive payloads
+  (FNV-1a hash over `id|status|content`) are suppressed. Re-issuing
+  the same list doesn't spam the inbox.
+- `cooldownMs: 5000` (default) — minimum interval between two
+  consecutive broadcasts. Prevents the agent loop from flooding the
+  mailbox on every iteration.
+
+**Host requirements**:
+- Requires `api.mailbox` (added in this commit) on the host's
+  `PluginAPI`. Minimal hosts (tests, the LSP server, the standalone
+  TUI without a coordinator) don't construct a mailbox — the hook
+  logs a one-shot warning and silently no-ops.
+- Subject is truncated to 200 chars to keep the inbox readable.
+
 ## Configuration patterns
 
 There are two surfaces for plugin configuration:
@@ -561,7 +613,7 @@ To disable a single built-in without removing its config:
 Plugins that hold module-scope state (`cron`, `file-watcher`,
 `template-engine`, `git-autocommit`, `cost-tracker`, `secret-scanner`,
 `todo-tracker`, `auto-doc`, `shell-check`, `semver-bump`,
-`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`, `test-runner-gate`, `import-organizer`) follow a strict lifecycle to survive hot-reload
+`token-budget`, `lint-gate`, `branch-guard`, `diff-summary`, `commit-validator`, `format-on-save`, `test-runner-gate`, `import-organizer`, `todo-listener`) follow a strict lifecycle to survive hot-reload
 without leaking resources. The pattern was formalized after a
 2026-06-03 audit (the "H1 audit") found that several plugins kept
 their state inside the `setup()` closure, where the loader's
