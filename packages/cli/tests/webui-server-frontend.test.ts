@@ -46,18 +46,17 @@ describe('runWebUI frontend serving', () => {
     // The HTTP server should serve index.html with this instance's WS port
     // stamped in — that's what lets the browser connect back to THIS backend.
     // onListening fires on the WS server; the HTTP server listens separately and
-    // can lag a tick under parallel test load, so retry the fetch briefly rather
-    // than racing it (ECONNREFUSED otherwise).
+    // can lag well past a tick under full-suite + coverage-instrumentation load,
+    // so poll with vi.waitFor (retries on ECONNREFUSED) rather than a fixed
+    // attempt budget that flakes when the machine is saturated.
     const url = `http://${info!.host}:${info!.httpPort}/`;
     let res: Response | undefined;
-    for (let attempt = 0; attempt < 20; attempt++) {
-      try {
+    await vi.waitFor(
+      async () => {
         res = await fetch(url);
-        break;
-      } catch {
-        await new Promise((r) => setTimeout(r, 25));
-      }
-    }
+      },
+      { timeout: 8000, interval: 50 },
+    );
     if (!res) throw new Error(`HTTP server never became reachable at ${url}`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/html');
