@@ -2,9 +2,7 @@ import type { WSServerMessage } from '../types';
 
 export type EventHandler = (msg: WSServerMessage) => void;
 
-export interface PendingConfirm {
-  resolve: (decision: 'yes' | 'no' | 'always' | 'deny') => void;
-}
+export type PendingConfirm = Record<string, never>;
 
 export type WsStatus =
   | { state: 'connecting' }

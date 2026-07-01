@@ -7,7 +7,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+_Empty — the next batch of changes will land here._
+
+## [0.278.0] — 2026-07-01
+
+> The **21-plugin milestone** release. Eight new plugins ship alongside
+> structural improvements: a shared `PluginAPI.mailbox` field, a
+> `catalog.ts` single source of truth, an opt-in `autoFix` mode for
+> `spec-linker`, a two-layer release gate, and a `release.yml` CI
+> workflow. The H1 audit pattern now covers all 21 plugins end-to-end.
+
+### Added — 8 new plugins (10 → 21)
+
+- **`import-organizer`** (`PostToolUse` on `write|edit`) — runs
+  `biome check --write --unsafe` after every save, re-sorting imports
+  alphabetically, grouping by source, and removing unused entries.
+  Falls back to `eslint --fix` if biome is missing.
+- **`todo-listener`** (`PostToolUse` on `todo`) — broadcasts the new
+  todo-list snapshot to the project mailbox on every todo tool call.
+  Other agents in the same project (terminals, WebUIs, shadow agents)
+  see what this one is working on in real time. Adds a new
+  `api.mailbox` PluginAPI field.
+- **`session-recap`** (`Stop` hook) — posts a one-page session summary
+  to the mailbox when the agent loop ends. Aggregates tokens
+  (per model), tool-call counts, commit count, and the last N events
+  from the session transcript.
+- **`spec-linker`** (`PostToolUse` on `write|edit`) — scans markdown
+  files for unlinked plugin references and surfaces them via
+  `additionalContext`. With `autoFix: true`, also registers a
+  `PreToolUse` hook on `write` that wraps each unlinked reference
+  in a markdown link via `modifiedInput.content` (case-preserving).
+- **`branch-guard`** — detects uncommitted changes on protected
+  branches and suggests a safe `git stash → checkout -b → stash pop`
+  workflow in the block reason.
+- **`lint-gate`** enhancements — `fixRules` config to limit which
+  rules auto-fix applies to, plus `edit` support (snippet-level fix
+  with explicit caveat about file-level rules).
+- **`diff-summary`** — `includeContext` config controls the number of
+  surrounding context lines via `git -U<N>`.
+- **`format-on-save`** — PostToolUse hook that runs `biome format
+  --write` on the file after every write or edit.
+
+### Added — Infrastructure
+
+- **`PluginAPI.mailbox`** — new optional field on the plugin API
+  (mirrors the `api.modelsRegistry` pattern). Plugins that publish
+  to other agents (`todo-listener`, `session-recap`) call
+  `api.mailbox.send`. Minimal hosts (tests, the LSP server) skip the
+  field and the affected plugins silently no-op.
+- **`packages/plugins/src/catalog.ts`** — single source of truth
+  for the 21 plugins' names and source paths. Each plugin is
+  imported once at module load, its `name` field is read, and the
+  result is exposed as `PLUGIN_CATALOG` (ReadonlyMap) and
+  `PLUGIN_NAMES` (readonly string[]). Sanity checks at module load
+  enforce kebab-case names and reject duplicates. `spec-linker`
+  reads from this catalog instead of carrying its own
+  hardcoded map.
+- **`packages/plugins/tests/catalog.test.ts`** — 7 regression tests
+  pinning the catalog: every plugin exported from `index.ts` must
+  have an entry; entries must be kebab-case; retired plugin names
+  (`web-search`, `json-path`) must never reappear.
+
+### Added — Release pipeline
+
+- **`prepublishOnly` + `test:guard`** — npm/pnpm-standard release
+  guard that runs `vitest run` against the three highest-leverage
+  test files (`catalog.test.ts`, `plugin-teardown.test.ts`,
+  `smoke.test.ts`) in ≈2s. Fires automatically before `pnpm publish`,
+  even when `pnpm release` is bypassed.
+- **`.github/workflows/release.yml`** — CI workflow that runs both
+  release layers (Layer 1 `pnpm release:check`, Layer 2
+  `pnpm prepublishOnly`) on `v*` tag push and on `workflow_dispatch`
+  with a `dry_run` toggle. Adds an explicit `NPM_TOKEN` secret
+  contract.
+- **`docs/release-process.md`** — documents the two-layer guard
+  model, the command matrix, and the "how to add a new guard"
+  workflow.
+- **`docs/feature-matrix.md`** — new bird's-eye-view reference
+  covering all 21 plugins across 6 categories (developer workflow,
+  quality, safety, observability, cross-agent, utilities), with a
+  hook-trigger table and a stacking recommendation.
+
+### Changed
+
+- **The H1 audit pattern is now complete** — all 21 plugins expose
+  `teardown()` (idempotent re-init, resource release) and
+  `health()` (counter report). `plugin-teardown.test.ts` is
+  now part of the release guard.
+- **`secret-scanner`** is a two-stage hook — PreToolUse blocks or
+  redacts credentials in `bash`/`write`/`edit` input; PostToolUse
+  warns on credentials leaking in tool output. Custom regex
+  patterns are configurable via `customPatterns`.
+- **`token-budget`** exposes a `model` config with wildcard support
+  (`"gpt-4*"` matches every GPT-4 variant). The `Stop` hook blocks
+  the agent loop if the budget is already exhausted; a
+  PostToolUse hook injects one-shot `additionalContext` when the
+  warn or stop threshold is crossed.
+- **`commit-validator`** supports `bodyRequired` and `minBodyLength`
+  for projects that require a non-trivial commit body.
+
+### Fixed
+
+- **`cli-main.ts` ordering** — `brainMailbox` is now created
+  immediately before `setupPlugins` (slash registry, then mailbox,
+  then plugins) so the new `api.mailbox` field is populated for
+  every plugin loaded at boot. Previously the constructor was
+  ~400 lines below `setupPlugins`, leaving the field undefined
+  for all built-in plugins.
+- **`import-organizer` linter detection** — lazy probe on first
+  hook invocation (not at setup time) so the plugin doesn't
+  shell out to `npx biome --version` during `setup()`.
+- **`secret-scanner` regex `lastIndex` reset** — the global regex
+  now resets before each scan, so consecutive `findMatches` calls
+  on the same input don't skip matches.
+- **`branch-guard` body regex** — the `re.lastIndex` reset
+  similarly prevents skipped matches on the dirty-workflow
+  suggestion.
+
+### Removed
+
+- Two retired plugins (`web-search`, `json-path`) were already
+  removed in `0.277.x`; the catalog test now enforces that
+  neither name can reappear without an explicit catalog update.
+
+### Plugin count
+
+```
+0.277.x: 10 plugins
+0.278.0: 21 plugins  (+11 from 0.277.x, +8 in this release)
+```
+
+## [0.277.2] — 2026-06-30
+
+_No notable changes — internal version bump._
 
 ## [0.277.1] — 2026-06-30
 
