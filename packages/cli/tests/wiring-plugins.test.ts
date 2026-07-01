@@ -210,6 +210,37 @@ describe('setupPlugins', () => {
     expect(apiCfgCapture).toHaveBeenCalled();
     expect(deps.sessionWriter.append).toHaveBeenCalledWith({ type: 't', ts: 'now', data: 'x' });
   });
+
+  it('forwards api.mailbox to the apiFactory so todo-listener-style plugins can publish', async () => {
+    const mailboxMock = { send: vi.fn(), query: vi.fn() };
+    // baseDeps returns a Partial<Config>-shaped bag; the wiring layer
+    // accepts additional PluginsWiringDeps fields (like `mailbox`) on
+    // top of that, so we add it after the spread.
+    const deps = { ...baseDeps({ plugins: ['virtual:test-plugin'] as never }), mailbox: mailboxMock as never };
+    await setupPlugins(deps);
+    const [, opts] = loadPluginsMock.mock.calls[0]!;
+    const apiCfgCapture = vi.fn();
+    const apiFactoryMod = (await import('../src/plugin-api-factory.js')) as never as {
+      default: ReturnType<typeof vi.fn>;
+    };
+    // Capture the cfg the wiring layer passes to apiFactory, then return
+    // a stub api object whose `mailbox` field references the same object
+    // the wiring forwarded.
+    apiFactoryMod.default.mockImplementation((_name, cfg: { mailbox?: unknown }) => {
+      apiCfgCapture(cfg);
+      return { mailbox: cfg.mailbox };
+    });
+    const api = opts.apiFactory({ name: 'virtual:test-plugin' }) as { mailbox: unknown };
+    // The factory must receive the mailbox instance verbatim so plugins
+    // can call api.mailbox.send. The default implementation
+    // (DefaultPluginAPI) sets `this.mailbox = init.mailbox` — we
+    // verify the contract here by asserting that whatever the factory
+    // returned carries the same mailbox reference.
+    expect(api.mailbox).toBe(mailboxMock);
+    expect(apiCfgCapture).toHaveBeenCalled();
+    const captured = apiCfgCapture.mock.calls[0]?.[0] as { mailbox?: unknown };
+    expect(captured.mailbox).toBe(mailboxMock);
+  });
 });
 
 // ── deprecated plugin names (loader-level deprecation policy) ────────────

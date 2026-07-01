@@ -937,6 +937,13 @@ export async function main(argv: string[]): Promise<number> {
   // Slash registry — created before plugins so plugins can register commands.
   const slashRegistry = new SlashCommandRegistry();
 
+  // Project mailbox — created before setupPlugins so the new
+  // `api.mailbox` PluginAPI field is populated for plugins like
+  // `todo-listener` that publish cross-agent status updates.
+  // (Constructor is side-effect-free; the instance is harmless until
+  //  the first send/heartbeat call.)
+  const brainMailbox = new GlobalMailbox(wpaths.projectDir, events, () => hqPublisher);
+
   // Plugins — extracted to wiring/plugins.ts
   await setupPlugins({
     config,
@@ -969,6 +976,7 @@ export async function main(argv: string[]): Promise<number> {
       projectGoal: wpaths.projectGoal,
     },
     hookRegistry,
+    mailbox: brainMailbox,
   });
 
   // ── Dep-watcher bridge: wire file-watcher events into the mailbox ────
@@ -1349,7 +1357,9 @@ export async function main(argv: string[]): Promise<number> {
     teardownHandlers.push(() => { offMsg(); offStatus(); });
   }
 
-  const brainMailbox = new GlobalMailbox(wpaths.projectDir, events, () => hqPublisher);
+  // brainMailbox is created earlier (before setupPlugins) so the
+  // `api.mailbox` PluginAPI field is populated for plugins like
+  // `todo-listener`. Reuse the same instance here.
   const brainMonitor = new BrainMonitor({
     events,
     brain,
