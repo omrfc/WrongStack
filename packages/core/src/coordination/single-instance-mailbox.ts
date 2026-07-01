@@ -134,6 +134,7 @@ export async function acquireOrJoin(
   // We're claiming the slot now, so unlink any stale lock first so
   // a concurrent reader doesn't race against our rename below.
   if (inspected.kind === 'stale') {
+    /* v8 ignore next -- best-effort: a vanished stale lock is fine */
     await fsp.unlink(lockPath).catch(() => undefined);
   }
   const generation = inspected.kind === 'stale'
@@ -205,7 +206,9 @@ export async function release(projectDir: string, generation: number): Promise<v
     const parsed = JSON.parse(raw) as MailboxBridgeLock;
     if (parsed.generation !== generation) return; // not ours
     if (parsed.pid !== process.pid) return; // not ours
+    /* v8 ignore next -- best-effort cleanup: a vanished lock at shutdown is fine */
     await fsp.unlink(lockPath).catch(() => undefined);
+    /* v8 ignore next -- best-effort cleanup: token may already be gone */
     await fsp.unlink(tokenPath).catch(() => undefined);
   } catch {
     // Lock already gone — fine.
@@ -251,6 +254,7 @@ async function readLockForInspection(lockPath: string): Promise<LockInspection> 
   } catch {
     // Malformed JSON — no usable data to preserve, safe to unlink so
     // the next acquire starts fresh. We don't lose anything here.
+    /* v8 ignore next -- best-effort: malformed lock already gone is fine */
     await fsp.unlink(lockPath).catch(() => undefined);
     return { kind: 'absent' };
   }
@@ -321,6 +325,7 @@ async function atomicWriteJson(targetPath: string, value: unknown): Promise<void
     await fsp.rename(tmp, targetPath);
   } catch (err) {
     // rename failed — clean up the tmpfile and rethrow.
+    /* v8 ignore next -- best-effort: tmp already gone during cleanup is fine */
     await fsp.unlink(tmp).catch(() => undefined);
     throw err;
   }
@@ -367,6 +372,7 @@ async function probeHealthz(url: string): Promise<boolean> {
   if (!url) return false;
   try {
     const ctrl = new AbortController();
+    /* v8 ignore next -- 500ms abort backstop fires only on a hung probe */
     const t = setTimeout(() => ctrl.abort(), 500);
     const res = await fetch(`${url}/healthz`, {
       signal: ctrl.signal,
