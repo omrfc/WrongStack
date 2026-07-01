@@ -89,6 +89,7 @@ export class FleetNotifier {
       this.timer = null;
       void this.flush();
     }, COALESCE_MS);
+    /* v8 ignore next -- timer.unref is always a function on Node Timeout objects */
     if (typeof this.timer.unref === 'function') this.timer.unref();
   }
 
