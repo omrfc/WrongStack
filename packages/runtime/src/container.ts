@@ -110,7 +110,12 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
   const memoryStore = new DefaultMemoryStore({ paths: wpaths, events: opts.events });
   container.bind(TOKENS.MemoryStore, () => memoryStore);
 
-  const skillLoader = new DefaultSkillLoader({ paths: wpaths, bundledDir: opts.bundledSkillsDir });
+  const skillLoader = new DefaultSkillLoader({
+    paths: wpaths,
+    bundledDir: opts.bundledSkillsDir,
+    readClaudeSkills: config.skills?.readClaudeSkills,
+    extraDirs: config.skills?.extraDirs,
+  });
   container.bind(TOKENS.SkillLoader, () => skillLoader);
 
   const promptLoader = new DefaultPromptLoader({
@@ -128,6 +133,7 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
             globalDir: wpaths.globalInstructions,
             projectDir: wpaths.inProjectInstructions,
           },
+          skillMode: config.skills?.mode,
           ...opts.systemPrompt,
         }),
     );

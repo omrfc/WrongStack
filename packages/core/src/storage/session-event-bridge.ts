@@ -82,6 +82,8 @@ const STANDARD_AUDIT_EVENTS = new Set<SessionEvent['type']>([
   'message_truncated',
   'provider_retry',
   'provider_error',
+  'skill_activated',
+  'skill_deactivated',
 ]);
 
 /**

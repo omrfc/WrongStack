@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { isValidSkillNameFormat, parseSkillFrontmatter } from '../skills/frontmatter.js';
 import type { SkillEntry, SkillLoader, SkillManifest } from '../types/skill.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
 
@@ -45,17 +46,46 @@ function compactSkillBody(body: string): string {
   return result.length > 450 ? result.slice(0, 447) + '…' : result;
 }
 
+/**
+ * True if `entry` is a directory, following symlinks. `Dirent.isDirectory()`
+ * is lstat-based and returns false for a symlink — but Claude Code and other
+ * agents commonly symlink skill dirs (e.g. `~/.claude/skills/foo` →
+ * `~/.agents/skills/foo`), so we stat the target for symlink entries.
+ */
+async function entryIsDirectory(dir: string, entry: import('node:fs').Dirent): Promise<boolean> {
+  if (entry.isDirectory()) return true;
+  if (entry.isSymbolicLink()) {
+    try {
+      return (await fs.stat(path.join(dir, entry.name))).isDirectory();
+    } catch {
+      return false; // broken symlink
+    }
+  }
+  return false;
+}
+
 export interface SkillLoaderOptions {
   paths: WstackPaths;
   bundledDir?: string | undefined;
+  /** Read foreign `.claude/skills` dirs (project + user). Default `true`. */
+  readClaudeSkills?: boolean | undefined;
+  /** Extra skill directories to scan (lowest priority, before bundled). */
+  extraDirs?: string[] | undefined;
 }
 
 /**
- * Discovery order (later layers shadow earlier ones at boot, but we walk
- * highest priority first and skip names already seen):
- *   1. Project-committed:  <project>/.wrongstack/skills/
- *   2. User-global:        ~/.wrongstack/skills/
- *   3. Bundled with build: packages/core/skills/
+ * Discovery order (we walk highest priority first and skip names already
+ * seen, so earlier layers shadow later ones):
+ *   1. Project-committed:   <project>/.wrongstack/skills/
+ *   2. Project foreign:     <project>/.claude/skills/      (opt-out)
+ *   3. User-global:         ~/.wrongstack/skills/
+ *   4. User foreign:        ~/.claude/skills/              (opt-out)
+ *   5. Extra dirs:          config.skills.extraDirs         (user config only)
+ *   6. Bundled with build:  packages/core/skills/
+ *
+ * The `.claude/*` layers let skills authored for other coding agents (Claude
+ * Code, Codex, Gemini, `asm`, `gh skill`) be used without copying. They are
+ * read-only — the installer never writes there.
  */
 export class DefaultSkillLoader implements SkillLoader {
   private readonly dirs: { dir: string; source: SkillManifest['source'] }[];
@@ -64,13 +94,15 @@ export class DefaultSkillLoader implements SkillLoader {
   private readonly bodyCache = new Map<string, string>();
 
   constructor(opts: SkillLoaderOptions) {
-    this.dirs = [
-      { dir: opts.paths.inProjectSkills, source: 'project' },
-      { dir: opts.paths.globalSkills, source: 'user' },
-    ];
-    if (opts.bundledDir) {
-      this.dirs.push({ dir: opts.bundledDir, source: 'bundled' });
-    }
+    const readClaude = opts.readClaudeSkills !== false;
+    const dirs: { dir: string; source: SkillManifest['source'] }[] = [];
+    dirs.push({ dir: opts.paths.inProjectSkills, source: 'project' });
+    if (readClaude) dirs.push({ dir: opts.paths.inProjectClaudeSkills, source: 'claude-project' });
+    dirs.push({ dir: opts.paths.globalSkills, source: 'user' });
+    if (readClaude) dirs.push({ dir: opts.paths.globalClaudeSkills, source: 'claude-user' });
+    for (const d of opts.extraDirs ?? []) dirs.push({ dir: d, source: 'extra' });
+    if (opts.bundledDir) dirs.push({ dir: opts.bundledDir, source: 'bundled' });
+    this.dirs = dirs;
   }
 
   async list(): Promise<SkillManifest[]> {
@@ -81,18 +113,24 @@ export class DefaultSkillLoader implements SkillLoader {
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const e of entries) {
-          if (!e.isDirectory()) continue;
+          if (!(await entryIsDirectory(dir, e))) continue;
           const skillFile = path.join(dir, e.name, 'SKILL.md');
           try {
             const raw = await fs.readFile(skillFile, 'utf8');
-            const meta = parseFrontmatter(raw);
-            if (!meta.name || !meta.description) continue;
-            if (seen.has(meta.name)) continue;
-            seen.add(meta.name);
+            const fm = parseSkillFrontmatter(raw);
+            if (!fm.name || !fm.description) continue;
+            // agentskills.io name format — skip genuinely malformed names.
+            if (!isValidSkillNameFormat(fm.name)) continue;
+            if (seen.has(fm.name)) continue;
+            seen.add(fm.name);
             found.push({
-              name: meta.name,
-              description: meta.description,
-              version: meta.version,
+              name: fm.name,
+              description: fm.description,
+              version: fm.version,
+              license: fm.license,
+              compatibility: fm.compatibility,
+              metadata: fm.metadata,
+              allowedTools: fm.allowedTools,
               path: skillFile,
               source,
             });
@@ -183,49 +221,6 @@ export class DefaultSkillLoader implements SkillLoader {
     this.bodyCache.set(key, result);
     return result;
   }
-}
-
-interface Frontmatter {
-  name?: string | undefined;
-  description?: string | undefined;
-  version?: string | undefined;
-}
-
-function parseFrontmatter(raw: string): Frontmatter {
-  if (!raw.startsWith('---')) return {};
-  const end = raw.indexOf('\n---', 4);
-  if (end === -1) return {};
-  const block = raw.slice(4, end);
-  const out: Frontmatter = {};
-  let key: keyof Frontmatter | null = null;
-  let value: string[] = [];
-  const flush = () => {
-    if (key) {
-      out[key] = value.join('\n').trim();
-    }
-    key = null;
-    value = [];
-  };
-  for (const line of block.split('\n')) {
-    const m = /^([a-zA-Z_]+):\s*(\|?)\s*(.*)$/.exec(line);
-    if (m) {
-      flush();
-      key = (m[1] ?? '') as keyof Frontmatter;
-      const pipe = m[2];
-      const rest = m[3] ?? '';
-      if (pipe === '|') {
-        value = [];
-      } else if (rest) {
-        value = [rest];
-      } else {
-        value = [];
-      }
-    } else if (key) {
-      value.push(line.replace(/^\s+/, ''));
-    }
-  }
-  flush();
-  return out;
 }
 
 /**

@@ -37,9 +37,13 @@ Keep it concise, actionable, and focused on one domain.
 
 | Field | Required | Description |
 |---|---|---|
-| `name` | ✅ | Unique identifier. First-seen wins on collisions across layers. |
+| `name` | ✅ | Unique identifier. Lowercase letters, digits, hyphens; must match the parent directory (agentskills.io). First-seen wins on collisions across layers. |
 | `description` | ✅ | One-sentence trigger summary. The agent uses this to decide relevance. |
 | `version` | ❌ | SemVer string. Informational only — not used for comparison. |
+| `license` | ❌ | License name or bundled license file (agentskills.io). |
+| `compatibility` | ❌ | Environment requirements — intended product, system packages, network (agentskills.io). |
+| `metadata` | ❌ | Arbitrary key-value map. |
+| `allowed-tools` | ❌ | Space-separated pre-approved tools (experimental, agentskills.io). |
 
 ### Body (required)
 
@@ -54,8 +58,11 @@ Skills are discovered at boot in three layers. The first layer with a given `nam
 | Priority | Location | Scope | Use case |
 |---|---|---|---|
 | 1 (highest) | `<project>/.wrongstack/skills/` | Per-project, committed to git | Repo-specific conventions, build system quirks, team standards |
-| 2 | `~/.wrongstack/skills/` | Per-user, not committed | Personal preferences, cross-project habits |
-| 3 (lowest) | Bundled with `@wrongstack/core` | Ships with the package | General-purpose skills (git-flow, bug-hunter, etc.) |
+| 2 | `<project>/.claude/skills/` | Per-project, foreign (read-only) | Skills authored for Claude Code / Codex / Gemini / `asm` / `gh skill` — used without copying |
+| 3 | `~/.wrongstack/skills/` | Per-user, not committed | Personal preferences, cross-project habits |
+| 4 | `~/.claude/skills/` | Per-user, foreign (read-only) | Your Claude Code user-level skills |
+| 5 | `config.skills.extraDirs` | User-config only | Any extra directory (stripped from in-project config) |
+| 6 (lowest) | Bundled with `@wrongstack/core` | Ships with the package | General-purpose skills (git-flow, bug-hunter, etc.) |
 
 ### Directory structure
 
@@ -67,6 +74,44 @@ skills/
 ```
 
 The loader scans each directory for subdirectories containing `SKILL.md`. Files outside this structure are ignored.
+
+---
+
+## Cross-agent compatibility (`.claude/skills`)
+
+WrongStack reads skills authored for other coding agents **natively** — no copying required. The `.claude/skills/` layers (project and user) use the exact same `SKILL.md` format (the [agentskills.io](https://agentskills.io/specification) open standard), so a skill installed by Claude Code, Codex, Gemini CLI, `asm`, or `gh skill` is discovered and injected just like a native one.
+
+These layers are **read-only** — the installer never writes there. To edit or commit a foreign skill, import it with `/skill-import` (below). A `.wrongstack` skill shadows a `.claude` skill of the same name, so you can always override a foreign skill locally.
+
+Disable foreign discovery with `skills.readClaudeSkills: false` in `~/.wrongstack/config.json`.
+
+## Configuration (`config.skills`)
+
+| Field | Default | Description |
+|---|---|---|
+| `readClaudeSkills` | `true` | Read the `.claude/skills/` layers (project + user). |
+| `mode` | `'eager'` | `'eager'` injects every skill body into the prompt; `'progressive'` injects only a name+trigger manifest (the agent loads bodies via the `skill` tool). |
+| `extraDirs` | `[]` | Extra directories to scan (lowest priority). **User config only** — stripped from a repo-committed `<project>/.wrongstack/config.json`. |
+
+## Progressive disclosure & the `skill` tool
+
+By default (`mode: 'eager'`) every discovered skill body is injected into the system prompt. Set `skills.mode: 'progressive'` to follow the agentskills.io three-tier model instead: the prompt carries only each skill's name + trigger, and the agent calls the **`skill`** tool to load a skill's full body on demand. The tool also lists the skill's bundled resources (`scripts/`, `references/`, `assets/`), which the agent reads with the `read` tool only when needed.
+
+```jsonc
+// ~/.wrongstack/config.json
+{ "skills": { "mode": "progressive" } }
+```
+
+## Importing skills (`/skill-import`)
+
+Foreign skills are usable as-is, but to **own, edit, or commit** one, import it into `.wrongstack/skills/`:
+
+```
+/skill-import --from-claude             # copy project .claude/skills/* → .wrongstack/skills
+/skill-import --from-claude --global    # copy ~/.claude/skills/*
+/skill-import /abs/path/to/skills       # copy from any directory
+/skill-import --from-claude --link      # symlink instead of copy (falls back to copy on Windows w/o Dev Mode)
+```
 
 ---
 

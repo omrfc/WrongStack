@@ -83,6 +83,7 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
     tokenSavingMode: 'off',
     allowOutsideProjectRoot: true,
   },
+  skills: { readClaudeSkills: true },
   mcpServers: {},
   fallbackAuto: true,
   maxConcurrent: 4,
@@ -288,6 +289,7 @@ const IN_PROJECT_ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'context',
   'tools',
   'features',
+  'skills',
   'autonomy',
   'indexing',
   'session',
@@ -392,6 +394,7 @@ const KNOWN_CONFIG_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
   'plugins',
   'log',
   'features',
+  'skills',
   'yolo',
   'nextPrediction',
   'cwd',
@@ -521,6 +524,21 @@ export function stripUnsafeInProjectFields(
         exec: clonedExec,
       };
       stripped.push('tools.exec.allow');
+    }
+  }
+
+  // Nested strip: `skills` is allow-listed (benign prefs), but `skills.extraDirs`
+  // points the loader at ARBITRARY directories to scan and inject into the
+  // prompt — never honor that from an attacker-controllable repo config
+  // (prompt-injection / read-into-prompt vector). `readClaudeSkills` and `mode`
+  // are safe prefs and survive.
+  const outSkills = (out as Record<string, unknown>)['skills'];
+  if (outSkills && typeof outSkills === 'object') {
+    if ('extraDirs' in (outSkills as Record<string, unknown>)) {
+      const clonedSkills = { ...(outSkills as Record<string, unknown>) };
+      delete clonedSkills['extraDirs'];
+      (out as Record<string, unknown>)['skills'] = clonedSkills;
+      stripped.push('skills.extraDirs');
     }
   }
 

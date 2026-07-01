@@ -1,3 +1,4 @@
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { color } from '../utils/color.js';
 import { toErrorMessage } from '../utils/error.js';
@@ -35,13 +36,14 @@ export function createSkillsPlugin(opts?: SkillsPluginOptions): Plugin {
       api.slashCommands.register(buildSkillCommand(skillLoader));
       api.slashCommands.register(buildSkillGeneratorCommand(skillLoader));
       api.slashCommands.register(buildSkillInstallCommand(skillLoader));
+      api.slashCommands.register(buildSkillImportCommand(skillLoader));
       api.slashCommands.register(buildSkillUpdateCommand(skillLoader));
       api.slashCommands.register(buildSkillUninstallCommand(skillLoader));
-      api.log.info('[skills] loaded — /skill, /skill-gen, /skill-install/update/uninstall available');
+      api.log.info('[skills] loaded — /skill, /skill-gen, /skill-install, /skill-import, /skill-update/uninstall available');
     },
 
     teardown(api) {
-      for (const name of ['skill', 'skill-gen', 'skill-install', 'skill-update', 'skill-uninstall']) {
+      for (const name of ['skill', 'skill-gen', 'skill-install', 'skill-import', 'skill-update', 'skill-uninstall']) {
         api.slashCommands.unregister(name);
       }
       api.log.info('[skills] unloaded');
@@ -112,7 +114,12 @@ export function buildSkillGeneratorCommand(skillLoader?: SkillLoader): SlashComm
         const entries = await skillLoader.listEntries();
         if (entries.length === 0) return { message: 'No skills found.' };
         const lines = entries.map((e) => {
-          const src = e.source === 'project' ? '📁' : e.source === 'user' ? '👤' : '📦';
+          const src =
+            e.source === 'project' ? '📁'
+            : e.source === 'user' ? '👤'
+            : e.source === 'claude-project' || e.source === 'claude-user' ? '🌐'
+            : e.source === 'extra' ? '➕'
+            : '📦';
           return `  ${src} ${e.name}\n     ${e.trigger}`;
         });
         return { message: `Available Skills:\n${lines.join('\n\n')}\n` };
@@ -185,6 +192,64 @@ export function buildSkillInstallCommand(skillLoader?: SkillLoader): SlashComman
       } catch (err) {
         const msg = toErrorMessage(err);
         return { message: `✗ Install failed: ${msg}` };
+      }
+    },
+  };
+}
+
+export function buildSkillImportCommand(skillLoader?: SkillLoader): SlashCommand {
+  return {
+    name: 'skill-import',
+    description: 'Import skills from a local directory (.claude/skills, etc.) into .wrongstack/skills.',
+    argsHint: '[<src-dir> | --from-claude] [--global] [--link]',
+    help: [
+      '╔═══ Skill Import ═══╗',
+      '',
+      'Copy (or symlink) skills from a local directory into .wrongstack/skills',
+      'so you can edit and commit them. Foreign skills are already readable',
+      'without importing — this takes ownership.',
+      '',
+      'Usage:',
+      '  /skill-import --from-claude             Import project .claude/skills',
+      '  /skill-import --from-claude --global    Import ~/.claude/skills',
+      '  /skill-import /path/to/skills           Import from any directory',
+      '  /skill-import --from-claude --link      Symlink instead of copy',
+      '',
+      'Each subdirectory with a valid SKILL.md is imported.',
+    ].join('\n'),
+    async run(args: string, ctx: Context) {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const isGlobal = parts.includes('--global');
+      const link = parts.includes('--link');
+      const fromClaude = parts.includes('--from-claude');
+      const positional = parts.find((p) => !p.startsWith('--'));
+
+      let srcDir: string | undefined;
+      if (fromClaude) {
+        srcDir = isGlobal
+          ? path.join(os.homedir(), '.claude', 'skills')
+          : path.join(ctx.projectRoot, '.claude', 'skills');
+      } else if (positional) {
+        srcDir = path.resolve(ctx.projectRoot, positional);
+      } else {
+        return { message: 'Usage: /skill-import <src-dir> | --from-claude [--global] [--link]' };
+      }
+
+      const installer = makeInstaller(skillLoader, ctx.projectRoot);
+      try {
+        const results = await installer.importFromDir(srcDir, { global: isGlobal, link });
+        if (results.length === 0) {
+          return { message: `No valid skills found in ${srcDir}.` };
+        }
+        const scope = isGlobal ? 'user-global' : 'project';
+        const lines = [`Imported ${results.length} skill(s) [${scope}]${link ? ' (symlinked)' : ''}:`];
+        for (const r of results) {
+          lines.push(`  ✓ ${r.name}`);
+          lines.push(`    → ${r.path}`);
+        }
+        return { message: lines.join('\n') };
+      } catch (err) {
+        return { message: `✗ Import failed: ${toErrorMessage(err)}` };
       }
     },
   };

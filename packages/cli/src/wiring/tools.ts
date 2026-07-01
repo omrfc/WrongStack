@@ -22,6 +22,7 @@ import {
   builtinToolsPack,
   configureExecPolicy,
   forgetTool,
+  makeSkillTool,
   relatedMemoryTool,
   rememberTool,
   searchMemoryTool,
@@ -141,8 +142,14 @@ export async function setupTools(params: ToolsWiringDeps): Promise<ToolsWiringRe
     ? new DefaultSkillLoader({
         paths: wpaths,
         bundledDir: resolveBundledSkillsDir(),
+        readClaudeSkills: config.skills?.readClaudeSkills,
+        extraDirs: config.skills?.extraDirs,
       })
     : undefined;
+  // Progressive-disclosure activation primitive: load a skill body on demand.
+  if (skillLoader) {
+    toolRegistry.register(makeSkillTool(skillLoader));
+  }
 
   // Resolve model capabilities for system prompt
   const resolvedModel = await modelsRegistry.getModel(config.provider, config.model);
@@ -159,6 +166,7 @@ export async function setupTools(params: ToolsWiringDeps): Promise<ToolsWiringRe
   const promptBuilder = new DefaultSystemPromptBuilder({
     memoryStore,
     skillLoader,
+    skillMode: config.skills?.mode,
     modeStore,
     modeId,
     modePrompt,

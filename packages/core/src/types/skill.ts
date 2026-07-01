@@ -2,8 +2,18 @@ export interface SkillManifest {
   name: string;
   description: string;
   version?: string | undefined;
+  /** agentskills.io optional frontmatter fields. */
+  license?: string | undefined;
+  compatibility?: string | undefined;
+  metadata?: Record<string, string> | undefined;
+  allowedTools?: string[] | undefined;
   path: string;
-  source: 'project' | 'user' | 'bundled';
+  /**
+   * Discovery layer the skill came from. `claude-*` and `extra` are read-only
+   * foreign sources (Claude Code / Codex / Gemini dirs, or `config.skills.extraDirs`);
+   * they are never written to by the skill installer.
+   */
+  source: 'project' | 'user' | 'bundled' | 'claude-project' | 'claude-user' | 'extra';
 }
 
 /** Parsed skill entry for structured rendering in system prompt. */

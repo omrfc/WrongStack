@@ -694,6 +694,34 @@ export interface CustomModelDefinition {
   maxOutput?: number | undefined;
 }
 
+/**
+ * Skill subsystem configuration. All fields optional; the subsystem itself is
+ * gated by `features.skills`. Honored from the user's `~/.wrongstack/config.json`;
+ * in the repo-committed in-project config the `extraDirs` field is stripped
+ * (arbitrary directories are a prompt-injection vector) — only `readClaudeSkills`
+ * and `mode` survive there.
+ */
+export interface SkillsConfig {
+  /**
+   * Read skills from foreign coding-agent directories (`<project>/.claude/skills`
+   * and `~/.claude/skills`). Default `true`. Lets Claude Code / Codex / Gemini /
+   * `asm` / `gh skill` skills be used without copying them.
+   */
+  readClaudeSkills?: boolean | undefined;
+  /**
+   * How skill bodies reach the system prompt.
+   * - `'eager'` (default): inject every discovered skill body into the prompt.
+   * - `'progressive'`: inject only the metadata manifest; the agent loads a
+   *   skill body on demand via the `skill` tool (the agentskills.io model).
+   */
+  mode?: 'eager' | 'progressive' | undefined;
+  /**
+   * Extra skill directories to scan (lowest priority, after the `.claude`
+   * layers). Honored only from the user config; stripped from in-project config.
+   */
+  extraDirs?: string[] | undefined;
+}
+
 export interface Config {
   version: 1;
   provider: string;
@@ -781,6 +809,8 @@ export interface Config {
   plugins?: (string | PluginConfig)[] | undefined;
   log: LogConfig;
   features: FeaturesConfig;
+  /** Skill subsystem options (readClaudeSkills / mode / extraDirs). */
+  skills?: SkillsConfig | undefined;
   yolo?: boolean | undefined;
   /** When true, show lightweight LLM-predicted next steps after each turn (/next). */
   nextPrediction?: boolean | undefined;

@@ -239,7 +239,7 @@ describe('handleSkillsEdit', () => {
   it('refuses to edit bundled skills', async () => {
     const loader = {
       list: async () => [],
-      listEntries: async () => [{ name: 'bundled', path: '/b/SKILL.md', scope: ['bundled'] }],
+      listEntries: async () => [{ name: 'bundled', path: '/b/SKILL.md', source: 'bundled', scope: ['bundled'] }],
       readBody: async () => '',
     };
     const ctx = makeCtx({ skillLoader: loader as never });
@@ -272,5 +272,39 @@ describe('handleSkillsExport', () => {
     expect(p?.skillCount).toBe(2);
     expect(typeof p?.zipBase64).toBe('string');
     expect((p?.zipBase64 as string).length).toBeGreaterThan(0);
+  });
+});
+
+// ── skills.edit ───────────────────────────────────────────────────────
+
+describe('handleSkillsEdit', () => {
+  const editMsg = (name: string) => ({ payload: { name, body: 'new body' } });
+
+  it('refuses to edit a foreign (read-only) skill — never writes into .claude', async () => {
+    const loader = {
+      listEntries: async () => [
+        { name: 'foreign-skill', source: 'claude-project', path: '/.claude/skills/foreign-skill/SKILL.md', trigger: 't', scope: [] },
+      ],
+      readBody: async () => '',
+    };
+    const ctx = makeCtx({ skillLoader: loader as never });
+    const { ws, messages } = openWs();
+    await handleSkillsEdit(ws, ctx, editMsg('foreign-skill'));
+    const p = payloadOf(messages, 'skills.edited');
+    expect(p?.success).toBe(false);
+    expect(p?.error).toMatch(/read-only/i);
+  });
+
+  it('refuses to edit a bundled skill', async () => {
+    const loader = {
+      listEntries: async () => [{ name: 'b', source: 'bundled', path: '/b/SKILL.md', trigger: 't', scope: [] }],
+      readBody: async () => '',
+    };
+    const ctx = makeCtx({ skillLoader: loader as never });
+    const { ws, messages } = openWs();
+    await handleSkillsEdit(ws, ctx, editMsg('b'));
+    const p = payloadOf(messages, 'skills.edited');
+    expect(p?.success).toBe(false);
+    expect(p?.error).toMatch(/Bundled/i);
   });
 });

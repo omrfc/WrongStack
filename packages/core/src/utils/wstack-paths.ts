@@ -29,6 +29,8 @@ export interface WstackPaths {
   globalMemory: string;
   /** ~/.wrongstack/skills — user-global skills. */
   globalSkills: string;
+  /** ~/.claude/skills — user-global skills from foreign coding agents (Claude Code, Codex, …). Read-only. */
+  globalClaudeSkills: string;
   /** ~/.wrongstack/design-kits — user-global Design Studio kits. */
   globalDesignKits: string;
   /** ~/.wrongstack/prompts — user-global prompt library. */
@@ -72,6 +74,8 @@ export interface WstackPaths {
   inProjectAgentsFile: string;
   /** <project>/.wrongstack/skills — committed project skills. */
   inProjectSkills: string;
+  /** <project>/.claude/skills — project skills authored for foreign coding agents (Claude Code, …). Read-only. */
+  inProjectClaudeSkills: string;
   /** <project>/.wrongstack/prompts — committed project prompt library. */
   inProjectPrompts: string;
   /** <project>/.wrongstack/instructions — committed project instruction overrides. */
@@ -160,6 +164,11 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
   // pass one expect paths under it) > WRONGSTACK_HOME env > real home dir.
   const globalRoot =
     opts.globalRoot ?? (opts.userHome ? path.join(opts.userHome, '.wrongstack') : wstackGlobalRoot());
+  // Home dir for FOREIGN tool state (Claude Code's ~/.claude). Independent of
+  // WRONGSTACK_HOME, which redirects only WrongStack state: a real user's
+  // Claude skills live in their real home, but tests pass `userHome` to keep
+  // both `.wrongstack` and `.claude` under a temp dir.
+  const homeDir = opts.userHome ?? os.homedir();
   const hash = projectHash(opts.projectRoot);
   const slug = projectSlug(opts.projectRoot);
   const projectDir = path.join(globalRoot, 'projects', slug);
@@ -170,6 +179,7 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
     secretsKey: path.join(globalRoot, '.key'),
     globalMemory: path.join(globalRoot, 'memory.md'),
     globalSkills: path.join(globalRoot, 'skills'),
+    globalClaudeSkills: path.join(homeDir, '.claude', 'skills'),
     globalDesignKits: path.join(globalRoot, 'design-kits'),
     globalPrompts: path.join(globalRoot, 'prompts'),
     globalInstructions: path.join(globalRoot, 'instructions'),
@@ -189,6 +199,7 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
     inProjectConfig: path.join(opts.projectRoot, '.wrongstack', 'config.json'),
     inProjectAgentsFile: path.join(opts.projectRoot, '.wrongstack', 'AGENTS.md'),
     inProjectSkills: path.join(opts.projectRoot, '.wrongstack', 'skills'),
+    inProjectClaudeSkills: path.join(opts.projectRoot, '.claude', 'skills'),
     inProjectPrompts: path.join(opts.projectRoot, '.wrongstack', 'prompts'),
     inProjectInstructions: path.join(opts.projectRoot, '.wrongstack', 'instructions'),
     inProjectDesignKits: path.join(opts.projectRoot, '.wrongstack', 'design-kits'),

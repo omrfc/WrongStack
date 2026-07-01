@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SkillLoader } from '../types/skill.js';
 import { downloadGitHubTarball, parseSkillRef } from './github-fetcher.js';
+import { isValidSkillNameFormat, parseSkillFrontmatter } from './frontmatter.js';
 import { type InstalledSkillEntry, SkillManifestStore } from './manifest-store.js';
 import { FsError, WrongStackError, ERROR_CODES } from '../types/errors.js';
 export interface SkillInstallerOptions {
@@ -154,6 +155,103 @@ export class SkillInstaller {
   }
 
   /**
+   * Import skills from a local directory (e.g. `.claude/skills`) into the
+   * project or user skills dir, optionally as symlinks. Used by `/skill-import`
+   * to take ownership of foreign skills so they can be edited/committed.
+   * Each direct subdirectory containing a valid `SKILL.md` is copied verbatim.
+   */
+  async importFromDir(
+    srcDir: string,
+    opts?: { global?: boolean | undefined; link?: boolean | undefined },
+  ): Promise<InstallResult[]> {
+    const scope: 'project' | 'user' = opts?.global ? 'user' : 'project';
+    const targetDir = scope === 'project' ? this.opts.projectSkillsDir : this.opts.globalSkillsDir;
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(srcDir, { withFileTypes: true });
+    } catch {
+      throw new WrongStackError({
+        message: `Source directory not found or not readable: ${srcDir}`,
+        code: ERROR_CODES.VALIDATION_ERROR,
+        subsystem: 'general',
+        context: { srcDir },
+      });
+    }
+
+    const results: InstallResult[] = [];
+    for (const e of entries) {
+      if (!(await entryIsDirectory(srcDir, e))) continue;
+      const skillMdPath = path.join(srcDir, e.name, 'SKILL.md');
+      let content: string;
+      try {
+        content = await fs.readFile(skillMdPath, 'utf8');
+      } catch {
+        continue; // subdirectory without a SKILL.md — not a skill
+      }
+      const fm = parseSkillFrontmatter(content);
+      if (!fm.name || !fm.description || !isValidSkillNameFormat(fm.name)) continue;
+
+      const existing = await this.manifest.findByName(fm.name);
+      if (existing.find((x) => x.scope === scope)) {
+        await this.removeSkillFiles(fm.name, scope);
+      }
+
+      const destDir = path.join(targetDir, fm.name);
+      await fs.mkdir(destDir, { recursive: true });
+      const srcSkillDir = path.join(srcDir, e.name);
+      const files = await collectFiles(srcSkillDir, srcSkillDir);
+      const copiedFiles: string[] = [];
+      for (const file of files) {
+        const srcPath = path.join(srcSkillDir, file);
+        const destPath = path.join(destDir, file);
+        const resolved = path.resolve(destPath);
+        if (!resolved.startsWith(path.resolve(destDir))) {
+          throw new FsError({
+            message: `Path traversal detected in skill file: ${file}`,
+            code: ERROR_CODES.FS_DELETE_FAILED,
+            path: destPath,
+            context: { reason: 'path_traversal', skillName: fm.name },
+          });
+        }
+        await fs.mkdir(path.dirname(destPath), { recursive: true });
+        if (opts?.link) {
+          try {
+            await fs.symlink(srcPath, destPath);
+          } catch (err) {
+            // Symlink unavailable (e.g. Windows without Developer Mode) — copy.
+            await fs.copyFile(srcPath, destPath);
+            this.opts.log?.(`symlink failed for ${file} (${toErrorMessage(err)}); copied instead`);
+          }
+        } else {
+          await fs.copyFile(srcPath, destPath);
+        }
+        copiedFiles.push(file);
+      }
+
+      await this.manifest.addEntry({
+        name: fm.name,
+        source: `import:${srcDir}`,
+        ref: '-',
+        scope,
+        projectHash: scope === 'project' ? this.opts.projectHash : undefined,
+        installedAt: new Date().toISOString(),
+        files: copiedFiles,
+      });
+      results.push({
+        name: fm.name,
+        path: destDir,
+        scope,
+        source: `import:${srcDir}`,
+        ref: '-',
+        skillCount: 1,
+      });
+    }
+
+    this.invalidateLoaderCache();
+    return results;
+  }
+
+  /**
    * Update installed skills.
    * - No args: update all
    * - Name: update that specific skill
@@ -294,10 +392,10 @@ export class SkillInstaller {
     try {
       await fs.access(rootSkillMd);
       const content = await fs.readFile(rootSkillMd, 'utf8');
-      const meta = parseFrontmatter(content);
-      if (meta.name && meta.description) {
+      const fm = parseSkillFrontmatter(content);
+      if (fm.name && fm.description && isValidSkillNameFormat(fm.name)) {
         results.push({
-          name: meta.name,
+          name: fm.name,
           baseDir,
           files: ['SKILL.md'],
         });
@@ -316,13 +414,13 @@ export class SkillInstaller {
         const skillFile = path.join(skillsDir, entry.name, 'SKILL.md');
         try {
           const content = await fs.readFile(skillFile, 'utf8');
-          const meta = parseFrontmatter(content);
-          if (meta.name && meta.description) {
+          const fm = parseSkillFrontmatter(content);
+          if (fm.name && fm.description && isValidSkillNameFormat(fm.name)) {
             // Collect all files in the skill directory
             const skillDir = path.join(skillsDir, entry.name);
             const files = await collectFiles(skillDir, skillDir);
             results.push({
-              name: meta.name,
+              name: fm.name,
               baseDir: skillDir,
               files,
             });
@@ -363,46 +461,20 @@ export class SkillInstaller {
 
 // ── Utilities ──────────────────────────────────────────────────────
 
-interface Frontmatter {
-  name?: string | undefined;
-  description?: string | undefined;
-}
-
-function parseFrontmatter(raw: string): Frontmatter {
-  if (!raw.startsWith('---')) return {};
-  const end = raw.indexOf('\n---', 4);
-  if (end === -1) return {};
-  const block = raw.slice(4, end);
-  const out: Frontmatter = {};
-  let key: keyof Frontmatter | null = null;
-  let value: string[] = [];
-  const flush = () => {
-    if (key) {
-      out[key] = value.join('\n').trim();
-    }
-    key = null;
-    value = [];
-  };
-  for (const line of block.split('\n')) {
-    const m = /^([a-zA-Z_]+):\s*(\|?)\s*(.*)$/.exec(line);
-    if (m) {
-      flush();
-      key = (m[1] ?? '') as keyof Frontmatter;
-      const pipe = m[2];
-      const rest = m[3] ?? '';
-      if (pipe === '|') {
-        value = [];
-      } else if (rest) {
-        value = [rest];
-      } else {
-        value = [];
-      }
-    } else if (key) {
-      value.push(line.replace(/^\s+/, ''));
+/**
+ * True if `entry` is a directory, following symlinks (Claude Code/agents
+ * symlink skill dirs — see DefaultSkillLoader.entryIsDirectory).
+ */
+async function entryIsDirectory(dir: string, entry: import('node:fs').Dirent): Promise<boolean> {
+  if (entry.isDirectory()) return true;
+  if (entry.isSymbolicLink()) {
+    try {
+      return (await fs.stat(path.join(dir, entry.name))).isDirectory();
+    } catch {
+      return false; // broken symlink
     }
   }
-  flush();
-  return out;
+  return false;
 }
 
 /**

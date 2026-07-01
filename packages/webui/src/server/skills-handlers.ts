@@ -381,9 +381,12 @@ export async function handleSkillsEdit(
       send(ws, { type: 'skills.edited', payload: { success: false, error: `Skill "${editPayload.name}" not found` } });
       return;
     }
-    // Only allow editing project/user skills (not bundled)
-    if (entry.scope.includes('bundled')) {
-      send(ws, { type: 'skills.edited', payload: { success: false, error: 'Bundled skills cannot be edited' } });
+    // Only allow editing WrongStack-managed skills (project/user). Bundled and
+    // foreign (.claude/*, extra) sources are read-only — editing them would
+    // write into another tool's directory.
+    if (entry.source !== 'project' && entry.source !== 'user') {
+      const label = entry.source === 'bundled' ? 'Bundled' : 'Foreign (read-only)';
+      send(ws, { type: 'skills.edited', payload: { success: false, error: `${label} skills cannot be edited` } });
       return;
     }
     await atomicWrite(entry.path, editPayload.body);

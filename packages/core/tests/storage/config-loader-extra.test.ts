@@ -266,6 +266,33 @@ describe('DefaultConfigLoader in-project config hardening (WS-06)', () => {
     expect((input as { tools: { exec: { allow: string[] } } }).tools.exec.allow).toEqual(['curl']);
   });
 
+  it('strips skills.extraDirs from in-project config but keeps readClaudeSkills/mode', () => {
+    // `skills` is allow-listed (benign prefs), but `skills.extraDirs` points the
+    // loader at ARBITRARY directories to scan and inject into the prompt — a repo
+    // must never widen that. `readClaudeSkills`/`mode` are safe prefs and survive.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const out = stripUnsafeInProjectFields(
+      {
+        skills: {
+          readClaudeSkills: true,
+          mode: 'progressive',
+          extraDirs: ['/etc', '/home/user/secrets'],
+        },
+      } as never,
+      '/tmp/.wrongstack/config.json',
+      warn,
+    );
+    const skills = (out as {
+      skills?: { readClaudeSkills?: boolean; mode?: string; extraDirs?: unknown };
+    }).skills;
+    expect(skills?.readClaudeSkills).toBe(true);
+    expect(skills?.mode).toBe('progressive');
+    expect(skills?.extraDirs).toBeUndefined();
+    const warned = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(warned).toContain('skills.extraDirs');
+    warn.mockRestore();
+  });
+
   it('still merges benign project-level preferences from the in-project config', async () => {
     await fs.writeFile(
       paths.inProjectConfig,

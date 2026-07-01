@@ -7,6 +7,7 @@ import { FileText, Plus, Download, Loader2, RefreshCw, Sparkles } from 'lucide-r
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
+import { showPanel } from '@/lib/view-navigation';
 import { useUIStore } from '@/stores/ui-store';
 
 interface SkillInfo {
@@ -21,19 +22,23 @@ interface SkillInfo {
   scope: string[];
 }
 
-type ScopeFilter = 'all' | 'project' | 'user' | 'bundled';
+type ScopeFilter = 'all' | 'project' | 'user' | 'bundled' | 'foreign';
 
 const SCOPE_LABELS: Record<string, string> = {
   project: 'Project',
   user: 'Global',
   bundled: 'Bundled',
+  foreign: 'Foreign',
 };
 
-function ScopeBadge({ source }: { source: string }) {
-  let scope: ScopeFilter = 'bundled';
-  if (source === 'project') scope = 'project';
-  else if (source === 'user') scope = 'user';
+/** Bucket a skill source for grouping. project/user/bundled map to themselves; everything else (.claude/*, extra) → foreign. */
+function bucketForSource(source: string | undefined): 'project' | 'user' | 'bundled' | 'foreign' {
+  if (source === 'project' || source === 'user' || source === 'bundled') return source;
+  return 'foreign';
+}
 
+function ScopeBadge({ source }: { source: string }) {
+  const scope = bucketForSource(source);
   return (
     <span
       className={cn(
@@ -41,6 +46,7 @@ function ScopeBadge({ source }: { source: string }) {
         scope === 'project' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400',
         scope === 'user' && 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400',
         scope === 'bundled' && 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+        scope === 'foreign' && 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400',
       )}
     >
       {SCOPE_LABELS[scope] ?? scope}
@@ -52,7 +58,6 @@ export function SkillsList({ className }: { className?: string }) {
   const { client } = useWebSocket();
   const skillsState = useUIStore((s) => s.skillsState);
   const setSkillsState = useUIStore((s) => s.setSkillsState);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
 
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -251,16 +256,16 @@ export function SkillsList({ className }: { className?: string }) {
         historyIndex: 0,
         detailOpen: true,
       });
-      setCurrentView('skill');
+      showPanel('skills');
     },
-    [setSkillsState, setCurrentView],
+    [setSkillsState],
   );
 
   const filteredSkills = useMemo(() => {
     let result = skills;
 
     if (scopeFilter !== 'all') {
-      result = result.filter((s) => s.source === scopeFilter);
+      result = result.filter((s) => bucketForSource(s.source) === scopeFilter);
     }
 
     if (searchQuery.trim()) {
@@ -280,15 +285,11 @@ export function SkillsList({ className }: { className?: string }) {
     const groups: Record<string, SkillInfo[]> = {
       project: [],
       user: [],
+      foreign: [],
       bundled: [],
     };
     for (const skill of filteredSkills) {
-      const key = skill.source || 'bundled';
-      if (groups[key]) {
-        groups[key].push(skill);
-      } else {
-        groups.bundled.push(skill);
-      }
+      groups[bucketForSource(skill.source)].push(skill);
     }
     return groups;
   }, [filteredSkills]);
@@ -296,7 +297,7 @@ export function SkillsList({ className }: { className?: string }) {
   const selectedSkillName = skillsState.selectedSkill?.name;
 
   return (
-    <div className={cn('flex flex-col h-full overflow-hidden', className)}>
+    <div className={cn('flex h-full min-h-0 min-w-0 flex-col overflow-hidden', className)}>
       {/* Icon rail */}
       <div className="w-full border-b flex items-center gap-1 px-2 py-2">
         <button
@@ -367,8 +368,8 @@ export function SkillsList({ className }: { className?: string }) {
           className="w-full px-2 py-1.5 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <div className="flex gap-1 flex-wrap">
-          {(['all', 'project', 'user', 'bundled'] as ScopeFilter[]).map((scope) => {
-            const count = scope === 'all' ? filteredSkills.length : filteredSkills.filter((s) => s.source === scope).length;
+          {(['all', 'project', 'user', 'foreign', 'bundled'] as ScopeFilter[]).map((scope) => {
+            const count = scope === 'all' ? filteredSkills.length : filteredSkills.filter((s) => bucketForSource(s.source) === scope).length;
             return (
               <button
                 key={scope}
@@ -398,7 +399,7 @@ export function SkillsList({ className }: { className?: string }) {
       </div>
 
       {/* Skill list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         {loading ? (
           <div className="p-4 text-xs text-muted-foreground text-center">Loading…</div>
         ) : filteredSkills.length === 0 ? (
@@ -407,7 +408,7 @@ export function SkillsList({ className }: { className?: string }) {
           </div>
         ) : (
           <div className="py-1">
-            {(['project', 'user', 'bundled'] as const).map((scope) => {
+            {(['project', 'user', 'foreign', 'bundled'] as const).map((scope) => {
               const group = groupedSkills[scope];
               if (group.length === 0) return null;
               return (
@@ -452,8 +453,8 @@ export function SkillsList({ className }: { className?: string }) {
             if (e.target === e.currentTarget) setInstallModalOpen(false);
           }}
         >
-          <div className="bg-background rounded-lg border shadow-xl w-[420px] max-w-[90vw]">
-            <div className="flex items-center justify-between p-4 border-b">
+          <div className="flex max-h-[calc(100dvh-2rem)] w-[420px] max-w-[90vw] flex-col overflow-hidden rounded-lg border bg-background shadow-xl">
+            <div className="flex shrink-0 items-center justify-between p-4 border-b">
               <div className="flex items-center gap-2">
                 <Download className="h-4 w-4 text-primary" />
                 <span className="font-semibold text-sm">Install Skill</span>
@@ -467,7 +468,7 @@ export function SkillsList({ className }: { className?: string }) {
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
               <p className="text-xs text-muted-foreground">
                 Enter a GitHub repository reference (<span className="font-mono text-[10px]">owner/repo</span>) or full URL.
               </p>
@@ -522,7 +523,7 @@ export function SkillsList({ className }: { className?: string }) {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 p-4 border-t bg-muted/20">
+            <div className="flex shrink-0 justify-end gap-2 p-4 border-t bg-muted/20">
               <button
                 type="button"
                 onClick={() => setInstallModalOpen(false)}
@@ -554,8 +555,8 @@ export function SkillsList({ className }: { className?: string }) {
             if (e.target === e.currentTarget) setCreateModalOpen(false);
           }}
         >
-          <div className="bg-background rounded-lg border shadow-xl w-[480px] max-w-[90vw]">
-            <div className="flex items-center justify-between p-4 border-b">
+          <div className="flex max-h-[calc(100dvh-2rem)] w-[480px] max-w-[90vw] flex-col overflow-hidden rounded-lg border bg-background shadow-xl">
+            <div className="flex shrink-0 items-center justify-between p-4 border-b">
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-primary" />
                 <span className="font-semibold text-sm">Create Skill</span>
@@ -569,7 +570,7 @@ export function SkillsList({ className }: { className?: string }) {
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
               <p className="text-xs text-muted-foreground">
                 Scaffold a new skill. The first line is the trigger; additional lines form the description.
               </p>
@@ -650,7 +651,7 @@ export function SkillsList({ className }: { className?: string }) {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 p-4 border-t bg-muted/20">
+            <div className="flex shrink-0 justify-end gap-2 p-4 border-t bg-muted/20">
               <button
                 type="button"
                 onClick={() => setCreateModalOpen(false)}

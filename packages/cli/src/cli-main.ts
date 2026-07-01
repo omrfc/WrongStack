@@ -339,6 +339,7 @@ export async function main(argv: string[]): Promise<number> {
     modePrompt,
     modelCapabilities: () => modelCapabilitiesRef.current,
     skillsEnabled: config.features.skills,
+    skillMode: config.skills?.mode,
     tokenSavingMode: config.features.tokenSavingMode,
     paths: {
       projectGoal: wpaths.projectGoal,

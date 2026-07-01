@@ -110,6 +110,13 @@ export function shellGuidanceBlock(shell: EffectiveShell, detail: 'full' | 'shor
 export interface DefaultSystemPromptBuilderOptions {
   memoryStore?: MemoryStore | undefined;
   skillLoader?: SkillLoader | undefined;
+  /**
+   * How skill bodies reach the prompt. `'eager'` (default) injects every
+   * discovered skill body; `'progressive'` injects only a name+trigger manifest
+   * and relies on the agent calling the `skill` tool to load a body on demand
+   * (the agentskills.io progressive-disclosure model).
+   */
+  skillMode?: 'eager' | 'progressive' | undefined;
   modeStore?: ModeStore | undefined;
   /** Pre-resolved active mode id — shown in environment block. */
   modeId?: string | undefined;
@@ -891,7 +898,13 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
     // In token-saving mode, skill bodies are compacted to save tokens:
     // only the Overview and Rules sections (~400 chars max per skill).
     if (this.opts.skillLoader) {
-      if (this.isCompact) {
+      if (this.opts.skillMode === 'progressive') {
+        // Progressive disclosure — only the metadata manifest is injected; the
+        // agent loads full bodies on demand via the `skill` tool.
+        if (this.skillBodyCache === undefined) {
+          await this.buildProgressiveSkillManifest();
+        }
+      } else if (this.isCompact) {
         // Compact mode — build once, cache
         if (this.skillBodyCache === undefined) {
           await this.buildCompactSkillBodies();
@@ -907,6 +920,38 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
       parts.push(`# Active Skills\n\n${this.skillBodyCache}`);
     }
     return parts.join('\n\n');
+  }
+
+  /**
+   * Build the progressive-disclosure manifest: list each skill's name + trigger
+   * only and instruct the agent to call the `skill` tool to load a body. No
+   * bodies are injected — the agent pulls them on demand (agentskills.io tier 2).
+   */
+  private async buildProgressiveSkillManifest(): Promise<void> {
+    if (!this.opts.skillLoader) {
+      this.skillBodyCache = '';
+      return;
+    }
+    try {
+      const entries = await this.opts.skillLoader.listEntries();
+      if (entries.length === 0) {
+        this.skillBodyCache = '';
+        return;
+      }
+      const lines = [
+        'Call the `skill` tool to load a skill before relying on it.',
+        '',
+        '| Skill | Use when |',
+        '|---|---|',
+      ];
+      for (const e of entries) {
+        const trigger = (e.trigger ?? '').replace(/\|/g, '\\|').replace(/\n+/g, ' ').trim();
+        lines.push(`| \`${e.name}\` | ${trigger} |`);
+      }
+      this.skillBodyCache = lines.join('\n');
+    } catch {
+      this.skillBodyCache = '';
+    }
   }
 
   /** Build full skill bodies (token-saving OFF). */
