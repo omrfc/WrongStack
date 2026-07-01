@@ -203,3 +203,50 @@ describe('teardown + H1 pattern', () => {
     expect(() => commitValidatorPlugin.teardown!(api as never)).not.toThrow();
   });
 });
+
+describe('bodyRequired config', () => {
+  it('blocks when bodyRequired=true and no body', () => {
+    const api = makeApi({ extensions: { 'commit-validator': { bodyRequired: true } } });
+    commitValidatorPlugin.setup(api as never);
+    const hook = getHook(api);
+    const result = hook({ toolName: 'bash', toolInput: { command: 'git commit -m "feat: add feature"' } });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toContain('body is required');
+  });
+
+  it('passes when bodyRequired=true and body is present', () => {
+    const api = makeApi({ extensions: { 'commit-validator': { bodyRequired: true, minBodyLength: 10 } } });
+    commitValidatorPlugin.setup(api as never);
+    const hook = getHook(api);
+    const msg = 'feat: add feature\n\nThis adds a new authentication module with OAuth2 support.';
+    const result = hook({ toolName: 'bash', toolInput: { command: `git commit -m "${msg}"` } });
+    expect(result).toBeUndefined();
+  });
+
+  it('blocks when body is shorter than minBodyLength', () => {
+    const api = makeApi({ extensions: { 'commit-validator': { bodyRequired: true, minBodyLength: 50 } } });
+    commitValidatorPlugin.setup(api as never);
+    const hook = getHook(api);
+    const msg = 'feat: add feature\n\nShort body';
+    const result = hook({ toolName: 'bash', toolInput: { command: `git commit -m "${msg}"` } });
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toContain('minimum');
+  });
+
+  it('does not require body when bodyRequired=false (default)', () => {
+    const api = makeApi();
+    commitValidatorPlugin.setup(api as never);
+    const hook = getHook(api);
+    const result = hook({ toolName: 'bash', toolInput: { command: 'git commit -m "feat: add feature"' } });
+    expect(result).toBeUndefined();
+  });
+
+  it('handles multi-line body correctly', () => {
+    const api = makeApi({ extensions: { 'commit-validator': { bodyRequired: true, minBodyLength: 20 } } });
+    commitValidatorPlugin.setup(api as never);
+    const hook = getHook(api);
+    const msg = 'feat: add feature\n\nLine 1 of body.\nLine 2 of body.';
+    const result = hook({ toolName: 'bash', toolInput: { command: `git commit -m "${msg}"` } });
+    expect(result).toBeUndefined();
+  });
+});

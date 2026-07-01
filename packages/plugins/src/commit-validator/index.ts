@@ -58,6 +58,10 @@ interface CommitValidatorConfig {
   requireScope: boolean;
   allowedTypes: string[];
   maxSubjectLength: number;
+  /** Require a non-empty body after the subject line. */
+  bodyRequired: boolean;
+  /** Minimum body length in characters (when bodyRequired). */
+  minBodyLength: number;
 }
 
 const DEFAULTS: CommitValidatorConfig = {
@@ -65,6 +69,8 @@ const DEFAULTS: CommitValidatorConfig = {
   requireScope: false,
   allowedTypes: [],
   maxSubjectLength: 72,
+  bodyRequired: false,
+  minBodyLength: 10,
 };
 
 function readConfig(raw: unknown): CommitValidatorConfig {
@@ -79,6 +85,10 @@ function readConfig(raw: unknown): CommitValidatorConfig {
     maxSubjectLength: typeof r['maxSubjectLength'] === 'number' && r['maxSubjectLength'] > 0
       ? r['maxSubjectLength']
       : DEFAULTS.maxSubjectLength,
+    bodyRequired: r['bodyRequired'] === true,
+    minBodyLength: typeof r['minBodyLength'] === 'number' && r['minBodyLength'] > 0
+      ? r['minBodyLength']
+      : DEFAULTS.minBodyLength,
   };
 }
 
@@ -170,6 +180,27 @@ function parseCommitMessage(message: string, cfg: CommitValidatorConfig): Parsed
     errors.push('Subject should not end with a period.');
   }
 
+  // Validate body (if required).
+  // The body is everything after the first line (conventional-commit
+  // format requires a blank line between subject and body).
+  if (cfg.bodyRequired) {
+    const lines = message.trim().split('\n');
+    // Subject is lines[0]. A properly formatted body has a blank line
+    // after the subject, then the body content.
+    const bodyStart = lines.findIndex((line, i) => i > 0 && line.trim() === '');
+    const body = bodyStart >= 0
+      ? lines.slice(bodyStart + 1).join('\n').trim()
+      : '';
+    if (!body) {
+      errors.push('A commit body is required. Add a blank line after the subject, then the description.');
+    } else if (body.length < cfg.minBodyLength) {
+      errors.push(
+        `Body is ${body.length} characters — minimum is ${cfg.minBodyLength}. ` +
+        `Add more context about what changed and why.`,
+      );
+    }
+  }
+
   return {
     valid: errors.length === 0,
     type,
@@ -233,6 +264,17 @@ const plugin: Plugin = {
         minimum: 10,
         default: 72,
         description: 'Maximum subject line length in characters.',
+      },
+      bodyRequired: {
+        type: 'boolean',
+        default: false,
+        description: 'Require a non-empty commit body after the subject line.',
+      },
+      minBodyLength: {
+        type: 'number',
+        minimum: 1,
+        default: 10,
+        description: 'Minimum body length in characters (when bodyRequired is true).',
       },
     },
   },
@@ -360,6 +402,8 @@ const plugin: Plugin = {
           requireScope: cfg.requireScope,
           allowedTypes: cfg.allowedTypes,
           maxSubjectLength: cfg.maxSubjectLength,
+          bodyRequired: cfg.bodyRequired,
+          minBodyLength: cfg.minBodyLength,
           standardTypes: STANDARD_TYPES,
           counters: {
             invocations: state.invocationCount,
