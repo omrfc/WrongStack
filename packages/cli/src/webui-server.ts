@@ -27,6 +27,13 @@
  *                                        (PR 5 + 5b–5k):
  *       providers · brain · introspection · worklist · agent-config ·
  *       prefs · projects · context · process · sessions · connection
+ *   webui-server/stream-coalescer.ts   — server-side coalescing of
+ *                                        text/thinking deltas + tool
+ *                                        progress (PR 9)
+ *   webui-server/client-registration.ts — mailbox presence + HQ telemetry
+ *                                        heartbeat for this instance (PR 10)
+ *   webui-server/session-start-payload.ts — session.start payload builder
+ *                                        with cost rates + max context (PR 11)
  *
  * `handleMessage` now only routes: each case unpacks the payload and calls
  * the matching `handleXxx(ctx, …)`. The per-group contexts are all built
@@ -38,7 +45,6 @@
  * Public surface: `runWebUI` plus the `WSServerMessage` / `WSClientMessage`
  * message shapes. Everything else is internal to the run.
  */
-import * as crypto from 'node:crypto';
 import { watch as fsWatch } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -58,11 +64,8 @@ import type {
   SkillLoader,
 } from '@wrongstack/core';
 import {
-  DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DefaultSecretScrubber,
-  GlobalMailbox,
   PromptUsageStore,
-  resolveProjectDir,
   resolveWstackPaths,
   TOKENS,
   type TodoItem,
@@ -73,7 +76,6 @@ import { makeProviderFromConfig } from '@wrongstack/providers';
 import { toErrorMessage } from '@wrongstack/core/utils/error';
 import { SkillInstaller } from '@wrongstack/core/skills';
 import type { MCPRegistry } from '@wrongstack/mcp';
-import { startCliHqConnection, type CliHqConnection } from './hq-publisher.js';
 import {
   AutoPhaseWebSocketHandler,
   SpecsWebSocketHandler,
@@ -137,9 +139,6 @@ import {
   WorktreeWebSocketHandler,
 } from '@wrongstack/webui/server';
 import { WebSocket, WebSocketServer } from 'ws';
-// ── Cost computation helpers (inlined from @wrongstack/webui/server/usage-cost.ts) ──
-// PR 2 of Issue #30: extracted to `./webui-server/cost-helpers.js`.
-import { getCostRates } from './webui-server/cost-helpers.js';
 // PR 8 of Issue #30: extracted to `./webui-server/prefs-seeding.js`.
 import { createPrefsSeeding, seedConfigToMeta } from './webui-server/prefs-seeding.js';
 import {
@@ -154,6 +153,9 @@ import {
 // PR 1 of Issue #30: extracted to `./webui-server/logger-shim.js`.
 import { consoleLogger } from './webui-server/logger-shim.js';
 import { createProviderConfigStore, getVault } from './webui-server/provider-config.js';
+import { createWebuiClientRegistration } from './webui-server/client-registration.js';
+import { createSessionStartPayloadBuilder } from './webui-server/session-start-payload.js';
+import { createStreamCoalescer } from './webui-server/stream-coalescer.js';
 import { startStaticServe } from './webui-server/static-serve.js';
 import {
   type AgentConfigContext,
@@ -505,147 +507,21 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // session was opened, rather than the hardcoded 0 it used to send.
   const sessionStartedAt = Date.now();
 
-  /**
-   * Build a session.start payload enriched with per-model cost rates and
-   * max-context cap. Used by the initial connect handler and every
-   * broadcast path (model.switch, mode.switch, session.resume, etc.) so
-   * the frontend always has the correct cost rates for live computation.
-   *
-   * Callers pass optional overrides for fields that vary per context
-   * (reset, mode, replayMessages, etc.).
-   */
-  async function buildSessionStartPayload(overrides?: Record<string, unknown>, needsSetup = false) {
-    let maxContext = 0;
-    let inputCost = 0;
-    let outputCost = 0;
-    let cacheReadCost = 0;
-    try {
-      if (opts.modelsRegistry) {
-        const m = await opts.modelsRegistry.getModel(
-          opts.agent.ctx.provider.id,
-          opts.agent.ctx.model,
-        );
-        const registryMax = m?.capabilities.maxContext;
-        // Fall back to the live provider's capabilities if the registry has no override.
-        // The provider is the authoritative source for the model's default context window.
-        maxContext = registryMax ?? opts.agent.ctx.provider.capabilities?.maxContext ?? 0;
-        const rates = getCostRates(m);
-        inputCost = rates.input;
-        outputCost = rates.output;
-        cacheReadCost = rates.cacheRead;
-      } else {
-        // No registry — use the provider's default capabilities directly.
-        maxContext = opts.agent.ctx.provider.capabilities?.maxContext ?? 0;
-      }
-    } catch {
-      /* best-effort; cost stays $0 */
-    }
-    return {
-      sessionId: opts.agent.ctx.session?.id ?? opts.session.id,
-      model: opts.agent.ctx.model,
-      provider: opts.agent.ctx.provider.id,
-      mode: opts.modeId ?? 'default',
-      projectName: opts.projectRoot ? path.basename(opts.projectRoot) : undefined,
-      // Frontend reads `projectRoot` from session.start (ws-handlers setEnv) —
-      // omitting it left the store's projectRoot empty after a project switch.
-      projectRoot:
-        opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '',
-      cwd: opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '',
-      needsSetup, // true when provider/model not configured and running in --webui mode
-      contextMode: String(
-        opts.agent.ctx.meta?.['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
-      ),
-      maxContext,
-      inputCost,
-      outputCost,
-      cacheReadCost,
-      ...overrides,
-    };
-  }
+  // session.start payload builder — cost rates + max-context enrichment.
+  // PR 11 of Issue #30: extracted to `./webui-server/session-start-payload.ts`.
+  const buildSessionStartPayload = createSessionStartPayloadBuilder(opts);
 
   // ── Client (REPL/TUI/WebUI) registration ─────────────────────────────────
-  // Register this WebUI instance as a client in the global mailbox so other
-  // TUIs, WebUIs, and REPLs on the same project can see it as "online".
-  // Clients heartbeat more frequently than agents (15s vs 30s).
-  let webuiClientId: string | null = null;
-  let webuiHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  let stopWebuiHqBridge: (() => void) | undefined;
-  let webuiHqConnection: CliHqConnection | undefined;
-  const CLIENT_HEARTBEAT_MS = 15_000;
-
-  const registerWebuiClient = async (): Promise<string | null> => {
-    if (!opts.projectRoot) return null;
-    try {
-      const projectRoot = opts.projectRoot;
-      const projectDir = resolveProjectDir(projectRoot, wstackGlobalRoot());
-      webuiHqConnection = startCliHqConnection({
-        clientKind: 'webui',
-        projectRoot,
-        projectName: path.basename(projectRoot),
-        appConfig: opts.appConfig,
-        onConnect: (publisher) => {
-          stopWebuiHqBridge?.();
-          stopWebuiHqBridge = undefined;
-          void import('@wrongstack/core')
-            .then(({ startSessionTelemetryBridge }) => {
-              stopWebuiHqBridge = startSessionTelemetryBridge({
-                publisher,
-                events: opts.events,
-                sessionId: opts.session.id,
-                projectRoot,
-                projectName: path.basename(projectRoot),
-                startedAt: new Date().toISOString(),
-              });
-            })
-            .catch(() => {
-              // telemetry optional
-            });
-        },
-      });
-      const mailbox = new GlobalMailbox(projectDir, opts.events, () =>
-        webuiHqConnection?.getPublisher(),
-      );
-      webuiClientId = `webui@${crypto.randomUUID().slice(0, 8)}`;
-      const projectName = opts.projectRoot ? path.basename(opts.projectRoot) : 'unknown';
-      await mailbox.registerClient({
-        clientId: webuiClientId,
-        sessionId: opts.agent.ctx.session?.id ?? opts.session.id,
-        name: `WebUI [${projectName}]`,
-        source: 'webui',
-        pid: process.pid,
-      });
-
-      webuiHeartbeatTimer = setInterval(() => {
-        mailbox
-          .clientHeartbeat({
-            clientId: webuiClientId!,
-            sessionId: opts.agent.ctx.session?.id ?? opts.session.id,
-          })
-          .catch(() => {
-            // best-effort — ignore heartbeat failures during shutdown
-          });
-      }, CLIENT_HEARTBEAT_MS);
-      webuiHeartbeatTimer.unref();
-
-      return webuiClientId;
-    } catch {
-      // best-effort — client registration errors should not block WebUI startup
-      return null;
-    }
-  };
-
-  const unregisterWebuiClient = (): void => {
-    if (webuiHeartbeatTimer) {
-      clearInterval(webuiHeartbeatTimer);
-      webuiHeartbeatTimer = null;
-    }
-    if (stopWebuiHqBridge) {
-      stopWebuiHqBridge();
-      stopWebuiHqBridge = undefined;
-    }
-    webuiHqConnection?.stop();
-    webuiHqConnection = undefined;
-  };
+  // Mailbox presence + HQ telemetry for this WebUI instance. PR 10 of
+  // Issue #30: extracted to `./webui-server/client-registration.ts`.
+  const { register: registerWebuiClient, unregister: unregisterWebuiClient } =
+    createWebuiClientRegistration({
+      projectRoot: opts.projectRoot,
+      appConfig: opts.appConfig,
+      events: opts.events,
+      hqSessionId: opts.session.id,
+      getSessionId: () => opts.agent.ctx.session?.id ?? opts.session.id,
+    });
 
   // Register immediately (fire-and-forget so it doesn't block server startup)
   registerWebuiClient();
@@ -750,164 +626,23 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       payload: sessionPayload({ fleetConcurrency, fleetConcurrencyMax }),
     });
 
-  // Coalesce high-volume live events on the server before they hit every
-  // connected browser tab. The frontend also coalesces per animation frame,
-  // but without this layer long streams still create one WebSocket message per
-  // provider token/tool progress event.
-  const STREAM_COALESCE_MS = 16;
-  const STREAM_COALESCE_MAX_CHARS = 8 * 1024;
   const currentSessionId = (): string => opts.agent.ctx.session?.id ?? opts.session.id;
   const sessionPayload = <T extends Record<string, unknown>>(payload: T): T & { sessionId: string } => {
     const provided = payload['sessionId'];
     const sessionId = typeof provided === 'string' && provided.length > 0 ? provided : currentSessionId();
     return { ...payload, sessionId };
   };
-  let textDeltaBuffer = '';
-  let textDeltaSessionId: string | undefined;
-  let textDeltaTimer: ReturnType<typeof setTimeout> | null = null;
-  let thinkingDeltaBuffer = '';
-  let thinkingDeltaSessionId: string | undefined;
-  let thinkingDeltaTimer: ReturnType<typeof setTimeout> | null = null;
-  const toolProgressBuffers = new Map<
-    string,
-    {
-      sessionId?: string | undefined;
-      id: string;
-      name: string;
-      eventType: string;
-      text: string;
-      timer: ReturnType<typeof setTimeout> | null;
-    }
-  >();
 
-  const flushTextDelta = (): void => {
-    if (textDeltaTimer) {
-      clearTimeout(textDeltaTimer);
-      textDeltaTimer = null;
-    }
-    if (!textDeltaBuffer) return;
-    const text = textDeltaBuffer;
-    const sessionId = textDeltaSessionId;
-    textDeltaBuffer = '';
-    textDeltaSessionId = undefined;
-    broadcast({
-      type: 'provider.text_delta',
-      payload: sessionPayload({ sessionId, text, messageId: 'current' }),
-    });
-  };
-
-  const flushThinkingDelta = (): void => {
-    if (thinkingDeltaTimer) {
-      clearTimeout(thinkingDeltaTimer);
-      thinkingDeltaTimer = null;
-    }
-    if (!thinkingDeltaBuffer) return;
-    const text = thinkingDeltaBuffer;
-    const sessionId = thinkingDeltaSessionId;
-    thinkingDeltaBuffer = '';
-    thinkingDeltaSessionId = undefined;
-    broadcast({
-      type: 'provider.thinking_delta',
-      payload: sessionPayload({ sessionId, text }),
-    });
-  };
-
-  const queueTextDelta = (text: string, sessionId?: string | undefined): void => {
-    if (!text) return;
-    if (textDeltaBuffer && textDeltaSessionId !== sessionId) {
-      flushTextDelta();
-    }
-    textDeltaSessionId = sessionId;
-    textDeltaBuffer += text;
-    if (textDeltaBuffer.length >= STREAM_COALESCE_MAX_CHARS) {
-      flushTextDelta();
-      return;
-    }
-    if (!textDeltaTimer) {
-      textDeltaTimer = setTimeout(flushTextDelta, STREAM_COALESCE_MS);
-      textDeltaTimer.unref?.();
-    }
-  };
-
-  const queueThinkingDelta = (text: string, sessionId?: string | undefined): void => {
-    if (!text) return;
-    if (thinkingDeltaBuffer && thinkingDeltaSessionId !== sessionId) {
-      flushThinkingDelta();
-    }
-    thinkingDeltaSessionId = sessionId;
-    thinkingDeltaBuffer += text;
-    if (thinkingDeltaBuffer.length >= STREAM_COALESCE_MAX_CHARS) {
-      flushThinkingDelta();
-      return;
-    }
-    if (!thinkingDeltaTimer) {
-      thinkingDeltaTimer = setTimeout(flushThinkingDelta, STREAM_COALESCE_MS);
-      thinkingDeltaTimer.unref?.();
-    }
-  };
-
-  const flushToolProgress = (id: string): void => {
-    const buffered = toolProgressBuffers.get(id);
-    if (!buffered) return;
-    if (buffered.timer) clearTimeout(buffered.timer);
-    toolProgressBuffers.delete(id);
-    if (!buffered.text) return;
-    broadcast({
-      type: 'tool.progress',
-      payload: sessionPayload({
-        sessionId: buffered.sessionId,
-        name: buffered.name,
-        id: buffered.id,
-        event: { type: buffered.eventType, text: buffered.text },
-      }),
-    });
-  };
-
-  const flushAllStreamBuffers = (): void => {
-    flushTextDelta();
-    flushThinkingDelta();
-    for (const id of [...toolProgressBuffers.keys()]) flushToolProgress(id);
-  };
-
-  const queueToolProgress = (payload: {
-    sessionId?: string | undefined;
-    id: string;
-    name: string;
-    event: { type?: string | undefined; text?: string | undefined };
-  }): void => {
-    const text = payload.event.text;
-    if (!text) {
-      flushToolProgress(payload.id);
-      broadcast({ type: 'tool.progress', payload: sessionPayload(payload as Record<string, unknown>) });
-      return;
-    }
-
-    const eventType = payload.event.type ?? 'progress';
-    const existing = toolProgressBuffers.get(payload.id);
-    if (existing && existing.sessionId !== payload.sessionId) flushToolProgress(payload.id);
-    if (existing && existing.eventType !== eventType) flushToolProgress(payload.id);
-    const buffered = toolProgressBuffers.get(payload.id) ?? {
-      sessionId: payload.sessionId,
-      id: payload.id,
-      name: payload.name,
-      eventType,
-      text: '',
-      timer: null,
-    };
-    buffered.sessionId = payload.sessionId;
-    buffered.name = payload.name;
-    buffered.text += buffered.text ? `\n${text}` : text;
-    toolProgressBuffers.set(payload.id, buffered);
-
-    if (buffered.text.length >= STREAM_COALESCE_MAX_CHARS) {
-      flushToolProgress(payload.id);
-      return;
-    }
-    if (!buffered.timer) {
-      buffered.timer = setTimeout(() => flushToolProgress(payload.id), STREAM_COALESCE_MS);
-      buffered.timer.unref?.();
-    }
-  };
+  // Coalesce high-volume live events on the server before they hit every
+  // connected browser tab. PR 9 of Issue #30: extracted to
+  // `./webui-server/stream-coalescer.ts`.
+  const {
+    queueTextDelta,
+    queueThinkingDelta,
+    queueToolProgress,
+    flushThinkingDelta,
+    flushAllStreamBuffers,
+  } = createStreamCoalescer({ broadcast, sessionPayload });
 
   function setupEvents() {
     // Clear any existing subscriptions
