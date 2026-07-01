@@ -1,7 +1,7 @@
 {
   "name": "@wrongstack/plugins",
   "version": "0.277.2",
-  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump, secret-scanner, todo-tracker, token-budget, lint-gate, branch-guard, diff-summary, commit-validator, format-on-save",
+  "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, cron, template-engine, semver-bump, secret-scanner, todo-tracker, token-budget, lint-gate, branch-guard, diff-summary, commit-validator, format-on-save, test-runner-gate",
   "license": "MIT",
   "author": "ECOSTACK TECHNOLOGY OÜ",
   "type": "module",
@@ -75,6 +75,10 @@
     "./format-on-save": {
       "types": "./dist/format-on-save.d.ts",
       "import": "./dist/format-on-save.js"
+    },
+    "./test-runner-gate": {
+      "types": "./dist/test-runner-gate.d.ts",
+      "import": "./dist/test-runner-gate.js"
     }
   },
   "files": [

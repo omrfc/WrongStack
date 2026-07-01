@@ -19,6 +19,7 @@ export default defineConfig({
     'diff-summary': 'src/diff-summary/index.ts',
     'commit-validator': 'src/commit-validator/index.ts',
     'format-on-save': 'src/format-on-save/index.ts',
+    'test-runner-gate': 'src/test-runner-gate/index.ts',
   },
   format: ['esm'],
   dts: true,
