@@ -95,15 +95,37 @@ What this skill does.
 2. Step two
 ```
 
-## File Location
+## File structure
 
-Skills live in directories under these paths (priority order):
+A skill is a directory containing `SKILL.md` plus optional resource subdirectories (the agentskills.io layout):
 
-1. **Project**: `<project>/.wrongstack/skills/<name>/SKILL.md`
-2. **User global**: `~/.wrongstack/skills/<name>/SKILL.md`
-3. **Bundled**: `packages/core/skills/<name>/SKILL.md` (read-only, for core team)
+```
+<name>/
+  SKILL.md            ← required: metadata + instructions
+  scripts/            ← optional: executable code (run via bash)
+  references/         ← optional: docs loaded on demand (REFERENCE.md, …)
+  assets/             ← optional: templates, data, snippets
+  …                   ← any other subdirectories
+```
+
+Skills live under these paths (priority order, first-seen wins by name):
+
+1. **Project**: `<project>/.wrongstack/skills/<name>/`
+2. **Project foreign**: `<project>/.claude/skills/<name>/`, `<project>/.{codex,cursor,agents,…}/skills/<name>/`
+3. **User global**: `~/.wrongstack/skills/<name>/`
+4. **User foreign**: `~/.claude/skills/<name>/`, `~/.{codex,cursor,agents,…}/skills/<name>/`
+5. **Bundled**: `packages/core/skills/<name>/` (read-only, core team)
 
 For user-created skills: always use path 1 (project level).
+
+## Resource files (scripts / references / assets)
+
+Bundled resources are NOT injected into the prompt — the agent loads them on demand via the `skill` tool (agentskills.io progressive disclosure, tier 3):
+
+- `skill({ name: "<name>" })` → lists every bundled file (scripts/, references/, assets/, any subdir, recursively).
+- `skill({ name: "<name>", resource: "references/REF.md" })` → returns that file's content. Scripts come back with an absolute path so the agent runs them via `bash`.
+
+Keep `SKILL.md` under ~500 lines; move deep reference material into `references/`. Reference files with relative paths from the skill root. Scripts must be self-contained and safe to run. Only add the subdirectories a skill actually needs — empty directories don't persist in git, so create a file (e.g. `scripts/README.md`) if you want the directory tracked.
 
 ## Workflow
 

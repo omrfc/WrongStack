@@ -69,13 +69,15 @@ Skills are discovered at boot across the layers below. The first layer with a gi
 ### Directory structure
 
 ```
-skills/
-  <skill-name>/
-    SKILL.md          ← required
-    (any other files) ← ignored by the loader, but you can reference them
+<skill-name>/
+  SKILL.md            ← required: metadata + instructions
+  scripts/            ← optional: executable code (the agent runs via bash)
+  references/         ← optional: docs loaded on demand (REFERENCE.md, …)
+  assets/             ← optional: templates, data, snippets
+  …                   ← any other files/subdirectories
 ```
 
-The loader scans each directory for subdirectories containing `SKILL.md`. Files outside this structure are ignored.
+The loader discovers a skill by its `SKILL.md`; the other files are **bundled resources** the agent loads on demand via the `skill` tool (see [Progressive disclosure](#progressive-disclosure--the-skill-tool)). Keep `SKILL.md` under ~500 lines and move deep material into `references/`.
 
 ---
 
@@ -109,7 +111,15 @@ Control which foreign tools are scanned with `skills.foreignSources` (default: a
 
 ## Progressive disclosure & the `skill` tool
 
-By default (`mode: 'eager'`) every discovered skill body is injected into the system prompt. Set `skills.mode: 'progressive'` to follow the agentskills.io three-tier model instead: the prompt carries only each skill's name + trigger, and the agent calls the **`skill`** tool to load a skill's full body on demand. The tool also lists the skill's bundled resources (`scripts/`, `references/`, `assets/`), which the agent reads with the `read` tool only when needed.
+By default (`mode: 'eager'`) every discovered skill body is injected into the system prompt. Set `skills.mode: 'progressive'` to follow the agentskills.io three-tier model instead: the prompt carries only each skill's name + trigger, and the agent calls the **`skill`** tool to load a skill's full body on demand.
+
+The `skill` tool also handles **bundled resources** (tier 3) — scripts, references, assets, any subdirectory:
+
+- `skill({ name: "docker-deploy" })` → the SKILL.md body + a recursive listing of every bundled file.
+- `skill({ name: "docker-deploy", resource: "references/COMPOSE.md" })` → that file's content.
+- Scripts come back with an absolute path; the agent runs them via `bash`.
+
+Use the `skill` tool (not `read`) for skill resources: it works for foreign skills that live outside the project root (`~/.claude/skills/…`, `~/.cursor/skills-cursor/…`), which a project-root-restricted `read` tool may refuse.
 
 ```jsonc
 // ~/.wrongstack/config.json

@@ -62,7 +62,43 @@ describe('makeSkillTool', () => {
     expect(out.resources.map((r) => r.path).sort()).toEqual(['references/REF.md', 'scripts/extract.py']);
     const rendered = tool.serialize!(out, { name: 'res-skill' });
     expect(rendered).toContain('scripts/extract.py');
-    expect(rendered).toContain('read on demand');
+    expect(rendered).toContain('load on demand');
+  });
+
+  it('loads a specific bundled resource by relative path', async () => {
+    const dir = path.join(tmp, 'res2');
+    await fs.mkdir(path.join(dir, 'references', 'deep'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'SKILL.md'), '---\nname: res2\ndescription: d\n---\nbody');
+    await fs.writeFile(
+      path.join(dir, 'references', 'deep', 'GUIDE.md'),
+      '# Guide\ndetailed reference text',
+    );
+    const tool = makeSkillTool(
+      loader(
+        [{ name: 'res2', description: 'd', path: path.join(dir, 'SKILL.md'), source: 'project' }],
+        { res2: 'body' },
+      ),
+    );
+    const out = await tool.execute({ name: 'res2', resource: 'references/deep/GUIDE.md' });
+    expect(out.loadedResource?.content).toContain('detailed reference text');
+    expect(out.loadedResource?.rel).toBe('references/deep/GUIDE.md');
+    // a resource request skips the full listing
+    expect(out.resources).toEqual([]);
+  });
+
+  it('rejects a resource path that escapes the skill dir (path traversal)', async () => {
+    const dir = path.join(tmp, 'res3');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'SKILL.md'), '---\nname: res3\ndescription: d\n---\nbody');
+    const tool = makeSkillTool(
+      loader(
+        [{ name: 'res3', description: 'd', path: path.join(dir, 'SKILL.md'), source: 'project' }],
+        { res3: 'body' },
+      ),
+    );
+    await expect(tool.execute({ name: 'res3', resource: '../../../etc/passwd' })).rejects.toThrow(
+      /invalid resource path|escapes/,
+    );
   });
 
   it('throws on unknown skill name', async () => {
