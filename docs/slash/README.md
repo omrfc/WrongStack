@@ -85,7 +85,6 @@ These commands are enabled by default when plugins are enabled and their host de
 | `/push` | `packages/core/src/plugins/git-plugin.ts` | Push current branch to configured remotes |
 | `/metrics` | `packages/core/src/plugins/observability-plugin.ts` | Metrics snapshot; requires `--metrics` |
 | `/health` | `packages/core/src/plugins/observability-plugin.ts` | Run health checks; requires `--metrics` |
-| `/security` | `packages/core/src/plugins/security-plugin.ts` | Security scan, audit, and report commands |
 | `/skill` | `packages/core/src/plugins/skills-plugin.ts` | List skills or show a skill body |
 | `/skill-gen` | `packages/core/src/plugins/skills-plugin.ts` | LLM-guided skill authoring |
 | `/skill-install` | `packages/core/src/plugins/skills-plugin.ts` | Install skills from GitHub |
