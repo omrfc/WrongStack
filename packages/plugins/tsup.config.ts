@@ -18,6 +18,7 @@ export default defineConfig({
     'branch-guard': 'src/branch-guard/index.ts',
     'diff-summary': 'src/diff-summary/index.ts',
     'commit-validator': 'src/commit-validator/index.ts',
+    'format-on-save': 'src/format-on-save/index.ts',
   },
   format: ['esm'],
   dts: true,

@@ -57,3 +57,4 @@ export { default as lintGatePlugin } from './lint-gate/index.js';
 export { default as branchGuardPlugin } from './branch-guard/index.js';
 export { default as diffSummaryPlugin } from './diff-summary/index.js';
 export { default as commitValidatorPlugin } from './commit-validator/index.js';
+export { default as formatOnSavePlugin } from './format-on-save/index.js';
