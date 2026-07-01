@@ -1,9 +1,10 @@
-import { expectDefined } from '@wrongstack/core';
 import type { EventBus, Logger, MCPServerConfig, Tool, ToolRegistry } from '@wrongstack/core';
-import { MCP_CONSTANTS } from './constants.js';
+import { expectDefined } from '@wrongstack/core';
 import { type ConnectionState, MCPClient, type MCPTool } from './client.js';
+import { MCP_CONSTANTS } from './constants.js';
 import { manifestConfigHash, readManifest, writeManifest } from './manifest-cache.js';
 import { wrapMCPTool } from './wrap-tool.js';
+
 interface ServerSlot {
   cfg: MCPServerConfig;
   client?: MCPClient | undefined;
@@ -15,6 +16,14 @@ interface ServerSlot {
   attempts: number;
   /** Set when a reconnect cycle is already running for this slot. */
   reconnectPending: boolean;
+  /**
+   * Handle to the pending backoff timer scheduled by `scheduleReconnect`.
+   * Stored so `stop` / `stopAll` / `sleepIdle` / exhaustion paths can cancel
+   * it — a stale timer that fires after the slot has been torn down would
+   * resurrect the server via `attemptReconnect` (which doesn't gate on
+   * `slot.state`).
+   */
+  reconnectTimer?: NodeJS.Timeout | undefined;
   /**
    * L2-B: number of full reconnect *cycles* (where one cycle = one
    * `attemptConnect` invocation, which itself can try multiple times
@@ -95,6 +104,17 @@ export class MCPRegistry {
 
   async start(cfg: MCPServerConfig): Promise<void> {
     if (cfg.enabled === false) return;
+    // Reject duplicate registrations explicitly. Without this, calling
+    // start() twice with the same name would overwrite the slot in
+    // `this.servers` and orphan the previous slot's client (still
+    // connected, with listeners wired into a slot that's no longer
+    // reachable from the registry). Callers that want a clean re-start
+    // should use `restart(name)`.
+    if (this.servers.has(cfg.name)) {
+      throw new Error(
+        `MCP server "${cfg.name}" is already registered — use restart() to re-cycle a running server`,
+      );
+    }
     // Lazy-connect requires a manifest cache dir to register tools cold.
     const lazy = !!cfg.lazy && !!this.cacheDir;
     const slot: ServerSlot = {
@@ -235,6 +255,13 @@ export class MCPRegistry {
     const slot = this.servers.get(name);
     if (!slot) return;
     slot.reconnectPending = false;
+    // Cancel the pending backoff timer. Without this, a disconnect scheduled
+    // for reconnection would fire its `attemptReconnect` callback after the
+    // slot has been torn down and respawn the server we just told to stop.
+    if (slot.reconnectTimer) {
+      clearTimeout(slot.reconnectTimer);
+      slot.reconnectTimer = undefined;
+    }
     if (slot.client) {
       slot.client.removeExitListener(this.onChildExit);
       if (slot.onDisconnect) slot.client.removeDisconnectListener(slot.onDisconnect);
@@ -295,9 +322,7 @@ export class MCPRegistry {
     if (slot.lazy && slot.registeredLazy && !this.lazyMode) return;
     const allowed = slot.cfg.allowedTools;
     const filtered = tools.filter((t) => !allowed || allowed.includes(t.name));
-    const clientArg = slot.lazy
-      ? () => this.ensureConnected(slot.cfg.name)
-      : expectDefined(client);
+    const clientArg = slot.lazy ? () => this.ensureConnected(slot.cfg.name) : expectDefined(client);
     const wrapped = filtered.map((t) =>
       wrapMCPTool(slot.cfg.name, t, clientArg, slot.cfg.permission ?? 'confirm'),
     );
@@ -350,6 +375,12 @@ export class MCPRegistry {
    */
   private async sleepIdle(slot: ServerSlot): Promise<void> {
     slot.reconnectPending = false;
+    // Defense-in-depth: a connect-failure retry timer from an earlier
+    // failed cycle shouldn't outlive a fresh sleep.
+    if (slot.reconnectTimer) {
+      clearTimeout(slot.reconnectTimer);
+      slot.reconnectTimer = undefined;
+    }
     if (slot.client) {
       // Remove the exit listener BEFORE close so the teardown isn't seen as a crash.
       slot.client.removeExitListener(this.onChildExit);
@@ -527,6 +558,15 @@ export class MCPRegistry {
       return;
     }
     slot.reconnectPending = true;
+    // Cancel any previously-scheduled timer for this slot. Defensive — the
+    // `reconnectPending` early-return above normally prevents re-scheduling
+    // while one is outstanding, but if the slot was torn down mid-flight
+    // and re-started (`restart()`), a stale handle from the prior cycle
+    // could otherwise fire and resurrect the wrong client.
+    if (slot.reconnectTimer) {
+      clearTimeout(slot.reconnectTimer);
+      slot.reconnectTimer = undefined;
+    }
     // Exponential backoff with light jitter: 1s, 2s, 4s, 8s, 16s, capped
     // at 30s. The ±20% jitter avoids reconnect stampedes when many
     // servers crash together.
@@ -536,7 +576,10 @@ export class MCPRegistry {
     );
     const jitter = base * MCP_CONSTANTS.RECONNECT.JITTER_FACTOR * (Math.random() * 2 - 1);
     const delay = Math.max(100, Math.round(base + jitter));
-    setTimeout(() => this.attemptReconnect(slot), delay);
+    slot.reconnectTimer = setTimeout(() => {
+      slot.reconnectTimer = undefined;
+      void this.attemptReconnect(slot);
+    }, delay);
   }
 
   private async attemptReconnect(slot: ServerSlot): Promise<void> {
@@ -634,6 +677,16 @@ export class MCPRegistry {
           );
           slot.state = 'failed';
           slot.client = undefined;
+          // The connect() loop itself doesn't schedule a backoff timer (it
+          // only awaits inline setTimeouts within the `while`), but a
+          // prior `scheduleReconnect` cycle may have left one outstanding.
+          // Drop it so the user can `restart()` without waiting on a stale
+          // fire that would race the fresh `attemptConnect`.
+          if (slot.reconnectTimer) {
+            clearTimeout(slot.reconnectTimer);
+            slot.reconnectTimer = undefined;
+          }
+          slot.reconnectPending = false;
           this.events.emit('mcp.server.disconnected', {
             name: slot.cfg.name,
             reason: err instanceof Error ? err.message : 'unknown',

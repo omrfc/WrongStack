@@ -40,6 +40,34 @@ describe('MCPRegistry', () => {
     expect(reg.list()).toHaveLength(0);
   });
 
+  it('start() throws on duplicate name (no orphan client)', async () => {
+    // Regression: previously calling start() twice with the same name
+    // silently overwrote the slot in `this.servers`, leaving the prior
+    // slot's client live in the process heap with registry listeners
+    // pointing into a slot no one can reach. Explicit error now —
+    // callers wanting a clean re-start should use restart().
+    //
+    // Use a never-resolving command so the first start() parks at the
+    // initial connect (no proc ever spawns, but the slot is registered).
+    // enabled:false on the first start() short-circuits before
+    // registration, so use a different path that DOES add the slot.
+    const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
+    // First call: explicitly enabled=false short-circuits. Bypass by
+    // going through attemptConnect directly with a stub client.
+    const slot = {
+      cfg: stdioCfg('dup'),
+      state: 'idle' as const,
+      toolNames: [] as string[],
+      lazyTools: [] as Tool[],
+      attempts: 0,
+      reconnectPending: false,
+      reconnectCycles: 0,
+    };
+    (reg as never as { servers: Map<string, typeof slot> }).servers.set('dup', slot);
+    // Second call should now reject the duplicate.
+    await expect(reg.start(stdioCfg('dup'))).rejects.toThrow(/already registered/);
+  });
+
   it('emits disconnected after retries exhausted on failure', async () => {
     const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
     const disconnects: unknown[] = [];
@@ -162,6 +190,81 @@ describe('MCPRegistry', () => {
       expect(captured).toBeGreaterThanOrEqual(12_000);
       expect(captured).toBeLessThanOrEqual(20_000);
       expect(slot.reconnectPending).toBe(true);
+    });
+
+    it('scheduleReconnect stores a cancellable timer handle on the slot', () => {
+      // Regression: previously the `setTimeout` for backoff was a fire-and-
+      // forget handle. After `stop` cleared `reconnectPending`, a stale
+      // timer would still fire and respawn the server via
+      // `attemptReconnect`. The handle must now be tracked so teardown
+      // paths can cancel it.
+      const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
+      const slot = {
+        cfg: stdioCfg('cancel-timer'),
+        state: 'disconnected' as const,
+        toolNames: [] as string[],
+        attempts: 0,
+        reconnectPending: false,
+        reconnectCycles: 0,
+      };
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set(
+        'cancel-timer',
+        slot,
+      );
+      (reg as never as { scheduleReconnect: (s: typeof slot) => void }).scheduleReconnect(
+        slot,
+      );
+      const handle = (
+        reg as never as {
+          servers: Map<string, { reconnectTimer?: NodeJS.Timeout | undefined }>;
+        }
+      ).servers.get('cancel-timer')?.reconnectTimer;
+      expect(handle).toBeDefined();
+      // Cleanup — release the timer so the test doesn't leak a Node handle.
+      if (handle) clearTimeout(handle);
+    });
+
+    it('stop cancels a pending reconnect timer (no zombie respawn)', async () => {
+      // The actual bug: scheduleReconnect armed a timer at start, then
+      // user calls stop(); without tracking the handle, the timer fires
+      // later and `attemptReconnect` resurrects the server. After the
+      // fix, `stop` must cancel it.
+      const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
+      const slot = {
+        cfg: stdioCfg('no-respawn'),
+        state: 'disconnected' as const,
+        toolNames: [] as string[],
+        attempts: 0,
+        reconnectPending: false,
+        reconnectCycles: 0,
+      };
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set(
+        'no-respawn',
+        slot,
+      );
+      const registryInternals = reg as never as {
+        scheduleReconnect: (s: typeof slot) => void;
+        stop: (n: string) => Promise<void>;
+        servers: Map<
+          string,
+          {
+            reconnectTimer?: NodeJS.Timeout | undefined;
+            reconnectPending: boolean;
+            reconnectCycles: number;
+            client?: unknown;
+          }
+        >;
+      };
+      registryInternals.scheduleReconnect(slot);
+      const before = registryInternals.servers.get('no-respawn');
+      expect(before?.reconnectPending).toBe(true);
+      expect(before?.reconnectTimer).toBeDefined();
+      await registryInternals.stop('no-respawn');
+      const after = registryInternals.servers.get('no-respawn');
+      // After stop: pending flag false, handle cleared, slot.client nulled.
+      expect(after?.reconnectPending).toBe(false);
+      expect(after?.reconnectTimer).toBeUndefined();
+      expect(after?.client).toBeUndefined();
     });
   });
 

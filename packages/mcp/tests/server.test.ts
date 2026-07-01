@@ -165,6 +165,49 @@ describe('serveStdio', () => {
     stdin.end();
     await expect(handle.done).resolves.toBeUndefined();
   });
+
+  it('done waits for in-flight writes to drain before resolving', async () => {
+    // Hosts that simulate async work ensure a real response is queued in
+    // writeChain when stdin ends. done must NOT resolve before that write
+    // lands on stdout — otherwise callers that `await handle.done` could
+    // close the process while the last response line is still buffered.
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const sawResponseLine = new Promise<void>((resolve) => {
+      stdout.on('data', (c: Buffer) => {
+        for (const l of c.toString('utf8').split('\n')) if (l.trim()) resolve();
+      });
+    });
+    const host: MCPServerToolHost = {
+      listTools: () => [],
+      callTool: async () => {
+        // Yield to the event loop so we deterministically schedule a write
+        // *after* the next stdin 'end' event.
+        await new Promise((r) => setTimeout(r, 5));
+        return { content: 'late', isError: false };
+      },
+    };
+    const handle = serveStdio(new MCPServer({ host }), { stdin, stdout });
+    stdin.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'any' } })}\n`,
+    );
+    stdin.end();
+    await expect(handle.done).resolves.toBeUndefined();
+    await expect(sawResponseLine).resolves.toBeUndefined();
+  });
+
+  it('aborts when a single line exceeds the buffer cap (no newline)', async () => {
+    // A misbehaving peer that streams bytes forever without `\n` would
+    // otherwise balloon the line buffer. The server must detect the cap,
+    // drop the unread tail, and resolve `done` cleanly.
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const handle = serveStdio(new MCPServer({ host: makeHost() }), { stdin, stdout });
+    // 5 MB of 'a' with no newline. The internal cap is 4 MiB.
+    stdin.write('a'.repeat(5 * 1024 * 1024));
+    stdin.end();
+    await expect(handle.done).resolves.toBeUndefined();
+  });
 });
 
 describe('serveHttp', () => {

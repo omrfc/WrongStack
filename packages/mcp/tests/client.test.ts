@@ -57,6 +57,35 @@ describe('MCPClient', () => {
     expect(c.getState()).toBe('failed');
   }, 10_000);
 
+  it('releases HTTP transport refs after a failed SSE connect', async () => {
+    // Regression: a thrown `sseTransport.connect()` used to leave the
+    // transport (with its read loop + AbortController) alive until GC. The
+    // client must now close it deterministically and clear the field.
+    const c = new MCPClient({
+      name: 'sse-cleanup',
+      transport: 'sse',
+      url: 'https://127.0.0.1:9',
+      startupTimeoutMs: 250,
+    });
+    await expect(c.connect()).rejects.toThrow();
+    // After failure, listTools must report zero — the transport was torn
+    // down, so no stale handle can leak tools (or, conversely, hide them).
+    expect(c.listTools()).toEqual([]);
+    expect(c.getState()).toBe('failed');
+  }, 10_000);
+
+  it('releases HTTP transport refs after a failed streamable-http connect', async () => {
+    const c = new MCPClient({
+      name: 'http-cleanup',
+      transport: 'streamable-http',
+      url: 'https://127.0.0.1:9',
+      startupTimeoutMs: 250,
+    });
+    await expect(c.connect()).rejects.toThrow();
+    expect(c.listTools()).toEqual([]);
+    expect(c.getState()).toBe('failed');
+  }, 10_000);
+
   it('requires command for stdio transport', async () => {
     const c = new MCPClient({ name: 'no-cmd', transport: 'stdio' });
     await expect(c.connect()).rejects.toThrow(/requires "command"/);

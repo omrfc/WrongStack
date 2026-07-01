@@ -1,9 +1,9 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import { MCP_CONSTANTS } from './constants.js';
 import { normalizeMCPTools } from './tool-schema.js';
 import { type HttpTransportOptions, SSETransport, StreamableHTTPTransport } from './transport.js';
-import { toErrorMessage } from '@wrongstack/core/utils';
 
 export type Transport = 'stdio' | 'sse' | 'streamable-http';
 
@@ -236,7 +236,7 @@ export class MCPClient {
         '[MCP] notify("notifications/initialized") failed for "' +
           this.opts.name +
           '": ' +
-          (toErrorMessage(err)),
+          toErrorMessage(err),
       );
     }
     const toolsRes = await this.request('tools/list', {});
@@ -292,6 +292,17 @@ export class MCPClient {
     try {
       await this.sseTransport.connect();
     } catch (err) {
+      // Tear down the partial transport deterministically: its SSE read
+      // loop is async-running on a `ReadableStreamDefaultReader`, and its
+      // `AbortController` is wired into the connect-time startup timer.
+      // Without this close(), the reader can keep the response body alive
+      // until GC. The transport is fresh (never reached the success
+      // path), so close() is safe and idempotent.
+      const t = this.sseTransport;
+      this.sseTransport = undefined;
+      await t.close().catch(() => {
+        /* best-effort cleanup */
+      });
       this.state = 'failed';
       throw err;
     }
@@ -341,6 +352,14 @@ export class MCPClient {
     try {
       await this.httpTransport.connect();
     } catch (err) {
+      // Same teardown reasoning as the SSE branch — the partial transport's
+      // `AbortController` and any in-flight header/state would otherwise
+      // outlive this client instance until GC.
+      const t = this.httpTransport;
+      this.httpTransport = undefined;
+      await t.close().catch(() => {
+        /* best-effort cleanup */
+      });
       this.state = 'failed';
       throw err;
     }
@@ -365,7 +384,9 @@ export class MCPClient {
     if (res.error) {
       return { content: res.error.message, isError: true };
     }
-    const result = res.result as { content?: unknown | undefined; isError?: boolean | undefined } | undefined;
+    const result = res.result as
+      | { content?: unknown | undefined; isError?: boolean | undefined }
+      | undefined;
     return {
       content: result?.content ?? '',
       isError: Boolean(result?.isError),
@@ -533,9 +554,7 @@ export class MCPClient {
         });
       }
     } catch (err) {
-      throw new Error(
-        `[MCP] notify("${method}") failed: ${toErrorMessage(err)}`,
-      );
+      throw new Error(`[MCP] notify("${method}") failed: ${toErrorMessage(err)}`);
     }
   }
 
@@ -553,7 +572,10 @@ export class MCPClient {
   private onLine(line: string): void {
     let msg: JsonRpcResponse & { method?: string | undefined; params?: unknown | undefined };
     try {
-      msg = JSON.parse(line) as JsonRpcResponse & { method?: string | undefined; params?: unknown | undefined };
+      msg = JSON.parse(line) as JsonRpcResponse & {
+        method?: string | undefined;
+        params?: unknown | undefined;
+      };
     } catch {
       return;
     }
@@ -581,7 +603,9 @@ export class MCPClient {
   private async handleToolsListChanged(): Promise<void> {
     try {
       const toolsRes = await this.request('tools/list', {});
-      const tools = normalizeMCPTools((toolsRes.result as { tools?: unknown | undefined } | undefined)?.tools);
+      const tools = normalizeMCPTools(
+        (toolsRes.result as { tools?: unknown | undefined } | undefined)?.tools,
+      );
       this._tools = tools;
       this._toolsCache = tools;
       for (const listener of this.toolsChangedListeners) {

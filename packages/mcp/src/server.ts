@@ -1,7 +1,7 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { expectDefined } from '@wrongstack/core';
-import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
-import { MCP_CONSTANTS } from './constants.js';
 import { toErrorMessage } from '@wrongstack/core/utils';
+import { MCP_CONSTANTS } from './constants.js';
 /**
  * Server-side MCP. The mirror image of `MCPClient`: instead of consuming a
  * remote MCP server, this lets WrongStack *be* an MCP server — exposing its
@@ -108,7 +108,11 @@ export class MCPServer {
     try {
       const result = await this.dispatch(msg.method, msg.params);
       if (result === METHOD_NOT_FOUND_SENTINEL) {
-        return this.encodeError(expectDefined(msg.id), METHOD_NOT_FOUND, `Method not found: ${msg.method}`);
+        return this.encodeError(
+          expectDefined(msg.id),
+          METHOD_NOT_FOUND,
+          `Method not found: ${msg.method}`,
+        );
       }
       return JSON.stringify({ jsonrpc: '2.0', id: msg.id, result });
     } catch (err) {
@@ -202,6 +206,7 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
   const stdout = opts.stdout ?? process.stdout;
   let buffer = '';
   let closed = false;
+  let bufferTooLarge = false;
   // Serialize writes so concurrent async handlers don't interleave lines.
   let writeChain: Promise<void> = Promise.resolve();
 
@@ -215,17 +220,48 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
       )
       .catch((err) => {
         const msg = toErrorMessage(err);
-        console.error(JSON.stringify({
-          level: 'error',
-          event: 'mcp_server.stdout_write_failed',
-          message: msg,
-          timestamp: new Date().toISOString(),
-        }));
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            event: 'mcp_server.stdout_write_failed',
+            message: msg,
+            timestamp: new Date().toISOString(),
+          }),
+        );
       });
   };
 
   const onData = (chunk: Buffer | string) => {
+    // A misbehaving peer that streams bytes forever without `\n` would
+    // otherwise balloon `buffer` indefinitely. Mirror the HTTP body cap
+    // (`HTTP_BODY_CAP` below) — once exceeded, abandon the line, drop the
+    // unread tail, and shut down so the caller can react.
+    if (bufferTooLarge) return;
     buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    if (buffer.length > HTTP_BODY_CAP) {
+      bufferTooLarge = true;
+      buffer = '';
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          event: 'mcp_server.line_buffer_overflow',
+          message: `stdio line exceeded ${HTTP_BODY_CAP} bytes without newline — aborting stream`,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+      // Pause and tear down further reads so the caller sees a clean end.
+      // `destroy()` is called WITHOUT an error so the stream's 'error' event
+      // isn't emitted (PassThrough/mocked streams would otherwise emit
+      // unhandled 'error' that callers must drain).
+      try {
+        (stdin as { pause?: () => void }).pause?.();
+        (stdin as { destroy?: () => void }).destroy?.();
+      } catch {
+        /* ignore */
+      }
+      onEnd();
+      return;
+    }
     let idx = buffer.indexOf('\n');
     while (idx !== -1) {
       const line = buffer.slice(0, idx);
@@ -235,24 +271,39 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
       void server
         .handleMessage(line)
         .then((res) => {
-          if (res !== null && !closed) writeLine(res);
+          // Always flush responses for in-flight requests, even after
+          // the stream ended: `done` waits on writeChain, so dropping a
+          // late response here would mean `done` resolves without that
+          // line ever landing on stdout. Stopping new reads is `onEnd`'s
+          // job — not gating writes.
+          if (res !== null) writeLine(res);
         })
         .catch((err) => {
           // Malformed JSON from a peer — log and continue so one bad line
           // doesn't kill the entire session.
-          console.error(JSON.stringify({
-            level: 'error',
-            event: 'mcp_server.handle_message_failed',
-            message: toErrorMessage(err),
-            timestamp: new Date().toISOString(),
-          }));
+          console.error(
+            JSON.stringify({
+              level: 'error',
+              event: 'mcp_server.handle_message_failed',
+              message: toErrorMessage(err),
+              timestamp: new Date().toISOString(),
+            }),
+          );
         });
     }
   };
 
   let resolveDone!: () => void;
+  // `done` resolves once the stream has closed AND any in-flight writes have
+  // drained. Without the writeChain tail-call, a caller that awaits
+  // `handle.done` after stdin ends could see `done` resolve before the last
+  // response line lands on stdout — useful, e.g., for closing a wrapper
+  // process and being sure the stdout pipe is fully flushed.
   const done = new Promise<void>((resolve) => {
-    resolveDone = resolve;
+    resolveDone = () => {
+      // Chain onto writeChain so `done` only resolves once writes drain.
+      void writeChain.then(() => resolve());
+    };
   });
 
   const onEnd = () => {
