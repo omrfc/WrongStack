@@ -48,6 +48,8 @@ const MAILBOX_FILE = '_mailbox.jsonl';
 const CLIENT_REGISTRY_FILE = '_mailbox.clients.json';
 /** Agents without a heartbeat for this long are considered offline. */
 const AGENT_STALE_MS = 60_000;
+/** Agents without a heartbeat for this long are removed from the registry entirely. */
+const AGENT_PURGE_MS = 86_400_000; // 24 hours
 /** Clients without a heartbeat for this long are considered offline. */
 const CLIENT_STALE_MS = 60_000;
 /** Heartbeat updates are throttled to at most this interval. */
@@ -204,7 +206,11 @@ export class GlobalMailbox implements Mailbox {
       this._pushToCache(msg);
     });
 
-    this.publishHqMailboxEvent({ mailboxId: this.hqMailboxId, action: 'message.sent', message: msg });
+    this.publishHqMailboxEvent({
+      mailboxId: this.hqMailboxId,
+      action: 'message.sent',
+      message: msg,
+    });
     this.publishHqMailboxSnapshot();
     return msg;
   }
@@ -216,9 +222,7 @@ export class GlobalMailbox implements Mailbox {
     // Single-pass filter — previously 7 chained .filter() allocations each
     // producing a fresh array. Predicates are independent, so we can AND
     // them in one walk and short-circuit per element.
-    const order = q.minPriority !== undefined
-      ? { low: 0, normal: 1, high: 2 } as const
-      : null;
+    const order = q.minPriority !== undefined ? ({ low: 0, normal: 1, high: 2 } as const) : null;
     const minPriorityRank = order && q.minPriority !== undefined ? order[q.minPriority] : 0;
     const out: MailboxMessage[] = [];
     for (let i = 0; i < all.length; i++) {
@@ -228,10 +232,7 @@ export class GlobalMailbox implements Mailbox {
       if (q.unreadBy !== undefined && q.unreadBy in m.readBy) continue;
       if (q.incompleteOnly && m.completed) continue;
       if (q.type !== undefined && m.type !== q.type) continue;
-      if (
-        order !== null &&
-        (order[m.priority as keyof typeof order] ?? 1) < minPriorityRank!
-      ) {
+      if (order !== null && (order[m.priority as keyof typeof order] ?? 1) < minPriorityRank!) {
         continue;
       }
       if (q.since !== undefined && m.timestamp <= q.since) continue;
@@ -297,8 +298,7 @@ export class GlobalMailbox implements Mailbox {
       // a re-ack of an already-read message is now a no-op on disk, where
       // previously it was a full rewrite.
       if (changed) {
-        const serialized =
-          all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
+        const serialized = all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
         await fsp.writeFile(this.messagePath, serialized, 'utf8');
       }
       // We always hold the authoritative post-read snapshot (we read fresh
@@ -369,8 +369,11 @@ export class GlobalMailbox implements Mailbox {
 
     // Emit event for TUI/WebUI to update online agent count
     this._events?.emitCustom('mailbox.agent_registered', {
-      agentId: input.agentId, sessionId: input.sessionId,
-      name: input.name, role: input.role, source: input.source,
+      agentId: input.agentId,
+      sessionId: input.sessionId,
+      name: input.name,
+      role: input.role,
+      source: input.source,
     });
     this.publishHqMailboxEvent({
       mailboxId: this.hqMailboxId,
@@ -388,6 +391,46 @@ export class GlobalMailbox implements Mailbox {
         online: true,
         pid: input.pid,
         ...(input.source !== undefined ? { source: input.source } : {}),
+      },
+    });
+    this.publishHqMailboxSnapshot();
+  }
+
+  async deregisterAgent(agentId: string): Promise<void> {
+    await this._ensureRegistry();
+    let removed: RegisteredAgent | undefined;
+    await withFileLock(this.registryPath, async () => {
+      const registry = await this._readRegistry({ fresh: true });
+      this._pruneStaleInPlace(registry);
+      // Capture the record before deletion so HQ telemetry can emit a full,
+      // well-typed agent summary rather than a bare id.
+      removed = registry.get(agentId);
+      registry.delete(agentId);
+      this._registryCache = registry;
+      this._registryCacheAt = Date.now();
+      await this._writeRegistry(registry);
+    });
+    this._events?.emitCustom('mailbox.agent_deregistered', {
+      agentId,
+    });
+    this.publishHqMailboxEvent({
+      mailboxId: this.hqMailboxId,
+      action: 'agent.deregistered',
+      agent: {
+        agentId,
+        name: removed?.name ?? agentId,
+        ...(removed?.role !== undefined ? { role: removed.role } : {}),
+        sessionId: removed?.sessionId ?? '',
+        status: 'offline',
+        ...(removed?.currentTool !== undefined ? { currentTool: removed.currentTool } : {}),
+        ...(removed?.currentTask !== undefined ? { currentTask: removed.currentTask } : {}),
+        iterations: removed?.iterations ?? 0,
+        toolCalls: removed?.toolCalls ?? 0,
+        lastActivityAt: removed?.lastSeenAt ?? new Date().toISOString(),
+        lastSeenAt: removed?.lastSeenAt ?? new Date().toISOString(),
+        online: false,
+        pid: removed?.pid ?? 0,
+        ...(removed?.source !== undefined ? { source: removed.source } : {}),
       },
     });
     this.publishHqMailboxSnapshot();
@@ -793,11 +836,7 @@ export class GlobalMailbox implements Mailbox {
    * that `messages` reflects the current on-disk state (e.g. they just
    * read or wrote it under the file lock).
    */
-  private _setMessageCache(
-    messages: MailboxMessage[],
-    mtime?: number,
-    size?: number,
-  ): void {
+  private _setMessageCache(messages: MailboxMessage[], mtime?: number, size?: number): void {
     // Bound the cache so a runaway mailbox can't balloon memory. The cap
     // is high enough that any realistic project mailbox fits; if it ever
     // exceeds the cap we just refuse to cache and the next read goes to
@@ -892,12 +931,25 @@ export class GlobalMailbox implements Mailbox {
   }
 
   private _pruneStaleInPlace(registry: Map<string, RegisteredAgent>): void {
-    const cutoff = Date.now() - AGENT_STALE_MS;
-    for (const agent of registry.values()) {
-      if (new Date(agent.lastSeenAt).getTime() < cutoff) {
-        agent.status = 'idle'; // preserve entry but mark as offline
-        // Note: we don't delete — the WebUI wants to show recently-offline agents
+    const staleCutoff = Date.now() - AGENT_STALE_MS;
+    const purgeCutoff = Date.now() - AGENT_PURGE_MS;
+    const toDelete: string[] = [];
+    for (const [id, agent] of registry) {
+      const lastSeen = new Date(agent.lastSeenAt).getTime();
+      // Delete entries past the purge threshold entirely
+      if (lastSeen < purgeCutoff) {
+        toDelete.push(id);
+        continue;
       }
+      // Mark stale agents as idle. Online/offline is a derived view built in
+      // getAgentStatuses() from lastSeenAt freshness — RegisteredAgent has no
+      // `online` field, so we only normalize the persisted status here.
+      if (lastSeen < staleCutoff) {
+        agent.status = 'idle';
+      }
+    }
+    for (const id of toDelete) {
+      registry.delete(id);
     }
   }
 
@@ -917,9 +969,9 @@ export class GlobalMailbox implements Mailbox {
     await fsp.mkdir(path.dirname(this.clientRegistryPath), { recursive: true });
   }
 
-  private async _readClientRegistry(
-    opts?: { fresh?: boolean },
-  ): Promise<Map<string, RegisteredClient>> {
+  private async _readClientRegistry(opts?: {
+    fresh?: boolean;
+  }): Promise<Map<string, RegisteredClient>> {
     if (
       !opts?.fresh &&
       this._clientRegistryCache &&

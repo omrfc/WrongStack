@@ -68,6 +68,7 @@ export function createAgentResponseHandler(a: AgentInternals): AgentResponseHand
     a.events.emit('provider.response', {
       sessionId: a.ctx.session.id,
       ctx: a.ctx,
+      model: req.model,
       usage: res.usage,
       stopReason: res.stopReason,
     });

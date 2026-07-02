@@ -137,7 +137,7 @@ export class DefaultMailbox implements Mailbox {
     }
 
     const limit = q.limit ?? 50;
-    const order = q.minPriority !== undefined ? { low: 0, normal: 1, high: 2 } as const : null;
+    const order = q.minPriority !== undefined ? ({ low: 0, normal: 1, high: 2 } as const) : null;
     const minPriorityRank = order && q.minPriority !== undefined ? order[q.minPriority] : 0;
     const passes = (msg: MailboxMessage): boolean => {
       if (q.to !== undefined && msg.to !== q.to && msg.to !== '*') return false;
@@ -145,7 +145,8 @@ export class DefaultMailbox implements Mailbox {
       if (q.unreadBy !== undefined && q.unreadBy in msg.readBy) return false;
       if (q.incompleteOnly && msg.completed) return false;
       if (q.type !== undefined && msg.type !== q.type) return false;
-      if (order !== null && (order[msg.priority as keyof typeof order] ?? 1) < minPriorityRank) return false;
+      if (order !== null && (order[msg.priority as keyof typeof order] ?? 1) < minPriorityRank)
+        return false;
       if (q.since !== undefined && msg.timestamp <= q.since) return false;
       return true;
     };
@@ -218,8 +219,7 @@ export class DefaultMailbox implements Mailbox {
         }
       }
       if (changed) {
-        const serialized =
-          all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
+        const serialized = all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
         await fsp.writeFile(this.filePath, serialized, 'utf8');
       }
       // Stat synchronously under the same file lock that protected the
@@ -278,6 +278,10 @@ export class DefaultMailbox implements Mailbox {
     // no-op: per-session mailbox doesn't track agents globally
   }
 
+  async deregisterAgent(_agentId: string): Promise<void> {
+    // no-op: per-session mailbox doesn't track agents globally
+  }
+
   async heartbeat(_input: AgentHeartbeatInput): Promise<void> {
     // no-op: per-session mailbox doesn't track heartbeats
   }
@@ -285,10 +289,7 @@ export class DefaultMailbox implements Mailbox {
   async unreadCount(forAgentId: string): Promise<number> {
     const all = await this._readAllCached();
     return all.filter(
-      (m) =>
-        (m.to === forAgentId || m.to === '*') &&
-        !(forAgentId in m.readBy) &&
-        !m.completed,
+      (m) => (m.to === forAgentId || m.to === '*') && !(forAgentId in m.readBy) && !m.completed,
     ).length;
   }
 
@@ -424,7 +425,9 @@ export class DefaultMailbox implements Mailbox {
         this._indexMsg(msg);
       } catch (err) {
         this._corruptionCount++;
-        console.debug(`[mailbox] skipped malformed line during incremental read: ${(err as Error).message}`);
+        console.debug(
+          `[mailbox] skipped malformed line during incremental read: ${(err as Error).message}`,
+        );
       }
     }
     return this._messageCache!;
@@ -449,7 +452,9 @@ export class DefaultMailbox implements Mailbox {
         messages.push(parsed as never as MailboxMessage);
       } catch (err) {
         this._corruptionCount++;
-        console.debug(`[mailbox] skipped malformed line during full parse: ${(err as Error).message}`);
+        console.debug(
+          `[mailbox] skipped malformed line during full parse: ${(err as Error).message}`,
+        );
       }
     }
     return messages;

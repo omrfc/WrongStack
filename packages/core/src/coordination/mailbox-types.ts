@@ -28,17 +28,17 @@
 // ── Message type discriminator ───────────────────────────────────────────
 
 export type MailboxMessageType =
-  | 'note'       // informational message
-  | 'ask'        // question / request for advice
-  | 'assign'     // task assignment
-  | 'steer'      // steering instruction (change behavior mid-task)
-  | 'btw'        // "by the way" — non-urgent info
-  | 'broadcast'  // sent to all agents
-  | 'status'     // agent status update
-  | 'result'     // task result / completion notice
-  | 'review'     // review request (code/doc/PR) — passive ask, no reply required
-  | 'control';   // out-of-band control signal (e.g. interrupt) — handled by
-                 // the agent loop, NOT folded into the conversation as content
+  | 'note' // informational message
+  | 'ask' // question / request for advice
+  | 'assign' // task assignment
+  | 'steer' // steering instruction (change behavior mid-task)
+  | 'btw' // "by the way" — non-urgent info
+  | 'broadcast' // sent to all agents
+  | 'status' // agent status update
+  | 'result' // task result / completion notice
+  | 'review' // review request (code/doc/PR) — passive ask, no reply required
+  | 'control'; // out-of-band control signal (e.g. interrupt) — handled by
+// the agent loop, NOT folded into the conversation as content
 
 // ── Read receipt ─────────────────────────────────────────────────────────
 
@@ -384,6 +384,8 @@ export interface Mailbox {
    * Subsequent calls are idempotent — they update lastSeenAt.
    */
   registerAgent(input: AgentRegistrationInput): Promise<void>;
+  /** Remove an agent from the registry entirely. Called on session shutdown. */
+  deregisterAgent(agentId: string): Promise<void>;
 
   /**
    * Update agent heartbeat and optional status fields.

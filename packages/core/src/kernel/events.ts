@@ -5,7 +5,12 @@
 
 import type { BrainDecision, BrainDecisionRequest } from '../coordination/brain.js';
 import type { Context } from '../core/context.js';
-import type { MemoryClearedPayload, MemoryConsolidatedPayload, MemoryForgottenPayload, MemoryRememberedPayload } from '../types/memory.js';
+import type {
+  MemoryClearedPayload,
+  MemoryConsolidatedPayload,
+  MemoryForgottenPayload,
+  MemoryRememberedPayload,
+} from '../types/memory.js';
 import type { PermissionDecision } from '../types/permission.js';
 import type { Usage } from '../types/provider.js';
 import type { RiskTier, Tool, ToolErrorCategory, ToolProgressEvent } from '../types/tool.js';
@@ -35,8 +40,17 @@ export interface TrackedAgentSnapshot {
 }
 
 export interface EventMap {
-  'brain.decision_requested': { sessionId?: string | undefined; request: BrainDecisionRequest; at: number };
-  'brain.decision_answered': { sessionId?: string | undefined; request: BrainDecisionRequest; decision: BrainDecision; at: number };
+  'brain.decision_requested': {
+    sessionId?: string | undefined;
+    request: BrainDecisionRequest;
+    at: number;
+  };
+  'brain.decision_answered': {
+    sessionId?: string | undefined;
+    request: BrainDecisionRequest;
+    decision: BrainDecision;
+    at: number;
+  };
   'brain.decision_ask_human': {
     sessionId?: string | undefined;
     request: BrainDecisionRequest;
@@ -51,7 +65,12 @@ export interface EventMap {
     text?: string | undefined;
     at: number;
   };
-  'brain.decision_denied': { sessionId?: string | undefined; request: BrainDecisionRequest; decision: BrainDecision; at: number };
+  'brain.decision_denied': {
+    sessionId?: string | undefined;
+    request: BrainDecisionRequest;
+    decision: BrainDecision;
+    at: number;
+  };
   /**
    * Fired by the BrainMonitor when it PROACTIVELY engaged (self-activation):
    * a watched signal (tool-failure streak, error storm) crossed its
@@ -76,7 +95,10 @@ export interface EventMap {
    * bridge) read this to build live snapshots without re-reading the shared
    * session-registry file.
    */
-  'session.agents_updated': { sessionId?: string | undefined; agents: readonly TrackedAgentSnapshot[] };
+  'session.agents_updated': {
+    sessionId?: string | undefined;
+    agents: readonly TrackedAgentSnapshot[];
+  };
   /**
    * Fired around a single Agent.run() call. Status trackers use these to
    * measure active-run elapsed time instead of inferring it from iterations.
@@ -90,7 +112,13 @@ export interface EventMap {
     at: string;
     durationMs: number;
   };
-  'agent.run.error': { sessionId?: string | undefined; ctx: Context; err: Error; at: string; durationMs: number };
+  'agent.run.error': {
+    sessionId?: string | undefined;
+    ctx: Context;
+    err: Error;
+    at: string;
+    durationMs: number;
+  };
   'iteration.started': { sessionId?: string | undefined; ctx: Context; index: number };
   'iteration.completed': { sessionId?: string | undefined; ctx: Context; index: number };
   /**
@@ -105,18 +133,39 @@ export interface EventMap {
     grant: (extraIterations: number) => void;
     deny: () => void;
   };
-  'provider.response': { sessionId?: string | undefined; ctx: Context; usage: Usage; stopReason: string };
+  'provider.response': {
+    sessionId?: string | undefined;
+    ctx: Context;
+    model: string;
+    usage: Usage;
+    stopReason: string;
+  };
   'provider.text_delta': { sessionId?: string | undefined; ctx: Context; text: string };
   'provider.thinking_delta': { sessionId?: string | undefined; ctx: Context; text: string };
-  'provider.tool_use_start': { sessionId?: string | undefined; ctx: Context; id: string; name: string };
-  'provider.tool_use_stop': { sessionId?: string | undefined; ctx: Context; id: string; name: string };
+  'provider.tool_use_start': {
+    sessionId?: string | undefined;
+    ctx: Context;
+    id: string;
+    name: string;
+  };
+  'provider.tool_use_stop': {
+    sessionId?: string | undefined;
+    ctx: Context;
+    id: string;
+    name: string;
+  };
   /**
    * Fired when a single SSE event handler throws mid-stream. Best-effort: the
    * malformed event is skipped and the partial response built from earlier
    * events is preserved, so the stream is not aborted. `eventType` is the SSE
    * event's `type`; `msg` is the handler error message.
    */
-  'provider.stream_error': { sessionId?: string | undefined; ctx: Context; eventType: string; msg: string };
+  'provider.stream_error': {
+    sessionId?: string | undefined;
+    ctx: Context;
+    eventType: string;
+    msg: string;
+  };
   /**
    * Fired before each retry of a failed provider call. `attempt` is 1-based
    * (the first retry is attempt 1, etc.). `description` is the human-readable
@@ -156,7 +205,12 @@ export interface EventMap {
     status: number;
     providerSwitched: boolean;
   };
-  'tool.started': { sessionId?: string | undefined; name: string; id: string; input?: unknown | undefined };
+  'tool.started': {
+    sessionId?: string | undefined;
+    name: string;
+    id: string;
+    input?: unknown | undefined;
+  };
   /**
    * Fired when a tool call finishes successfully. Metrics collectors can count
    * calls and build latency histograms without parsing renderer output.
@@ -192,7 +246,12 @@ export interface EventMap {
    * subscribe to render incremental progress (streaming bash output, file
    * tree counts, etc.) without the tool having to know about the UI.
    */
-  'tool.progress': { sessionId?: string | undefined; name: string; id: string; event: ToolProgressEvent };
+  'tool.progress': {
+    sessionId?: string | undefined;
+    name: string;
+    id: string;
+    event: ToolProgressEvent;
+  };
   /** Cache hit on session store load — used by observability layers. */
   'storage.cache_hit': {
     sessionId: string;
@@ -392,7 +451,14 @@ export interface EventMap {
     sessionId?: string | undefined;
     subagentId: string;
     agentName: string;
-    status: 'spawned' | 'running' | 'completed' | 'failed' | 'timeout' | 'stopped' | 'budget_exhausted';
+    status:
+      | 'spawned'
+      | 'running'
+      | 'completed'
+      | 'failed'
+      | 'timeout'
+      | 'stopped'
+      | 'budget_exhausted';
     /** ISO 8601 timestamp. */
     ts: string;
     /** Human-readable summary or error message. */
@@ -494,16 +560,18 @@ export interface EventMap {
     /** Provider's max context window in tokens. */
     maxContext: number;
     /** Budget snapshot used for the compaction decision. */
-    budget?: {
-      maxContext: number;
-      inputTokens: number;
-      availableInputTokens: number;
-      remainingInputTokens: number;
-      reservedOutputTokens: number;
-      reservedSafetyTokens: number;
-      load: number;
-      overflowTokens: number;
-    } | undefined;
+    budget?:
+      | {
+          maxContext: number;
+          inputTokens: number;
+          availableInputTokens: number;
+          remainingInputTokens: number;
+          reservedOutputTokens: number;
+          reservedSafetyTokens: number;
+          load: number;
+          overflowTokens: number;
+        }
+      | undefined;
     /** Adaptive trigger signals observed alongside token pressure. */
     signals?: { repeatedReadCount?: number | undefined } | undefined;
     /** Full compaction report from the compactor. */
@@ -525,16 +593,18 @@ export interface EventMap {
     level: 'warn' | 'soft' | 'hard';
     tokens: number;
     maxContext: number;
-    budget?: {
-      maxContext: number;
-      inputTokens: number;
-      availableInputTokens: number;
-      remainingInputTokens: number;
-      reservedOutputTokens: number;
-      reservedSafetyTokens: number;
-      load: number;
-      overflowTokens: number;
-    } | undefined;
+    budget?:
+      | {
+          maxContext: number;
+          inputTokens: number;
+          availableInputTokens: number;
+          remainingInputTokens: number;
+          reservedOutputTokens: number;
+          reservedSafetyTokens: number;
+          load: number;
+          overflowTokens: number;
+        }
+      | undefined;
     signals?: { repeatedReadCount?: number | undefined } | undefined;
     load: number;
     fatal: boolean;
@@ -663,7 +733,9 @@ export interface EventMap {
           message: string;
           retryable: boolean;
           backoffMs?: number | undefined;
-          cause?: { name: string | undefined; message: string; stack?: string | undefined } | undefined;
+          cause?:
+            | { name: string | undefined; message: string; stack?: string | undefined }
+            | undefined;
         }
       | undefined;
     /** Final assistant text from the subagent's last turn. */
@@ -725,19 +797,52 @@ export interface EventMap {
     worktreeBranch?: string | undefined;
   };
   /** A task finished successfully. */
-  'sdd.task.completed': { sessionId?: string | undefined; runId: string; taskId: string; subagentId: string; durationMs: number };
+  'sdd.task.completed': {
+    sessionId?: string | undefined;
+    runId: string;
+    taskId: string;
+    subagentId: string;
+    durationMs: number;
+  };
   /** A task failed terminally (retries exhausted). */
-  'sdd.task.failed': { sessionId?: string | undefined; runId: string; taskId: string; subagentId: string; error: string };
+  'sdd.task.failed': {
+    sessionId?: string | undefined;
+    runId: string;
+    taskId: string;
+    subagentId: string;
+    error: string;
+  };
   /** A failed task was requeued for another attempt. */
-  'sdd.task.retrying': { sessionId?: string | undefined; runId: string; taskId: string; attempt: number; maxRetries: number };
+  'sdd.task.retrying': {
+    sessionId?: string | undefined;
+    runId: string;
+    taskId: string;
+    attempt: number;
+    maxRetries: number;
+  };
   /** A task's worker reported success but the post-task verification gate rejected it. */
-  'sdd.task.verification_failed': { sessionId?: string | undefined; runId: string; taskId: string; reason: string };
+  'sdd.task.verification_failed': {
+    sessionId?: string | undefined;
+    runId: string;
+    taskId: string;
+    reason: string;
+  };
   /** A completed task's worktree could not be merged back into the base branch. */
-  'sdd.task.conflict': { sessionId?: string | undefined; runId: string; taskId: string; conflictFiles: string[] };
+  'sdd.task.conflict': {
+    sessionId?: string | undefined;
+    runId: string;
+    taskId: string;
+    conflictFiles: string[];
+  };
   /** A completed task's worktree was squash-merged onto the base branch (sha = the run commit). */
   'sdd.task.merged': { sessionId?: string | undefined; runId: string; taskId: string; sha: string };
   /** A task was split into sub-tasks (the parent becomes a completed container). */
-  'sdd.task.split': { sessionId?: string | undefined; runId: string; taskId: string; subtaskIds: string[] };
+  'sdd.task.split': {
+    sessionId?: string | undefined;
+    runId: string;
+    taskId: string;
+    subtaskIds: string[];
+  };
   /** The supervisor made a decision about a failing/stuck task. */
   'sdd.supervisor.decision': {
     sessionId?: string | undefined;
@@ -781,13 +886,22 @@ export interface EventMap {
    */
   'in_flight.started': { sessionId?: string | undefined; context: string; ts: string };
   /** Fired by SessionWriter.clearInFlightMarker() — operation completed cleanly. */
-  'in_flight.ended': { sessionId?: string | undefined; reason: 'clean' | 'aborted' | 'recovered'; ts: string };
+  'in_flight.ended': {
+    sessionId?: string | undefined;
+    reason: 'clean' | 'aborted' | 'recovered';
+    ts: string;
+  };
   /**
    * Fired after a session rewind completes: files are reverted and the session
    * history is truncated. The TUI listens to this to update its checkpoint
    * list and clear history entries that are now invalid.
    */
-  'session.rewound': { sessionId?: string | undefined; toPromptIndex: number; revertedFiles: string[]; removedEvents: number };
+  'session.rewound': {
+    sessionId?: string | undefined;
+    toPromptIndex: number;
+    revertedFiles: string[];
+    removedEvents: number;
+  };
   /**
    * Fired by the multi-agent coordinator on FleetBus whenever subagent
    * counts change (spawn/stop/complete). The TUI subscribes to render
@@ -851,7 +965,13 @@ export interface EventMap {
     branch: string;
     conflictFiles: string[];
   };
-  'worktree.released': { sessionId?: string | undefined; handleId: string; ownerId: string; branch: string; kept: boolean };
+  'worktree.released': {
+    sessionId?: string | undefined;
+    handleId: string;
+    ownerId: string;
+    branch: string;
+    kept: boolean;
+  };
   'worktree.failed': {
     sessionId?: string | undefined;
     handleId: string;
@@ -881,7 +1001,19 @@ export interface EventMap {
   'storage.read': {
     sessionId: string;
     /** Which store was read. */
-    store: 'session' | 'goal' | 'plan' | 'project' | 'todos' | 'queue' | 'tasks' | 'memory' | 'annotations' | 'audit' | 'replay' | 'config';
+    store:
+      | 'session'
+      | 'goal'
+      | 'plan'
+      | 'project'
+      | 'todos'
+      | 'queue'
+      | 'tasks'
+      | 'memory'
+      | 'annotations'
+      | 'audit'
+      | 'replay'
+      | 'config';
     filePath: string;
     /** Session store: load|list|summary|index_read. Goal store: load. Plan store: load. Memory store: readAll. Annotations: list. Audit: verify|load. Replay: load|lookup. Config: read_json|load_sync. */
     operation: string;
@@ -896,7 +1028,19 @@ export interface EventMap {
    */
   'storage.write': {
     sessionId: string;
-    store: 'session' | 'goal' | 'plan' | 'project' | 'todos' | 'queue' | 'tasks' | 'memory' | 'annotations' | 'audit' | 'replay' | 'config';
+    store:
+      | 'session'
+      | 'goal'
+      | 'plan'
+      | 'project'
+      | 'todos'
+      | 'queue'
+      | 'tasks'
+      | 'memory'
+      | 'annotations'
+      | 'audit'
+      | 'replay'
+      | 'config';
     filePath: string;
     /** Session store: create|resume|append|flush|close|index_append|compact|checkpoint.
      * Goal store: save|update|delete. Plan store: save. Project manifest: manifest_write.
@@ -915,7 +1059,19 @@ export interface EventMap {
    */
   'storage.error': {
     sessionId: string;
-    store: 'session' | 'goal' | 'plan' | 'project' | 'todos' | 'queue' | 'tasks' | 'memory' | 'annotations' | 'audit' | 'replay' | 'config';
+    store:
+      | 'session'
+      | 'goal'
+      | 'plan'
+      | 'project'
+      | 'todos'
+      | 'queue'
+      | 'tasks'
+      | 'memory'
+      | 'annotations'
+      | 'audit'
+      | 'replay'
+      | 'config';
     filePath: string;
     operation: string;
     outcome?: 'failure';
@@ -947,7 +1103,12 @@ export interface EventMap {
     timestamp: number;
     projectSlug: string;
   };
-  error: { sessionId?: string | undefined; err: Error; phase: string; _original?: Error | undefined };
+  error: {
+    sessionId?: string | undefined;
+    err: Error;
+    phase: string;
+    _original?: Error | undefined;
+  };
 }
 
 export type EventName = keyof EventMap;
