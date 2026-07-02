@@ -25,7 +25,12 @@ import { describe, expect, it } from 'vitest';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
 const typesFile = path.join(repoRoot, 'packages/webui/src/types.ts');
-const embeddedPath = path.join(repoRoot, 'packages/cli/src/webui-server.ts');
+// PR 15 of Issue #30 moved the wsRoutes table + prefix fallback out of
+// webui-server.ts into webui-server/message-router.ts — scan both.
+const embeddedPaths = [
+  path.join(repoRoot, 'packages/cli/src/webui-server.ts'),
+  path.join(repoRoot, 'packages/cli/src/webui-server/message-router.ts'),
+];
 const standalonePaths = [
   path.join(repoRoot, 'packages/webui/src/server/index.ts'),
   path.join(repoRoot, 'packages/webui/src/server/message-dispatcher.ts'),
@@ -156,16 +161,18 @@ const NON_WS_CASE_LABELS = new Set(['absent', 'live', 'probe-failed']);
 
 describe('WebUI WS-handler parity (embedded vs standalone)', () => {
   it('both server files exist and have message-type cases', () => {
-    expect(fs.existsSync(embeddedPath)).toBe(true);
+    for (const embeddedPath of embeddedPaths) {
+      expect(fs.existsSync(embeddedPath)).toBe(true);
+    }
     for (const standalonePath of standalonePaths) {
       expect(fs.existsSync(standalonePath)).toBe(true);
     }
-    expect(caseLabels(embeddedPath).size).toBeGreaterThan(50);
+    expect(caseLabels(embeddedPaths).size).toBeGreaterThan(50);
     expect(caseLabels(standalonePaths).size).toBeGreaterThan(50);
   });
 
   it('handles an identical set of WS message types in both servers', () => {
-    const embedded = caseLabels(embeddedPath);
+    const embedded = caseLabels(embeddedPaths);
     const standalone = caseLabels(standalonePaths);
 
     const onlyEmbedded = [...embedded].filter((t) => !NON_WS_CASE_LABELS.has(t) && !standalone.has(t)).sort();
@@ -189,9 +196,9 @@ describe('WebUI WS-handler parity (embedded vs standalone)', () => {
     const canon = canonicalClientTypes();
     expect(canon.size).toBeGreaterThan(100);
 
-    const embeddedCases = caseLabels(embeddedPath);
+    const embeddedCases = caseLabels(embeddedPaths);
     const standaloneCases = caseLabels(standalonePaths);
-    const embeddedPrefixes = delegatedPrefixes(embeddedPath);
+    const embeddedPrefixes = delegatedPrefixes(embeddedPaths);
     const standalonePrefixes = delegatedPrefixes(standalonePaths);
 
     const unhandledBy = (cases: Set<string>, prefixes: Set<string>): string[] =>
