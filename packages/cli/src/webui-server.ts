@@ -133,7 +133,6 @@ import {
   handleDesignUse,
   handleDesignState,
   handleDesignVerify,
-  verifyClient as verifyWsClient,
   WorktreeWebSocketHandler,
 } from '@wrongstack/webui/server';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -156,6 +155,7 @@ import { createSessionStartPayloadBuilder } from './webui-server/session-start-p
 import { createStreamCoalescer } from './webui-server/stream-coalescer.js';
 import { createSetupEvents } from './webui-server/setup-events.js';
 import { startSessionStatusPoll } from './webui-server/session-status-poll.js';
+import { createConnectionHandler, type ConnectedClient } from './webui-server/connection-handler.js';
 import { startStaticServe } from './webui-server/static-serve.js';
 import {
   type AgentConfigContext,
@@ -229,7 +229,6 @@ import {
   handleToolsList,
   handleUserMessage,
   handleWorkingDirSet,
-  resolveAllPendingConfirms,
   type IntrospectionContext,
   type MailboxContext,
   type PendingConfirm,
@@ -383,10 +382,8 @@ interface CliWebUIOptions {
   onYoloSwitch?: ((enabled: boolean) => void) | undefined;
 }
 
-interface ConnectedClient {
-  ws: WebSocket;
-  sessionId: string | null;
-}
+// ConnectedClient is defined in ./webui-server/connection-handler.ts (PR 14
+// of Issue #30) — imported below alongside createConnectionHandler.
 
 export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   const host = opts.host ?? process.env['WEBUI_HOST'] ?? process.env['WS_HOST'] ?? '127.0.0.1';
@@ -915,128 +912,35 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
     });
 
-    wss.on('connection', async (ws, req) => {
-      // Per-connection error handler, attached FIRST (before any awaited
-      // work or even the auth check). Without it, a socket-level error —
-      // most notably an oversized inbound frame (the `ws` receiver throws
-      // `RangeError: Max payload size exceeded`, close 1009, once a client
-      // sends more than `maxPayload`) — is emitted as an unhandled 'error'
-      // on this socket and crashes the whole process. `wss.on('error')`
-      // only catches SERVER-level errors, not per-connection ones.
-      ws.on('error', (err) => {
-        console.warn(
-          JSON.stringify({
-            level: 'warn',
-            event: 'webui_server.client_socket_error',
-            message: err instanceof Error ? err.message : String(err),
-            timestamp: new Date().toISOString(),
-          }),
-        );
-      });
-
-      // --- Auth: DNS-rebinding guard + token (cookie or URL) + loopback
-      // bootstrap. Delegated to the shared `verifyClient` (ws-auth.ts) so the
-      // embedded server enforces the SAME policy as the standalone one — most
-      // importantly the HttpOnly `ws_token` cookie set by `/ws-auth`, and a
-      // SINGLE token (`wsToken`).
-      //
-      // This used to be an inline check that (a) validated `?token=` against a
-      // SECOND, unrelated `authToken` (never the `wsToken` that lands in the
-      // URL / cookie / `/api/*`), and (b) ignored the cookie entirely. On
-      // loopback the origin bootstrap masked the mismatch, but the cookie path
-      // was dead and a LAN bind (`WS_HOST=0.0.0.0`) could never authenticate.
-      const ok = verifyWsClient({
-        origin: req.headers.origin,
-        url: req.url ?? '/',
-        hostHeader: req.headers.host,
-        remoteAddress: req.socket.remoteAddress,
-        cookieHeader: req.headers.cookie,
-        wsHost: host,
-        expectedToken: wsToken,
+    // WebSocket connection handler — per-tab error handling, auth, client
+    // registration, rate limiting, message dispatch, close cleanup, and the
+    // initial session.start push. PR 14 of Issue #30: extracted to
+    // `./webui-server/connection-handler.ts`.
+    wss.on(
+      'connection',
+      createConnectionHandler({
+        host,
+        wsToken,
         requireToken,
-        allowedHostnames: publicHostnames,
-        allowBrowserUrlToken: Boolean(publicWsUrl),
-      });
-      if (!ok) {
-        ws.close(4003, 'Forbidden');
-        return;
-      }
-
-      const client: ConnectedClient = { ws, sessionId: currentSessionId() };
-      clients.set(ws, client);
-
-      // Register this client with the AutoPhase handler so it receives phase events
-      autoPhaseHandler.addClient(ws);
-      specsHandler.addClient(ws);
-      sddBoardHandler.addClient(ws);
-      sddWizardHandler?.addClient(ws);
-      worktreeHandler.addClient(ws);
-
-      // Per-connection rate limiting — disabled unless WEBUI_RATE_LIMIT > 0.
-      let msgCount = 0;
-      let windowResetAt = Date.now() + 60_000;
-
-      ws.on('message', async (data) => {
-        if (rateLimitMax > 0) {
-          const now = Date.now();
-          if (now > windowResetAt) {
-            msgCount = 0;
-            windowResetAt = now + 60_000;
-          }
-          if (++msgCount > rateLimitMax) {
-            send(ws, {
-              type: 'error',
-              payload: sessionPayload({ phase: 'rate_limit', message: 'Too many messages. Please wait.' }),
-            });
-            return;
-          }
-        }
-        try {
-          const msg = JSON.parse(data.toString()) as WSClientMessage;
-          await handleMessage(ws, client, msg);
-        } catch (err) {
-          console.error(
-            JSON.stringify({
-              level: 'error',
-              event: 'webui_server.message_parse_failed',
-              message: err instanceof Error ? err.message : String(err),
-              timestamp: new Date().toISOString(),
-            }),
-          );
-        }
-      });
-
-      ws.on('close', () => {
-        clients.delete(ws);
-        // Drop this socket's in-flight run controller (if any). We do NOT
-        // abort the run here — a tab close may be a reload, and the user
-        // may reconnect. The controller is removed so a future
-        // `case 'abort'` from a reconnected socket starts clean. The
-        // `handleUserMessage` finally-block also clears its entry, so
-        // this is a safety net for an unclean close mid-run.
-        abortControllers.delete(ws);
-        // If the last client leaves while a permission prompt is pending, deny
-        // it so the agent loop doesn't hang waiting for an answer that will
-        // never arrive (the terminal no longer prompts in --webui mode).
-        if (clients.size === 0 && pendingConfirms.size > 0) {
-          resolveAllPendingConfirms(pendingConfirms, 'no');
-        }
-      });
-
-      // Send session.start to the new client — per-model cost rates
-      // and context-window cap so the frontend can compute accurate
-      // live costs. The auth token is no longer in the payload: the
-      // cookie path (`/ws-auth` → `Set-Cookie: ws_token=…`) is the
-      // C-2 recommended delivery (Phase 1.4) and `?token=…` from
-      // the server-printed URL is the back-compat fallback. Including
-      // the token here would re-introduce the C-598 query-string
-      // exposure class.
-      const base = await buildSessionStartPayload({}, opts.needsSetup ?? false);
-      send(ws, {
-        type: 'session.start',
-        payload: { ...base },
-      });
-    });
+        publicHostnames,
+        publicWsUrl,
+        clients,
+        currentSessionId,
+        autoPhaseHandler,
+        specsHandler,
+        sddBoardHandler,
+        sddWizardHandler,
+        worktreeHandler,
+        rateLimitMax,
+        send,
+        sessionPayload,
+        handleMessage,
+        abortControllers,
+        pendingConfirms,
+        buildSessionStartPayload,
+        needsSetup: opts.needsSetup ?? false,
+      }),
+    );
 
     wss.on('error', (err) => {
       console.error(
