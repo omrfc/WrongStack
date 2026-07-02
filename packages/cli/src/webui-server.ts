@@ -45,7 +45,6 @@
  * Public surface: `runWebUI` plus the `WSServerMessage` / `WSClientMessage`
  * message shapes. Everything else is internal to the run.
  */
-import { watch as fsWatch } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -156,6 +155,7 @@ import { createWebuiClientRegistration } from './webui-server/client-registratio
 import { createSessionStartPayloadBuilder } from './webui-server/session-start-payload.js';
 import { createStreamCoalescer } from './webui-server/stream-coalescer.js';
 import { createSetupEvents } from './webui-server/setup-events.js';
+import { startSessionStatusPoll } from './webui-server/session-status-poll.js';
 import { startStaticServe } from './webui-server/static-serve.js';
 import {
   type AgentConfigContext,
@@ -900,84 +900,18 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       opts.onListening?.({ httpPort, wsPort, host, url: accessUrl });
 
       // ── Live session status poll ──────────────────────────────────
-      // Periodically read the cross-process SessionRegistry and push
-      // live agent/session status to all connected WebSocket clients.
-      // This keeps the WebUI session panel in sync even when agents
-      // run in background (project switches, multiple processes).
+      // Cross-process SessionRegistry → sessions.status_update broadcasts
+      // (5s fallback poll + fs.watch push). PR 13 of Issue #30: extracted
+      // to `./webui-server/session-status-poll.ts`.
       if (globalRoot) {
-        const broadcastSessions = async () => {
-          try {
-            // Lazy import to avoid bundling core into the webui runtime
-            const { SessionRegistry } = await import('@wrongstack/core');
-            const registry = new SessionRegistry(globalRoot);
-            const sessions = await registry.list();
-            // Scope Fleet HQ to our own project (derive from our pid's entry —
-            // survives in-place project switches). Fall back to all if not found.
-            const mySlug = sessions.find((s) => s.pid === process.pid)?.projectSlug;
-            const live = sessions
-              .filter((s) => s.status !== 'stale')
-              .filter((s) => (mySlug ? s.projectSlug === mySlug : true))
-              .map((s) => ({
-                sessionId: s.sessionId,
-                projectName: s.projectName,
-                projectSlug: s.projectSlug,
-                projectRoot: s.projectRoot,
-                workingDir: s.workingDir,
-                gitBranch: s.gitBranch,
-                clientType: s.clientType,
-                status: s.status,
-                pid: s.pid,
-                startedAt: s.startedAt,
-                agentCount: s.agentCount,
-                agents: s.agents.map((a) => ({
-                  id: a.id,
-                  name: a.name,
-                  status: a.status,
-                  currentTool: a.currentTool,
-                  iterations: a.iterations,
-                  toolCalls: a.toolCalls,
-                  costUsd: a.costUsd,
-                  tokensIn: a.tokensIn,
-                  tokensOut: a.tokensOut,
-                  ctxPct: a.ctxPct,
-                  model: a.model,
-                  partialText: a.partialText,
-                  lastActivityAt: a.lastActivityAt,
-                })),
-              }));
-            broadcast({ type: 'sessions.status_update', payload: { sessions: live } });
-          } catch {
-            // Best-effort — never crash the WebSocket relay for status errors
-          }
-        };
-        // Expose to the /api/fleet/ping HTTP route (push-on-write).
-        fleetBroadcastCli = broadcastSessions;
-
-        // Fallback poll (also prunes stale entries on read).
-        const statusInterval = setInterval(() => void broadcastSessions(), 5_000);
-        if (statusInterval.unref) statusInterval.unref();
-        eventUnsubscribers.push(() => clearInterval(statusInterval));
-
-        // Event-driven: watch the registry file so a TUI/REPL write reaches the
-        // map in ~150ms. Atomic writes go `<file>.<uuid>.tmp`→rename → watch the
-        // dir and match any `session-registry.json*` change (ignore .lock).
-        let regDebounce: ReturnType<typeof setTimeout> | undefined;
-        try {
-          const regWatcher = fsWatch(globalRoot, { persistent: false }, (_event, filename) => {
-            const name = filename ? String(filename) : '';
-            if (!name.startsWith('session-registry.json') || name.endsWith('.lock')) return;
-            if (regDebounce) clearTimeout(regDebounce);
-            regDebounce = setTimeout(() => void broadcastSessions(), 150);
-          });
-          eventUnsubscribers.push(() => {
-            if (regDebounce) clearTimeout(regDebounce);
-            regWatcher.close();
-          });
-        } catch {
-          // Watch unsupported on this platform — the 5s poll still covers it.
-        }
-
-        void broadcastSessions();
+        startSessionStatusPoll({
+          globalRoot,
+          broadcast,
+          eventUnsubscribers,
+          onBroadcastReady: (fn) => {
+            fleetBroadcastCli = fn;
+          },
+        });
       }
     });
 
