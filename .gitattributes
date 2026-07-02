@@ -1,0 +1,29 @@
+# Line-ending policy: LF everywhere, in the index AND the working tree.
+#
+# Why: the repo had drifted to per-file mixed endings (29 CRLF + 15 mixed
+# files as of 2026-07-02), which made editors flip whole files and produced
+# unreviewable diffs. `eol=lf` keeps checkouts byte-identical across
+# platforms; every toolchain here (Biome lineEnding=lf, tsc, vitest, Node)
+# is LF-native, including on Windows.
+#
+# The renormalization commit that accompanied this file rewrote those 44
+# files once — use `git diff --ignore-cr-at-eol` when archaeology takes you
+# across it.
+* text=auto eol=lf
+
+# Explicit binaries (text=auto detects most of these; pinned so a stray
+# NUL-free binary can never be normalized).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.zip binary
+*.gz binary
+*.node binary
+*.wasm binary
