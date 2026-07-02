@@ -3,12 +3,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { Context } from '../../src/core/context.js';
-import { ToolExecutor } from '../../src/execution/tool-executor.js';
+import { ToolExecutor, classifyToolError } from '../../src/execution/tool-executor.js';
 import { EventBus } from '../../src/kernel/events.js';
 import type { ToolResultBlock, ToolUseBlock } from '../../src/types/blocks.js';
 import type { Logger } from '../../src/types/logger.js';
 import type { PermissionDecision } from '../../src/types/permission.js';
 import type { Tool } from '../../src/types/tool.js';
+import { ToolErrorCategory } from '../../src/types/tool.js';
 import { DefaultPermissionPolicy } from '../../src/security/permission-policy.js';
 
 // --- Test helpers ---
@@ -996,6 +997,70 @@ describe('ToolExecutor', () => {
       );
       expect(result.outputs).toHaveLength(1); // only 'a' was executed
       expect(tool.execute).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('executeTool + streaming + classifyToolError', () => {
+    it('executeTool runs a non-streaming tool and returns a capped block + bytes', async () => {
+      const tool = makeTool({ name: 'echo', execute: vi.fn().mockResolvedValue('hello world') });
+      const exec = makeExecutor([tool]);
+      const { block, bytes } = await exec.executeTool(tool, makeUse('echo'), makeCtx(), 50_000);
+      expect(block.type).toBe('tool_result');
+      expect(block.is_error).toBe(false);
+      expect(bytes).toBeGreaterThan(0);
+    });
+
+    it('executeTool drives a streaming tool (executeStream) through runStreamedTool', async () => {
+      const events: string[] = [];
+      const streamTool = makeTool({
+        name: 'streamer',
+        async *executeStream() {
+          yield { type: 'partial_output', text: 'head-' } as never;
+          yield { type: 'partial_output', text: 'body-'.repeat(80) } as never;
+          yield { type: 'log', message: 'a log line' } as never;
+          yield { type: 'metric', name: 'm', value: 1 } as never;
+          yield { type: 'file_changed', path: 'a.ts' } as never;
+          yield { type: 'final', output: { ok: true, result: 'done' } } as never;
+        },
+      });
+      const bus = new EventBus();
+      bus.on('tool.progress', (e: { event: { type: string } }) => events.push(e.event.type));
+      const exec = makeExecutor([streamTool], { events: bus });
+      const { block } = await exec.executeTool(streamTool, makeUse('streamer'), makeCtx(), 50_000);
+      expect(block.type).toBe('tool_result');
+      expect(events).toContain('partial_output');
+      expect(events).toContain('log');
+      expect(events).toContain('file_changed');
+    });
+
+    it('throws when a streaming tool completes without a final event', async () => {
+      const noFinal = makeTool({
+        name: 'nofinal',
+        async *executeStream() {
+          yield { type: 'partial_output', text: 'x' } as never;
+        },
+      });
+      const exec = makeExecutor([noFinal]);
+      await expect(exec.executeTool(noFinal, makeUse('nofinal'), makeCtx(), 50_000)).rejects.toThrow(/without a 'final'/);
+    });
+
+    it('classifyToolError maps HTTP statuses via httpStatusToCategory', () => {
+      const httpErr = (status: number) => Object.assign(new Error('http'), { response: { status } });
+      expect(classifyToolError(httpErr(429))).toMatchObject({ category: ToolErrorCategory.TRANSIENT, retryable: true });
+      expect(classifyToolError(httpErr(503))).toMatchObject({ category: ToolErrorCategory.TRANSIENT });
+      expect(classifyToolError(httpErr(404))).toMatchObject({ category: ToolErrorCategory.NOT_FOUND });
+      expect(classifyToolError(httpErr(401))).toMatchObject({ category: ToolErrorCategory.PERMISSION });
+      expect(classifyToolError(httpErr(400))).toMatchObject({ category: ToolErrorCategory.VALIDATION });
+      expect(classifyToolError(httpErr(500))).toMatchObject({ category: ToolErrorCategory.FATAL });
+    });
+
+    it('classifyToolError maps AbortError + system errno codes', () => {
+      const errno = (code: string) => Object.assign(new Error('e'), { code });
+      expect(classifyToolError(Object.assign(new Error('a'), { name: 'AbortError' }))).toMatchObject({ category: ToolErrorCategory.FATAL, detail: 'aborted' });
+      expect(classifyToolError(errno('ETIMEDOUT'))).toMatchObject({ category: ToolErrorCategory.TRANSIENT, retryable: true });
+      expect(classifyToolError(errno('ENOENT'))).toMatchObject({ category: ToolErrorCategory.NOT_FOUND });
+      expect(classifyToolError(errno('EACCES'))).toMatchObject({ category: ToolErrorCategory.PERMISSION });
+      expect(classifyToolError(errno('EBUSY'))).toMatchObject({ category: ToolErrorCategory.TRANSIENT, retryable: true });
     });
   });
 });

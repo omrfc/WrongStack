@@ -615,8 +615,11 @@ describe('makeDependencyWatcherConfig', () => {
       timestamp: new Date().toISOString(),
     });
 
-    // Wait for debounce
-    await new Promise((r) => setTimeout(r, 50));
+    await expect
+      .poll(async () => (await mailbox.query({ to: 'tech-stack' })).length, {
+        timeout: 5000,
+      })
+      .toBe(1);
 
     const msgs = await mailbox.query({ to: 'tech-stack' });
     expect(msgs.length).toBe(1);
@@ -680,8 +683,11 @@ describe('makeDependencyWatcherConfig', () => {
       });
     }
 
-    // Wait for debounce
-    await new Promise((r) => setTimeout(r, 60));
+    await expect
+      .poll(async () => (await mailbox.query({ to: 'tech-stack' })).length, {
+        timeout: 5000,
+      })
+      .toBe(1);
 
     const msgs = await mailbox.query({ to: 'tech-stack' });
     expect(msgs.length).toBe(1); // debounced to one
@@ -710,7 +716,11 @@ describe('makeDependencyWatcherConfig', () => {
       timestamp: new Date().toISOString(),
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await expect
+      .poll(async () => (await mailbox.query({})).length, {
+        timeout: 5000,
+      })
+      .toBe(1);
 
     const msgs = await mailbox.query({});
     expect(msgs.length).toBe(1);
