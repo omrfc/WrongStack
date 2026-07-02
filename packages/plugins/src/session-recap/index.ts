@@ -124,7 +124,8 @@ function readConfig(raw: unknown): SessionRecapConfig {
   const r = raw as Record<string, unknown>;
   return {
     enabled: r['enabled'] !== false,
-    subjectPrefix: typeof r['subjectPrefix'] === 'string' ? r['subjectPrefix'] : DEFAULTS.subjectPrefix,
+    subjectPrefix:
+      typeof r['subjectPrefix'] === 'string' ? r['subjectPrefix'] : DEFAULTS.subjectPrefix,
     includeTranscriptTail:
       typeof r['includeTranscriptTail'] === 'number' && r['includeTranscriptTail'] >= 0
         ? r['includeTranscriptTail']
@@ -179,13 +180,15 @@ function formatDuration(startedAt: string | null, lastActivityAt: string | null)
 }
 
 function topN<T>(map: Map<string, T>, n: number): Array<[string, T]> {
-  return [...map.entries()].sort((a, b) => {
-    // Sort by numeric value when possible
-    const av = a[1] as unknown;
-    const bv = b[1] as unknown;
-    if (typeof av === 'number' && typeof bv === 'number') return bv - av;
-    return 0;
-  }).slice(0, n);
+  return [...map.entries()]
+    .sort((a, b) => {
+      // Sort by numeric value when possible
+      const av = a[1] as unknown;
+      const bv = b[1] as unknown;
+      if (typeof av === 'number' && typeof bv === 'number') return bv - av;
+      return 0;
+    })
+    .slice(0, n);
 }
 
 interface TranscriptEvent {
@@ -196,7 +199,10 @@ interface TranscriptEvent {
   [k: string]: unknown;
 }
 
-async function readTranscriptTail(transcriptPath: string | undefined, n: number): Promise<TranscriptEvent[]> {
+async function readTranscriptTail(
+  transcriptPath: string | undefined,
+  n: number,
+): Promise<TranscriptEvent[]> {
   if (!transcriptPath || n <= 0) return [];
   let raw: string;
   try {
@@ -229,7 +235,8 @@ function truncate(s: string, max: number): string {
 const plugin: Plugin = {
   name: 'session-recap',
   version: '0.1.0',
-  description: 'Stop hook that posts a one-page session summary (tokens, tools, commits, last activity) to the project mailbox',
+  description:
+    'Stop hook that posts a one-page session summary (tokens, tools, commits, last activity) to the project mailbox',
   apiVersion: '^0.1.10',
   capabilities: { tools: true, hooks: true },
   defaultConfig: { ...DEFAULTS },
@@ -291,11 +298,11 @@ const plugin: Plugin = {
         touchActivity();
         const p = payload as {
           model?: string;
-          usage?: { input_tokens?: number; output_tokens?: number };
+          usage?: { input?: number; output?: number };
         } | null;
         const model = p?.model ?? 'unknown';
-        const input = p?.usage?.input_tokens ?? 0;
-        const output = p?.usage?.output_tokens ?? 0;
+        const input = p?.usage?.input ?? 0;
+        const output = p?.usage?.output ?? 0;
         bumpModelUsage(model, input, output);
       });
       state.eventUnsubscribers.push(offUsage);
@@ -326,7 +333,11 @@ const plugin: Plugin = {
       // Tool results — we only want to count git_autocommit as a
       // commit on success. Use a tighter pattern.
       const offResult = api.onPattern('tool.result', (_event: string, payload: unknown) => {
-        const p = payload as { tool?: string; isError?: boolean; result?: { committed?: boolean } } | null;
+        const p = payload as {
+          tool?: string;
+          isError?: boolean;
+          result?: { committed?: boolean };
+        } | null;
         if (p?.tool === 'git_autocommit' && p.isError === false) {
           state.commitCount += 1;
         }
@@ -335,9 +346,10 @@ const plugin: Plugin = {
     }
 
     // ── Register the Stop hook ────────────────────────────────────────
-    const stopHook = async (
-      input: { cwd?: string | undefined; sessionId?: string | undefined },
-    ): Promise<void> => {
+    const stopHook = async (input: {
+      cwd?: string | undefined;
+      sessionId?: string | undefined;
+    }): Promise<void> => {
       if (!cfg.enabled) return;
       touchActivity();
       state.stopInvocations += 1;
@@ -409,10 +421,11 @@ const plugin: Plugin = {
         }),
       };
 
-      const subject = `${cfg.subjectPrefix}${recap.session.id ?? 'session'} — ${duration}, ${recap.tools.totalCalls} tool calls, ${recap.tokens.total.input + recap.tokens.total.output} tokens`.slice(
-        0,
-        200,
-      );
+      const subject =
+        `${cfg.subjectPrefix}${recap.session.id ?? 'session'} — ${duration}, ${recap.tools.totalCalls} tool calls, ${recap.tokens.total.input + recap.tokens.total.output} tokens`.slice(
+          0,
+          200,
+        );
 
       const body = truncate(JSON.stringify(recap, null, 2), cfg.maxBodyChars);
 

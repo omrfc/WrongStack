@@ -23,8 +23,16 @@ interface PluginAPI {
   slashCommands: { register: ReturnType<typeof vi.fn> };
   pipelines: Record<string, { use: (h: unknown) => void }>;
   config: { extensions?: Record<string, unknown> };
-  log: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
-  metrics: { counter: ReturnType<typeof vi.fn>; histogram: ReturnType<typeof vi.fn>; gauge: ReturnType<typeof vi.fn> };
+  log: {
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
+  metrics: {
+    counter: ReturnType<typeof vi.fn>;
+    histogram: ReturnType<typeof vi.fn>;
+    gauge: ReturnType<typeof vi.fn>;
+  };
   session: { append: ReturnType<typeof vi.fn>; transcriptPath?: string };
   extensions: { register: ReturnType<typeof vi.fn> };
   registerSystemPromptContributor: ReturnType<typeof vi.fn>;
@@ -117,7 +125,10 @@ describe('session-recap plugin', () => {
     });
 
     it('configSchema defines enabled, subjectPrefix, includeTranscriptTail, maxBodyChars', () => {
-      const schema = sessionRecapPlugin.configSchema as Record<string, { properties?: Record<string, unknown> }>;
+      const schema = sessionRecapPlugin.configSchema as Record<
+        string,
+        { properties?: Record<string, unknown> }
+      >;
       const props = schema.properties;
       expect(props?.enabled).toBeDefined();
       expect(props?.subjectPrefix).toBeDefined();
@@ -158,7 +169,9 @@ describe('session-recap plugin', () => {
       const api = createMockAPI({ withMailbox: true });
       sessionRecapPlugin.setup(api as never);
       // Fire a provider.response event through the registered handler.
-      const handler = vi.mocked(api.onEvent).mock.calls.find((c) => c?.[0] === 'provider.response')?.[1] as
+      const handler = vi
+        .mocked(api.onEvent)
+        .mock.calls.find((c) => c?.[0] === 'provider.response')?.[1] as
         | ((p: unknown) => void)
         | undefined;
       handler?.({ model: 'gpt-4o', usage: { input_tokens: 100, output_tokens: 50 } });
@@ -195,11 +208,15 @@ describe('session-recap plugin', () => {
       sessionRecapPlugin.setup(api as never);
       // Simulate activity before Stop: provider response with tokens,
       // and a tool result for git_autocommit success.
-      const usageHandler = vi.mocked(api.onEvent).mock.calls.find((c) => c?.[0] === 'provider.response')?.[1] as
+      const usageHandler = vi
+        .mocked(api.onEvent)
+        .mock.calls.find((c) => c?.[0] === 'provider.response')?.[1] as
         | ((p: unknown) => void)
         | undefined;
-      usageHandler?.({ model: 'gpt-4o', usage: { input_tokens: 100, output_tokens: 50 } });
-      const toolResultHandler = vi.mocked(api.onPattern).mock.calls.find((c) => c?.[0] === 'tool.result')?.[1] as
+      usageHandler?.({ model: 'gpt-4o', usage: { input: 100, output: 50 } });
+      const toolResultHandler = vi
+        .mocked(api.onPattern)
+        .mock.calls.find((c) => c?.[0] === 'tool.result')?.[1] as
         | ((_e: string, p: unknown) => void)
         | undefined;
       toolResultHandler?.('tool.result', { tool: 'git_autocommit', isError: false });
@@ -234,8 +251,12 @@ describe('session-recap plugin', () => {
       sessionRecapPlugin.setup(api as never);
       const hook = getHook(api, 'Stop');
       await hook({ cwd: '/tmp', sessionId: 'sess-x' });
-      const tool = vi.mocked(api.tools.register).mock.calls[0]?.[0] as { execute: () => Promise<unknown> };
-      const status = (await tool.execute()) as { counters: { recapsErrored: number; recapsPublished: number } };
+      const tool = vi.mocked(api.tools.register).mock.calls[0]?.[0] as {
+        execute: () => Promise<unknown>;
+      };
+      const status = (await tool.execute()) as {
+        counters: { recapsErrored: number; recapsPublished: number };
+      };
       expect(status.counters.recapsErrored).toBe(1);
       expect(status.counters.recapsPublished).toBe(0);
     });
@@ -260,7 +281,11 @@ describe('session-recap plugin', () => {
         { type: 'tool_call', ts: '2026-06-30T10:00:06Z', tool: 'read' },
         { type: 'assistant', ts: '2026-06-30T10:00:08Z', content: 'final reply' },
       ];
-      await fs.writeFile(transcriptPath, events.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf-8');
+      await fs.writeFile(
+        transcriptPath,
+        events.map((e) => JSON.stringify(e)).join('\n') + '\n',
+        'utf-8',
+      );
 
       const api = createMockAPI({ withMailbox: true });
       api.session.transcriptPath = transcriptPath;
@@ -297,11 +322,13 @@ describe('session-recap plugin', () => {
     it('reports config + accumulated metrics', async () => {
       const api = createMockAPI({ withMailbox: true });
       sessionRecapPlugin.setup(api as never);
-      const usageHandler = vi.mocked(api.onEvent).mock.calls.find((c) => c?.[0] === 'provider.response')?.[1] as
+      const usageHandler = vi
+        .mocked(api.onEvent)
+        .mock.calls.find((c) => c?.[0] === 'provider.response')?.[1] as
         | ((p: unknown) => void)
         | undefined;
-      usageHandler?.({ model: 'gpt-4o', usage: { input_tokens: 10, output_tokens: 5 } });
-      usageHandler?.({ model: 'gpt-4o-mini', usage: { input_tokens: 20, output_tokens: 8 } });
+      usageHandler?.({ model: 'gpt-4o', usage: { input: 10, output: 5 } });
+      usageHandler?.({ model: 'gpt-4o-mini', usage: { input: 20, output: 8 } });
 
       const tool = getStatusTool(api);
       const status = (await tool.execute()) as {

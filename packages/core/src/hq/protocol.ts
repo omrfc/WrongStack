@@ -183,7 +183,14 @@ export interface HqAgentMessagePayload {
 export interface HqAgentStatusPayload {
   subagentId: string;
   agentName: string;
-  status: 'spawned' | 'running' | 'completed' | 'failed' | 'timeout' | 'stopped' | 'budget_exhausted';
+  status:
+    | 'spawned'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'timeout'
+    | 'stopped'
+    | 'budget_exhausted';
   ts: string;
   summary?: string;
   task?: string;
@@ -206,12 +213,7 @@ export interface HqFleetEventPayload {
 
 export type HqSessionLiveStatus = 'active' | 'idle' | 'closing' | 'stale';
 
-export type HqSessionAgentLiveStatus =
-  | 'idle'
-  | 'running'
-  | 'streaming'
-  | 'waiting_user'
-  | 'error';
+export type HqSessionAgentLiveStatus = 'idle' | 'running' | 'streaming' | 'waiting_user' | 'error';
 
 /** A single live agent inside a session snapshot (mirrors SessionRegistry's AgentEntry). */
 export interface HqSessionAgentSummary {
@@ -382,7 +384,8 @@ export interface HqMailboxEventPayload {
     | 'message.updated'
     | 'agent.registered'
     | 'agent.heartbeat'
-    | 'agent.offline';
+    | 'agent.offline'
+    | 'agent.deregistered';
   message?: HqMailboxMessageSummary;
   agent?: HqMailboxAgentSummary;
   summary?: string;
@@ -810,6 +813,7 @@ const HQ_MAILBOX_EVENT_ACTIONS = new Set<string>([
   'agent.registered',
   'agent.heartbeat',
   'agent.offline',
+  'agent.deregistered',
 ]);
 
 function isHqMailboxEventPayload(x: unknown): x is HqMailboxEventPayload {
@@ -890,7 +894,11 @@ function isHqTranscriptEntry(x: unknown): x is HqTranscriptEntry {
 function isHqTranscriptAppendPayload(x: unknown): x is HqTranscriptAppendPayload {
   if (typeof x !== 'object' || x === null) return false;
   const v = x as Record<string, unknown>;
-  if (typeof v.sessionId !== 'string' || typeof v.fromSeq !== 'number' || !Array.isArray(v.entries)) {
+  if (
+    typeof v.sessionId !== 'string' ||
+    typeof v.fromSeq !== 'number' ||
+    !Array.isArray(v.entries)
+  ) {
     return false;
   }
   for (const entry of v.entries) {
